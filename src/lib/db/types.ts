@@ -34,6 +34,8 @@ export type ContactRow = {
   status: ContactStatus
   subscribed_to_newsletter: boolean
   deleted_at: string | null
+  /** newsletter | import | manual. Null for rows predating the column. */
+  source: string | null
   created_at: string
 }
 
@@ -69,6 +71,14 @@ export type CredentialRow = {
   key: string
   value: string
   created_at: string
+}
+
+export type WebhookEventRow = {
+  id: string
+  provider: string
+  event_id: string
+  event_type: string | null
+  received_at: string
 }
 
 export type SyncLogRow = {
@@ -129,6 +139,7 @@ export interface Database {
       contact_services: TableDef<ContactServiceRow>
       credentials: TableDef<CredentialRow>
       sync_logs: TableDef<SyncLogRow>
+      webhook_events: TableDef<WebhookEventRow>
     }
     Views: {
       /** contacts filtered to deleted_at IS NULL (security_invoker). */
