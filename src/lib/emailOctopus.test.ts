@@ -1,107 +1,185 @@
-import { syncContactToEmailOctopus } from './emailOctopus';
+import { getRetryDelayMs, syncContactToEmailOctopus } from './emailOctopus'
 
-const mockFetch = jest.fn();
-global.fetch = mockFetch as any;
+const mockFetch = jest.fn()
+global.fetch = mockFetch as unknown as typeof fetch
 
-describe('emailOctopus - API Client Sync Wrapper', () => {
+const sleep = jest.fn().mockResolvedValue(undefined)
+
+function ok() {
+  return { ok: true, status: 200, headers: new Headers(), json: async () => ({ id: 'eo-1' }) }
+}
+
+function failure(status: number, body: unknown = {}, headers: Record<string, string> = {}) {
+  return {
+    ok: false,
+    status,
+    headers: new Headers(headers),
+    json: async () => body,
+  }
+}
+
+function sync(status: 'SUBSCRIBED' | 'UNSUBSCRIBED' = 'SUBSCRIBED', maxAttempts = 3) {
+  return syncContactToEmailOctopus(
+    'eo-api-key',
+    'list-1',
+    'grace@example.com',
+    'Grace',
+    'Hopper',
+    status,
+    { maxAttempts, sleep }
+  )
+}
+
+describe('syncContactToEmailOctopus', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
-  });
+    jest.clearAllMocks()
+  })
 
-  it('should successfully post subscription details to EmailOctopus API', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ id: 'octopus-contact-uuid-1', status: 'subscribed' }),
-    });
+  describe('v2 contract', () => {
+    it('posts to the v2 contacts endpoint', async () => {
+      mockFetch.mockResolvedValueOnce(ok())
 
-    await expect(
-      syncContactToEmailOctopus(
-        'mock-api-key',
-        'mock-list-id',
-        'test@user.com',
-        'Jane',
-        'Doe',
-        'SUBSCRIBED'
+      await sync()
+
+      const [url] = mockFetch.mock.calls[0]
+      expect(url).toBe('https://api.emailoctopus.com/lists/list-1/contacts')
+    })
+
+    it('authenticates with a bearer token, not a key in the body', async () => {
+      // v1.6 put api_key in the JSON body, which leaks it into request logs and
+      // proxies. v2 uses the Authorization header.
+      mockFetch.mockResolvedValueOnce(ok())
+
+      await sync()
+
+      const [, init] = mockFetch.mock.calls[0]
+      expect(init.headers.Authorization).toBe('Bearer eo-api-key')
+      expect(init.body).not.toContain('api_key')
+      expect(init.body).not.toContain('eo-api-key')
+    })
+
+    it('sends the lowercase status v2 expects', async () => {
+      mockFetch.mockResolvedValueOnce(ok())
+
+      await sync('UNSUBSCRIBED')
+
+      const [, init] = mockFetch.mock.calls[0]
+      expect(JSON.parse(init.body).status).toBe('unsubscribed')
+    })
+
+    it('sends the contact fields', async () => {
+      mockFetch.mockResolvedValueOnce(ok())
+
+      await sync()
+
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body)
+      expect(body).toMatchObject({
+        email_address: 'grace@example.com',
+        fields: { FirstName: 'Grace', LastName: 'Hopper' },
+      })
+    })
+
+    it('url-encodes the list id', async () => {
+      mockFetch.mockResolvedValueOnce(ok())
+
+      await syncContactToEmailOctopus('k', 'list/../evil', 'a@b.co', 'A', 'B', 'SUBSCRIBED', {
+        sleep,
+      })
+
+      expect(mockFetch.mock.calls[0][0]).toBe(
+        'https://api.emailoctopus.com/lists/list%2F..%2Fevil/contacts'
       )
-    ).resolves.not.toThrow();
+    })
 
-    expect(mockFetch).toHaveBeenCalledWith(
-      'https://emailoctopus.com/api/1.6/lists/mock-list-id/contacts',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
+    it('resolves without throwing on success', async () => {
+      mockFetch.mockResolvedValueOnce(ok())
+
+      await expect(sync()).resolves.toBeUndefined()
+    })
+  })
+
+  describe('rate limiting', () => {
+    it('retries a 429 and succeeds', async () => {
+      mockFetch.mockResolvedValueOnce(failure(429)).mockResolvedValueOnce(ok())
+
+      await expect(sync()).resolves.toBeUndefined()
+      expect(mockFetch).toHaveBeenCalledTimes(2)
+    })
+
+    it('honours Retry-After', async () => {
+      mockFetch
+        .mockResolvedValueOnce(failure(429, {}, { 'retry-after': '7' }))
+        .mockResolvedValueOnce(ok())
+
+      await sync()
+
+      expect(sleep).toHaveBeenCalledWith(7000)
+    })
+
+    it('backs off exponentially when Retry-After is absent', async () => {
+      mockFetch
+        .mockResolvedValueOnce(failure(429))
+        .mockResolvedValueOnce(failure(429))
+        .mockResolvedValueOnce(ok())
+
+      await sync()
+
+      expect(sleep).toHaveBeenNthCalledWith(1, 500)
+      expect(sleep).toHaveBeenNthCalledWith(2, 1000)
+    })
+
+    it('gives up after the attempt limit', async () => {
+      mockFetch.mockResolvedValue(failure(429, { detail: 'Too many requests' }))
+
+      await expect(sync('SUBSCRIBED', 3)).rejects.toThrow(/Too many requests/)
+      expect(mockFetch).toHaveBeenCalledTimes(3)
+    })
+
+    it('retries a 5xx', async () => {
+      mockFetch.mockResolvedValueOnce(failure(503)).mockResolvedValueOnce(ok())
+
+      await expect(sync()).resolves.toBeUndefined()
+      expect(mockFetch).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  describe('errors', () => {
+    it('does not retry a 4xx', async () => {
+      // Retrying a bad request burns quota and delays the real error.
+      mockFetch.mockResolvedValue(failure(400, { detail: 'Invalid email address' }))
+
+      await expect(sync()).rejects.toThrow(/Invalid email address/)
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+    })
+
+    it('surfaces a nested v1-style error message', async () => {
+      mockFetch.mockResolvedValue(failure(422, { error: { message: 'MEMBER_EXISTS_WITH_EMAIL' } }))
+
+      await expect(sync()).rejects.toThrow(/MEMBER_EXISTS_WITH_EMAIL/)
+    })
+
+    it('falls back to the status code for a non-JSON body', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 502,
+        headers: new Headers(),
+        json: async () => {
+          throw new Error('not json')
         },
-        body: JSON.stringify({
-          api_key: 'mock-api-key',
-          email_address: 'test@user.com',
-          fields: {
-            FirstName: 'Jane',
-            LastName: 'Doe',
-          },
-          status: 'SUBSCRIBED',
-        }),
-      }
-    );
-  });
+      })
 
-  it('should throw an error with API error details when the endpoint returns non-200', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      json: () =>
-        Promise.resolve({
-          error: {
-            code: 'MEMBER_EXISTS_WITH_EMAIL_ADDRESS',
-            message: 'A contact already exists with this email address.',
-          },
-        }),
-    });
+      await expect(sync('SUBSCRIBED', 1)).rejects.toThrow(/HTTP Error 502/)
+    })
+  })
+})
 
-    await expect(
-      syncContactToEmailOctopus(
-        'mock-api-key',
-        'mock-list-id',
-        'test@user.com',
-        'Jane',
-        'Doe',
-        'SUBSCRIBED'
-      )
-    ).rejects.toThrow('EmailOctopus API Error: A contact already exists with this email address.');
-  });
-});
+describe('getRetryDelayMs', () => {
+  it('uses Retry-After when present', () => {
+    expect(getRetryDelayMs('12', 1)).toBe(12000)
+  })
 
-import { POST as syncPOST } from '../app/api/integrations/emailoctopus/sync/route';
-
-describe('EmailOctopus Sync API Route Handler', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-  });
-
-  it('should batch sync contacts list and return synced counts', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ id: 'mock-id' }),
-    });
-
-    const body = {
-      apiKey: 'test-key',
-      listId: 'test-list',
-      contacts: [
-        { email: 'user1@test.com', firstName: 'First', lastName: 'Last', subscribedToNewsletter: true },
-        { email: 'user2@test.com', firstName: 'Second', lastName: 'Last', subscribedToNewsletter: false },
-      ],
-    };
-
-    const req = new Request('http://localhost/api/integrations/emailoctopus/sync', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }) as any;
-
-    const response = await syncPOST(req);
-    expect(response.status).toBe(200);
-    const data = await response.json();
-    expect(data.success).toBe(true);
-    expect(data.syncedCount).toBe(2);
-    expect(data.errorsCount).toBe(0);
-  });
-});
+  it.each([null, '', 'soon', '0', '-5'])('backs off exponentially for %p', (header) => {
+    expect(getRetryDelayMs(header, 1)).toBe(500)
+    expect(getRetryDelayMs(header, 3)).toBe(2000)
+  })
+})

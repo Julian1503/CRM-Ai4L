@@ -2,7 +2,7 @@ import * as XLSX from 'xlsx';
 
 export interface RawParsedSpreadsheet {
   headers: string[];
-  rows: Record<string, any>[];
+  rows: Record<string, string>[];
 }
 
 export interface MappedContactRow {
@@ -44,7 +44,7 @@ export function parseExcelBuffer(buffer: Buffer): RawParsedSpreadsheet {
   const worksheet = workbook.Sheets[firstSheetName];
   
   // Get raw grid as arrays (including header row)
-  const sheetData = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1, raw: false });
+  const sheetData = XLSX.utils.sheet_to_json<unknown[]>(worksheet, { header: 1, raw: false });
   
   if (sheetData.length === 0) {
     return { headers: [], rows: [] };
@@ -57,7 +57,7 @@ export function parseExcelBuffer(buffer: Buffer): RawParsedSpreadsheet {
 
   // Map remaining rows to objects with header keys
   const rows = sheetData.slice(1).map((rowArray) => {
-    const rowObj: Record<string, any> = {};
+    const rowObj: Record<string, string> = {};
     sheetData[0].forEach((header, index) => {
       if (header) {
         const headerStr = String(header).trim();
@@ -71,7 +71,7 @@ export function parseExcelBuffer(buffer: Buffer): RawParsedSpreadsheet {
   return { headers, rows };
 }
 
-function parseBoolean(val: any): boolean {
+function parseBoolean(val: unknown): boolean {
   if (typeof val === 'boolean') return val;
   if (val === undefined || val === null) return false;
   const str = String(val).trim().toLowerCase();
@@ -79,10 +79,10 @@ function parseBoolean(val: any): boolean {
 }
 
 export function mapAndValidateRows(
-  rows: Record<string, any>[],
+  rows: Record<string, string>[],
   mapping: Record<string, string>
 ): MappedContactRow[] {
-  return rows.map((row, index) => {
+  return rows.map((row) => {
     const errors: string[] = [];
     
     // Extract mapped keys

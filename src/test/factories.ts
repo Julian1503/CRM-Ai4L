@@ -41,6 +41,7 @@ export function buildContactRow(overrides: Partial<ContactRow> = {}): ContactRow
     status: 'prospect' as ContactStatus,
     subscribed_to_newsletter: false,
     deleted_at: null,
+    source: null,
     created_at: '2026-01-01T00:00:00.000Z',
     ...overrides,
   }

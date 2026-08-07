@@ -27,7 +27,7 @@ export interface ValidationResult {
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export function validateContact(input: any): ValidationResult {
+export function validateContact(input: Record<string, unknown>): ValidationResult {
   const errors: Record<string, string> = {};
   
   const firstName = typeof input.firstName === 'string' ? input.firstName.trim() : '';

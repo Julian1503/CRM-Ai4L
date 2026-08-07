@@ -2,7 +2,7 @@ import * as XLSX from 'xlsx';
 import { parseExcelBuffer, mapAndValidateRows } from './excelParser';
 
 // Helper function to create a mock excel file buffer
-function createExcelBuffer(headers: string[], rows: any[][]): Buffer {
+function createExcelBuffer(headers: string[], rows: string[][]): Buffer {
   const wb = XLSX.utils.book_new();
   const wsData = [headers, ...rows];
   const ws = XLSX.utils.aoa_to_sheet(wsData);
