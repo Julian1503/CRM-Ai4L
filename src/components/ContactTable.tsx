@@ -22,6 +22,8 @@ export interface TableContact {
   position?: string;
   isCustomer: boolean;
   subscribedToNewsletter: boolean;
+  /** FK to job_types; drives the job-type filter and segmentation. */
+  jobTypeId?: string | null;
   organisation?: { name: string } | null;
   notes?: string;
   servicesBought?: string[];

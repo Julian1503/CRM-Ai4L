@@ -35,6 +35,7 @@ import ContactDrawer from '@/components/ContactDrawer';
 import { getSupabaseClient, hasSupabaseConfig } from '@/lib/supabaseClient';
 import { mapAndValidateRows } from '@/lib/excelParser';
 import { importContacts } from '@/lib/contacts/import';
+import FilterBar, { type StatusFilter } from '@/components/contacts/FilterBar';
 
 type ServiceOption = { id: string; name: string };
 type SyncLog = { id: string; event_text: string; status: string; created_at: string };
@@ -58,6 +59,7 @@ type DbContact = {
   notes: string | null;
   is_customer: boolean | null;
   subscribed_to_newsletter: boolean | null;
+  job_type_id: string | null;
   organisation: { name: string } | null;
 };
 type ContactSavePayload = Partial<TableContact> & {
@@ -87,6 +89,7 @@ function formatContactFromDatabase(contact: DbContact, contactServices: string[]
     notes: contact.notes || '',
     isCustomer: Boolean(contact.is_customer),
     subscribedToNewsletter: Boolean(contact.subscribed_to_newsletter),
+    jobTypeId: contact.job_type_id || null,
     organisation: contact.organisation || null,
     servicesBought: contactServices,
   };
@@ -145,7 +148,10 @@ export default function App() {
   const [services, setServices] = useState<ServiceOption[]>([]);
   const [selectedContact, setSelectedContact] = useState<TableContact | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'customer' | 'prospect' | 'subscribed'>('all');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [jobTypeFilter, setJobTypeFilter] = useState('');
+  const [stateFilter, setStateFilter] = useState('');
+  const [jobTypes, setJobTypes] = useState<ServiceOption[]>([]);
   const [sortKey, setSortKey] = useState('name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   
@@ -197,6 +203,7 @@ export default function App() {
     if (!hasSupabaseConfig) {
       setContacts([]);
       setServices([]);
+      setJobTypes([]);
       setSyncLogs([]);
       setEmailOctopusApiKey('');
       setEmailOctopusListId('');
@@ -225,6 +232,9 @@ export default function App() {
       const { data: serviceData, error: serviceError } = await db.from('services').select('*').order('name');
       if (serviceError) throw serviceError;
 
+      const { data: jobTypeData, error: jobTypeError } = await db.from('job_types').select('*').order('name');
+      if (jobTypeError) throw jobTypeError;
+
       const { data: credentialsData, error: credentialsError } = await db.from('credentials').select('*');
       if (credentialsError) throw credentialsError;
 
@@ -248,6 +258,7 @@ export default function App() {
 
       setContacts(formattedContacts);
       setServices(((serviceData || []) as ServiceOption[]).map((service) => ({ id: service.id, name: service.name })));
+      setJobTypes(((jobTypeData || []) as ServiceOption[]).map((jobType) => ({ id: jobType.id, name: jobType.name })));
       setEmailOctopusApiKey(credentialsFromDb.find((credential) => credential.key === 'emailoctopus_api_key')?.value || '');
       setEmailOctopusListId(credentialsFromDb.find((credential) => credential.key === 'emailoctopus_list_id')?.value || '');
       setSyncLogs(logsFromDb.map((log) => ({
@@ -262,6 +273,7 @@ export default function App() {
       const message = getErrorMessage(error);
       setContacts([]);
       setServices([]);
+      setJobTypes([]);
       setSyncLogs([]);
       setIsDatabaseConnected(false);
       setConnectionError(`Supabase connection failed: ${message}`);
@@ -552,16 +564,25 @@ export default function App() {
     }
   };
 
-  // Delete Contact Handler
-  const handleDeleteContact = async (id: string) => {
+  // Archive Contact Handler
+  //
+  // Soft delete: the record is retained with deleted_at set, per the requirement that
+  // records are archived rather than permanently removed. Goes through the API route so
+  // the archive rules live in one place (src/lib/contacts/repository.ts) rather than
+  // being duplicated in the browser.
+  const handleArchiveContact = async (id: string) => {
     try {
-      const db = getSupabaseClient();
-      const { error } = await db.from('contacts').delete().eq('id', id);
-      if (error) throw error;
+      const response = await fetch(`/api/contacts/${id}`, { method: 'DELETE' });
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error || `Archive failed (HTTP ${response.status})`);
+      }
+
       await loadLiveData();
     } catch (err) {
-      console.error('Failed to delete contact from database', err);
-      alert(`Failed to delete contact: ${getErrorMessage(err)}`);
+      console.error('Failed to archive contact', err);
+      alert(`Failed to archive contact: ${getErrorMessage(err)}`);
       throw err;
     }
   };
@@ -629,6 +650,21 @@ export default function App() {
     }
   };
 
+  // Serialised with the same parameter names the export route parses
+  // (src/lib/contacts/query.ts), so "export" always means "export what I am
+  // looking at" rather than a second, drifting query path.
+  const exportQuery = React.useMemo(() => {
+    const params = new URLSearchParams();
+    if (searchQuery.trim()) params.set('q', searchQuery.trim());
+    if (jobTypeFilter) params.set('jobTypeId', jobTypeFilter);
+    if (stateFilter) params.set('state', stateFilter);
+    if (statusFilter === 'customer') params.set('status', 'customer');
+    if (statusFilter === 'prospect') params.set('status', 'prospect');
+    if (statusFilter === 'subscribed') params.set('subscribed', 'true');
+    const query = params.toString();
+    return query ? `&${query}` : '';
+  }, [searchQuery, jobTypeFilter, stateFilter, statusFilter]);
+
   // Search & Filter Computation
   const filteredContacts = contacts
     .filter((contact) => {
@@ -640,6 +676,10 @@ export default function App() {
       if (statusFilter === 'customer' && !contact.isCustomer) return false;
       if (statusFilter === 'prospect' && contact.isCustomer) return false;
       if (statusFilter === 'subscribed' && !contact.subscribedToNewsletter) return false;
+
+      // 3. Job type and location
+      if (jobTypeFilter && contact.jobTypeId !== jobTypeFilter) return false;
+      if (stateFilter && (contact.state || '').toUpperCase() !== stateFilter) return false;
 
       return true;
     })
@@ -744,49 +784,19 @@ export default function App() {
               newsletterSubscribers={newsletterSubscribersCount}
             />
 
-            {/* Table Search & Filter Bar */}
-            <div className={styles.filterBar}>
-              <div className={styles.searchWrapper}>
-                <svg className={styles.searchIcon} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="11" cy="11" r="8" />
-                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                </svg>
-                <input
-                  type="text"
-                  placeholder="Search name, organisation, title..."
-                  className={styles.searchInput}
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                />
-              </div>
-
-              <div className={styles.buttonFilters}>
-                <button
-                  className={`${styles.filterBtn} ${statusFilter === 'all' ? styles.filterBtnActive : ''}`}
-                  onClick={() => setStatusFilter('all')}
-                >
-                  All List
-                </button>
-                <button
-                  className={`${styles.filterBtn} ${statusFilter === 'customer' ? styles.filterBtnActive : ''}`}
-                  onClick={() => setStatusFilter('customer')}
-                >
-                  Customers
-                </button>
-                <button
-                  className={`${styles.filterBtn} ${statusFilter === 'prospect' ? styles.filterBtnActive : ''}`}
-                  onClick={() => setStatusFilter('prospect')}
-                >
-                  Prospects
-                </button>
-                <button
-                  className={`${styles.filterBtn} ${statusFilter === 'subscribed' ? styles.filterBtnActive : ''}`}
-                  onClick={() => setStatusFilter('subscribed')}
-                >
-                  Subscribed
-                </button>
-              </div>
-            </div>
+            <FilterBar
+              searchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
+              statusFilter={statusFilter}
+              onStatusChange={setStatusFilter}
+              jobTypes={jobTypes}
+              jobTypeFilter={jobTypeFilter}
+              onJobTypeChange={setJobTypeFilter}
+              stateFilter={stateFilter}
+              onStateChange={setStateFilter}
+              exportQuery={exportQuery}
+              resultCount={filteredContacts.length}
+            />
 
             {/* Contacts Table layout */}
             <ContactTable
@@ -1302,7 +1312,7 @@ export default function App() {
         contact={selectedContact}
         onClose={() => setSelectedContact(null)}
         onSave={handleSaveContact}
-        onDelete={handleDeleteContact}
+        onDelete={handleArchiveContact}
         availableServices={services}
       />
     </div>

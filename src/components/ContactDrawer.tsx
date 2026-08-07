@@ -541,13 +541,18 @@ export default function ContactDrawer({
               className={`${styles.button} ${styles.deleteBtn}`}
               onClick={() => {
                 const contactId = formData.id;
-                if (contactId && window.confirm('Are you sure you want to delete this contact?')) {
+                if (
+                  contactId &&
+                  window.confirm(
+                    'Archive this contact? The record is kept and can be restored later.'
+                  )
+                ) {
                   onDelete(contactId);
                   onClose();
                 }
               }}
             >
-              Delete
+              Archive
             </button>
           )}
           <button 
