@@ -1,0 +1,140 @@
+.statsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
+  width: 100%;
+}
+
+/* Double-Bezel Outer Shell */
+.cardShell {
+  background: rgba(255, 255, 255, 0.015);
+  border: 1px solid var(--glass-border);
+  padding: 6px;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  transition: transform var(--transition-spring), border-color var(--transition-normal), box-shadow var(--transition-normal);
+  cursor: pointer;
+}
+
+.cardShell:hover {
+  transform: translateY(-4px) scale(1.01);
+  border-color: var(--border-focus);
+  box-shadow: var(--shadow-lg);
+}
+
+.cardShell:active {
+  transform: translateY(-2px) scale(0.985);
+}
+
+/* Double-Bezel Inner Core */
+.cardInner {
+  padding: 16px 20px;
+  background: var(--glass-bg);
+  border-radius: calc(var(--radius-lg) - 6px);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.06), var(--shadow-glass);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 110px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.label {
+  font-family: var(--font-heading);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  letter-spacing: 0.08em;
+}
+
+/* Base Icon Wrapper */
+.iconWrapper {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform var(--transition-spring), box-shadow var(--transition-normal);
+  border: 1px solid transparent;
+}
+
+.cardShell:hover .iconWrapper {
+  transform: scale(1.1) rotate(3deg);
+}
+
+/* Category-specific Colors & Glows */
+.contactsIcon {
+  background-color: rgba(1, 172, 219, 0.08);
+  border-color: rgba(1, 172, 219, 0.2);
+  color: var(--primary);
+  box-shadow: 0 0 10px rgba(1, 172, 219, 0.05);
+}
+.cardShell:hover .contactsIcon {
+  box-shadow: 0 0 15px rgba(1, 172, 219, 0.15);
+}
+
+.customerIcon {
+  background-color: rgba(34, 197, 94, 0.08);
+  border-color: rgba(34, 197, 94, 0.2);
+  color: var(--success);
+  box-shadow: 0 0 10px rgba(34, 197, 94, 0.05);
+}
+.cardShell:hover .customerIcon {
+  box-shadow: 0 0 15px rgba(34, 197, 94, 0.15);
+}
+
+.prospectIcon {
+  background-color: rgba(1, 172, 219, 0.08);
+  border-color: rgba(1, 172, 219, 0.2);
+  color: var(--info);
+  box-shadow: 0 0 10px rgba(1, 172, 219, 0.05);
+}
+.cardShell:hover .prospectIcon {
+  box-shadow: 0 0 15px rgba(1, 172, 219, 0.15);
+}
+
+.newsletterIcon {
+  background-color: rgba(249, 137, 8, 0.08);
+  border-color: rgba(249, 137, 8, 0.2);
+  color: var(--accent);
+  box-shadow: 0 0 10px rgba(249, 137, 8, 0.05);
+}
+.cardShell:hover .newsletterIcon {
+  box-shadow: 0 0 15px rgba(249, 137, 8, 0.15);
+}
+
+.value {
+  font-family: var(--font-heading);
+  font-size: 2.2rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1;
+  letter-spacing: -0.02em;
+  margin-bottom: 4px;
+}
+
+.trend {
+  font-size: 0.72rem;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 500;
+}
+
+.trendPositive {
+  color: var(--success);
+}
+
+.trendNeutral {
+  color: var(--text-secondary);
+}

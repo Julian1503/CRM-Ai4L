@@ -1,0 +1,572 @@
+'use client';
+
+import React, { useState, useEffect, useRef } from 'react';
+import styles from './ContactDrawer.module.css';
+import { TableContact } from './ContactTable';
+import { validateContact } from '@/lib/contacts';
+import { gsap } from 'gsap';
+import { useGSAP } from '@gsap/react';
+
+interface ContactDrawerProps {
+  contact: TableContact | null;
+  onClose: () => void;
+  onSave: (data: ContactFormData) => Promise<void>;
+  onDelete?: (id: string) => Promise<void>;
+  availableServices: { id: string; name: string }[];
+}
+
+type ContactFormData = Partial<Omit<TableContact, 'organisation'>> & {
+  organisationName?: string;
+};
+
+type ContactFormValue = string | boolean | string[] | undefined;
+
+interface AddressSuggestion {
+  display_name: string;
+  address: {
+    road?: string;
+    suburb?: string;
+    state?: string;
+    postcode?: string;
+    country?: string;
+  };
+}
+
+export default function ContactDrawer({
+  contact,
+  onClose,
+  onSave,
+  onDelete,
+  availableServices,
+}: ContactDrawerProps) {
+  const [formData, setFormData] = useState<ContactFormData>({});
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const scrollAreaRef = useRef<HTMLFormElement>(null);
+
+  const [addressSuggestions, setAddressSuggestions] = useState<AddressSuggestion[]>([]);
+  const [isSearchingAddress, setIsSearchingAddress] = useState(false);
+  const [addressSearchError, setAddressSearchError] = useState('');
+  const suggestionsRef = useRef<HTMLDivElement>(null);
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const addressAbortRef = useRef<AbortController | null>(null);
+
+  // Close suggestions on outside click
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (suggestionsRef.current && !suggestionsRef.current.contains(e.target as Node)) {
+        setAddressSuggestions([]);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+      addressAbortRef.current?.abort();
+    };
+  }, []);
+
+  const searchAddress = async (query: string) => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+
+    const trimmedQuery = query.trim();
+
+    if (trimmedQuery.length < 3) {
+      addressAbortRef.current?.abort();
+      setAddressSuggestions([]);
+      setAddressSearchError('');
+      setIsSearchingAddress(false);
+      return;
+    }
+
+    debounceTimerRef.current = setTimeout(async () => {
+      addressAbortRef.current?.abort();
+      const controller = new AbortController();
+      addressAbortRef.current = controller;
+      setIsSearchingAddress(true);
+      setAddressSearchError('');
+
+      try {
+        const params = new URLSearchParams({ q: trimmedQuery });
+        if (formData.country) {
+          params.set('country', formData.country);
+        }
+
+        const res = await fetch(`/api/locations/autocomplete?${params.toString()}`, {
+          signal: controller.signal,
+        });
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+          throw new Error(data.error || 'Location lookup failed');
+        }
+
+        setAddressSuggestions(Array.isArray(data.suggestions) ? data.suggestions : []);
+      } catch (err) {
+        if ((err as Error).name === 'AbortError') {
+          return;
+        }
+        console.error('Search address error:', err);
+        setAddressSuggestions([]);
+        setAddressSearchError('Location lookup unavailable');
+      } finally {
+        if (addressAbortRef.current === controller) {
+          addressAbortRef.current = null;
+          setIsSearchingAddress(false);
+        }
+      }
+    }, 350);
+  };
+
+  const handleSelectSuggestion = (suggestion: AddressSuggestion) => {
+    const addr = suggestion.address;
+    setFormData((prev) => ({
+      ...prev,
+      address: addr.road || prev.address,
+      suburb: addr.suburb || prev.suburb,
+      state: addr.state || prev.state,
+      postcode: addr.postcode || prev.postcode,
+      country: addr.country || prev.country
+    }));
+    setAddressSuggestions([]);
+  };
+
+  useGSAP(() => {
+    if (!contact) return;
+
+    // Stagger reveal of form sections and input fields when contact details load
+    gsap.fromTo(
+      `.${styles.sectionTitle}, .${styles.field}`,
+      { opacity: 0, x: 12 },
+      {
+        opacity: 1,
+        x: 0,
+        duration: 0.35,
+        stagger: 0.02,
+        ease: 'power2.out',
+        clearProps: 'all',
+      }
+    );
+  }, { dependencies: [contact], scope: scrollAreaRef });
+
+  // Sync state with selected contact
+  useEffect(() => {
+    if (contact) {
+      // The drawer owns editable draft state derived from the selected table row.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setFormData({
+        id: contact.id,
+        firstName: contact.firstName || '',
+        lastName: contact.lastName || '',
+        preferredName: contact.preferredName || '',
+        email: contact.email || '',
+        mobileNumber: contact.mobileNumber || '',
+        workPhone: contact.workPhone || '',
+        address: contact.address || '',
+        suburb: contact.suburb || '',
+        state: contact.state || '',
+        postcode: contact.postcode || '',
+        country: contact.country || 'Australia',
+        organisationName: contact.organisation?.name || '',
+        department: contact.department || '',
+        position: contact.position || '',
+        notes: contact.notes || '',
+        isCustomer: contact.isCustomer ?? false,
+        servicesBought: contact.servicesBought || [],
+        subscribedToNewsletter: contact.subscribedToNewsletter ?? false,
+      });
+      setValidationErrors({});
+    }
+  }, [contact]);
+
+  if (!contact) return <div className={styles.overlay} />;
+
+  const handleInputChange = (field: keyof ContactFormData, value: ContactFormValue) => {
+    setFormData((prev) => {
+      const updated = { ...prev, [field]: value };
+      
+      // If we turn off customer status, empty the services list
+      if (field === 'isCustomer' && !value) {
+        updated.servicesBought = [];
+      }
+      
+      return updated;
+    });
+    
+    // Clear validation error when editing
+    if (validationErrors[field]) {
+      setValidationErrors((prev) => {
+        const copy = { ...prev };
+        delete copy[field];
+        return copy;
+      });
+    }
+  };
+
+  const handleServiceToggle = (serviceId: string) => {
+    setFormData((prev) => {
+      const currentServices = prev.servicesBought || [];
+      const updatedServices = currentServices.includes(serviceId)
+        ? currentServices.filter((id: string) => id !== serviceId)
+        : [...currentServices, serviceId];
+      return { ...prev, servicesBought: updatedServices };
+    });
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    // Validate fields
+    const validation = validateContact(formData);
+    if (!validation.isValid) {
+      setValidationErrors(validation.errors || {});
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      await onSave(formData);
+      onClose();
+    } catch (err) {
+      console.error('Failed to save contact:', err);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <>
+      <div 
+        className={`${styles.overlay} ${contact ? styles.overlayActive : ''}`} 
+        onClick={onClose}
+      />
+      <div className={`${styles.drawer} ${contact ? styles.drawerActive : ''}`}>
+        <div className={styles.header}>
+          <h2 className={styles.title}>
+            {formData.id ? 'Edit Contact' : 'New Contact'}
+          </h2>
+          <button className={styles.closeButton} onClick={onClose}>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+
+        <form ref={scrollAreaRef} onSubmit={handleSubmit} className={styles.scrollArea}>
+          {/* Section 1: Basic Information */}
+          <div className={styles.section}>
+            <h3 className={styles.sectionTitle}>Basic Info</h3>
+            <div className={styles.grid2}>
+              <div className={styles.field}>
+                <label className={styles.label}>First Name</label>
+                <input
+                  type="text"
+                  className={styles.input}
+                  value={formData.firstName || ''}
+                  onChange={(e) => handleInputChange('firstName', e.target.value)}
+                />
+                {validationErrors.firstName && (
+                  <span style={{ color: 'var(--danger)', fontSize: '0.75rem' }}>{validationErrors.firstName}</span>
+                )}
+              </div>
+              <div className={styles.field}>
+                <label className={styles.label}>Last Name</label>
+                <input
+                  type="text"
+                  className={styles.input}
+                  value={formData.lastName || ''}
+                  onChange={(e) => handleInputChange('lastName', e.target.value)}
+                />
+                {validationErrors.lastName && (
+                  <span style={{ color: 'var(--danger)', fontSize: '0.75rem' }}>{validationErrors.lastName}</span>
+                )}
+              </div>
+            </div>
+
+            <div className={styles.field}>
+              <label className={styles.label}>Preferred Name</label>
+              <input
+                type="text"
+                className={styles.input}
+                value={formData.preferredName || ''}
+                onChange={(e) => handleInputChange('preferredName', e.target.value)}
+              />
+            </div>
+
+            <div className={styles.field}>
+              <label className={styles.label}>Email Address</label>
+              <input
+                type="email"
+                className={styles.input}
+                value={formData.email || ''}
+                onChange={(e) => handleInputChange('email', e.target.value)}
+              />
+              {validationErrors.email && (
+                <span style={{ color: 'var(--danger)', fontSize: '0.75rem' }}>{validationErrors.email}</span>
+              )}
+            </div>
+
+            <div className={styles.grid2}>
+              <div className={styles.field}>
+                <label className={styles.label}>Mobile Number</label>
+                <input
+                  type="text"
+                  className={styles.input}
+                  value={formData.mobileNumber || ''}
+                  onChange={(e) => handleInputChange('mobileNumber', e.target.value)}
+                />
+              </div>
+              <div className={styles.field}>
+                <label className={styles.label}>Work Phone</label>
+                <input
+                  type="text"
+                  className={styles.input}
+                  value={formData.workPhone || ''}
+                  onChange={(e) => handleInputChange('workPhone', e.target.value)}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Section 2: Organisation */}
+          <div className={styles.section}>
+            <h3 className={styles.sectionTitle}>Organisation</h3>
+            <div className={styles.field}>
+              <label className={styles.label}>Organisation Name</label>
+              <input
+                type="text"
+                className={styles.input}
+                value={formData.organisationName || ''}
+                onChange={(e) => handleInputChange('organisationName', e.target.value)}
+              />
+            </div>
+            <div className={styles.grid2}>
+              <div className={styles.field}>
+                <label className={styles.label}>Department</label>
+                <input
+                  type="text"
+                  className={styles.input}
+                  value={formData.department || ''}
+                  onChange={(e) => handleInputChange('department', e.target.value)}
+                />
+              </div>
+              <div className={styles.field}>
+                <label className={styles.label}>Position / Title</label>
+                <input
+                  type="text"
+                  className={styles.input}
+                  value={formData.position || ''}
+                  onChange={(e) => handleInputChange('position', e.target.value)}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Section 3: Address */}
+          <div className={styles.section}>
+            <h3 className={styles.sectionTitle}>Location</h3>
+            <div className={styles.field} style={{ position: 'relative' }} ref={suggestionsRef}>
+              <label className={styles.label}>Address</label>
+              <input
+                type="text"
+                className={styles.input}
+                value={formData.address || ''}
+                onChange={(e) => {
+                  handleInputChange('address', e.target.value);
+                  searchAddress(e.target.value);
+                }}
+                placeholder="Start typing street address..."
+              />
+              
+              {isSearchingAddress && (
+                <div className={styles.searchingIndicator}>Searching...</div>
+              )}
+
+              {!isSearchingAddress && addressSearchError && (
+                <div className={styles.searchingIndicator}>{addressSearchError}</div>
+              )}
+
+              {addressSuggestions.length > 0 && (
+                <ul className={styles.suggestionsList}>
+                  {addressSuggestions.map((suggestion, idx) => (
+                    <li 
+                      key={idx} 
+                      className={styles.suggestionItem}
+                      onClick={() => handleSelectSuggestion(suggestion)}
+                    >
+                      {suggestion.display_name}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            
+            <div className={styles.grid2}>
+              <div className={styles.field}>
+                <label className={styles.label}>Suburb</label>
+                <input
+                  type="text"
+                  className={styles.input}
+                  value={formData.suburb || ''}
+                  onChange={(e) => handleInputChange('suburb', e.target.value)}
+                />
+              </div>
+              <div className={styles.field} style={{ position: 'relative' }}>
+                <label className={styles.label}>State</label>
+                {(formData.country || 'Australia').toLowerCase() === 'australia' ? (
+                  <>
+                    <input
+                      type="text"
+                      className={styles.input}
+                      value={formData.state || ''}
+                      onChange={(e) => handleInputChange('state', e.target.value)}
+                      placeholder="Type or select state..."
+                    />
+                  </>
+                ) : (
+                  <input
+                    type="text"
+                    className={styles.input}
+                    value={formData.state || ''}
+                    onChange={(e) => handleInputChange('state', e.target.value)}
+                    placeholder="State / Region"
+                  />
+                )}
+              </div>
+            </div>
+            
+            <div className={styles.grid2}>
+              <div className={styles.field}>
+                <label className={styles.label}>Postcode</label>
+                <input
+                  type="text"
+                  className={styles.input}
+                  value={formData.postcode || ''}
+                  onChange={(e) => handleInputChange('postcode', e.target.value)}
+                />
+              </div>
+              <div className={styles.field} style={{ position: 'relative' }} >
+                <label className={styles.label}>Country</label>
+                <input
+                  type="text"
+                  className={styles.input}
+                  value={formData.country || ''}
+                  onChange={(e) => handleInputChange('country', e.target.value)}
+                  placeholder="Type or select country..."
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Section 4: CRM Details & Integration */}
+          <div className={styles.section}>
+            <h3 className={styles.sectionTitle}>Status & Sync</h3>
+            
+            <div 
+              className={styles.checkboxContainer}
+              onClick={() => handleInputChange('isCustomer', !formData.isCustomer)}
+            >
+              <input
+                type="checkbox"
+                className={styles.checkbox}
+                checked={formData.isCustomer || false}
+                readOnly
+              />
+              <span className={styles.label}>Is Customer (Prospect if unchecked)</span>
+            </div>
+
+            {formData.isCustomer && (
+              <div className={styles.field} style={{ marginTop: '14px' }}>
+                <label className={styles.label}>Services Bought</label>
+                <div className={styles.servicesGrid}>
+                  {availableServices.map((service) => (
+                    <div 
+                      key={service.id}
+                      className={styles.serviceItem}
+                      onClick={() => handleServiceToggle(service.id)}
+                    >
+                      <input
+                        type="checkbox"
+                        className={styles.checkbox}
+                        checked={(formData.servicesBought || []).includes(service.id)}
+                        readOnly
+                      />
+                      <span>{service.name}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div 
+              className={styles.checkboxContainer}
+              onClick={() => handleInputChange('subscribedToNewsletter', !formData.subscribedToNewsletter)}
+            >
+              <input
+                type="checkbox"
+                className={styles.checkbox}
+                checked={formData.subscribedToNewsletter || false}
+                readOnly
+              />
+              <span className={styles.label}>Subscribed to Newsletter (Sync to EmailOctopus)</span>
+            </div>
+          </div>
+
+          {/* Section 5: Notes */}
+          <div className={styles.section}>
+            <h3 className={styles.sectionTitle}>Notes</h3>
+            <div className={styles.field}>
+              <textarea
+                className={styles.textarea}
+                value={formData.notes || ''}
+                placeholder="Write any special notes here..."
+                onChange={(e) => handleInputChange('notes', e.target.value)}
+              />
+            </div>
+          </div>
+        </form>
+
+        <div className={styles.footer}>
+          {formData.id && onDelete && (
+            <button
+              type="button"
+              className={`${styles.button} ${styles.deleteBtn}`}
+              onClick={() => {
+                const contactId = formData.id;
+                if (contactId && window.confirm('Are you sure you want to delete this contact?')) {
+                  onDelete(contactId);
+                  onClose();
+                }
+              }}
+            >
+              Delete
+            </button>
+          )}
+          <button 
+            type="button" 
+            className={`${styles.button} ${styles.cancelBtn}`} 
+            onClick={onClose}
+          >
+            Cancel
+          </button>
+          <button 
+            type="submit" 
+            className={`${styles.button} ${styles.saveBtn}`}
+            disabled={isSubmitting}
+            onClick={handleSubmit}
+          >
+            {isSubmitting ? 'Saving...' : 'Save Contact'}
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
