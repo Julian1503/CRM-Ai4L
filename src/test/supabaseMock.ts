@@ -41,10 +41,16 @@ export type QueryBuilderMock = {
   [K in ChainableMethod]: (...args: unknown[]) => QueryBuilderMock
 }
 
+/**
+ * @param resolveWith A single response, or an array consumed one per await — the
+ * latter is needed for multi-step flows (look up, then insert or update) where each
+ * step returns something different.
+ */
 export function createQueryBuilderMock(
   resolveWith: unknown = { data: [], error: null, count: 0 }
 ): QueryBuilderMock {
   const calls: RecordedCall[] = []
+  const queue = Array.isArray(resolveWith) ? [...resolveWith] : null
 
   const builder: Record<string, unknown> = {
     calls,
@@ -55,7 +61,16 @@ export function createQueryBuilderMock(
       return calls.filter((call) => call.method === method)
     },
     then(onFulfilled: (value: unknown) => unknown) {
-      return Promise.resolve(resolveWith).then(onFulfilled)
+      // Once the queue is drained, keep returning the final response rather than
+      // undefined — an over-await should not produce a confusing TypeError.
+      const next =
+        queue === null
+          ? resolveWith
+          : queue.length > 1
+            ? queue.shift()
+            : queue[0]
+
+      return Promise.resolve(next).then(onFulfilled)
     },
   }
 
@@ -71,10 +86,22 @@ export function createQueryBuilderMock(
 
 export type DbMock = { from: jest.Mock; rpc: jest.Mock }
 
-/** A `db`-shaped object whose `.from()` always returns the given builder. */
-export function createDbMock(builder: unknown): DbMock {
+/**
+ * A `db`-shaped object.
+ *
+ * Pass a single builder to have every `.from()` return it, or a resolver to vary the
+ * builder per table — needed when one request touches several tables.
+ */
+export function createDbMock(
+  builderOrResolver: unknown | ((table: string) => unknown)
+): DbMock {
+  const resolve =
+    typeof builderOrResolver === 'function'
+      ? (builderOrResolver as (table: string) => unknown)
+      : () => builderOrResolver
+
   return {
-    from: jest.fn(() => builder),
+    from: jest.fn((table: string) => resolve(table)),
     rpc: jest.fn(),
   }
 }
