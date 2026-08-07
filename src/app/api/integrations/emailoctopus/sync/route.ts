@@ -1,48 +1,95 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { syncContactToEmailOctopus } from '@/lib/emailOctopus';
+import { NextResponse, type NextRequest } from 'next/server'
 
-export async function POST(req: NextRequest) {
+import { getSession } from '@/lib/auth/dal'
+import { syncContactToEmailOctopus, type SubscriptionStatus } from '@/lib/emailOctopus'
+
+export const runtime = 'nodejs'
+
+type SyncContact = {
+  email: string
+  firstName?: string
+  lastName?: string
+  subscribedToNewsletter?: boolean
+}
+
+type SyncPayload = {
+  apiKey?: unknown
+  listId?: unknown
+  contacts?: unknown
+}
+
+function isSyncContact(value: unknown): value is SyncContact {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as SyncContact).email === 'string' &&
+    (value as SyncContact).email.trim() !== ''
+  )
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'Unknown error'
+}
+
+/**
+ * Pushes contacts to an EmailOctopus list.
+ *
+ * Acts on behalf of a signed-in user, so unlike the webhook it is *not* exempt from the
+ * session gate — and it verifies the session itself rather than relying on proxy.ts.
+ */
+export async function POST(request: NextRequest): Promise<NextResponse> {
+  const session = await getSession()
+
+  if (!session) {
+    return NextResponse.json({ error: 'Authentication required.' }, { status: 401 })
+  }
+
   try {
-    const payload = await req.json();
+    const payload = (await request.json()) as SyncPayload
 
-    if (!payload || !payload.apiKey || !payload.listId || !Array.isArray(payload.contacts)) {
-      return NextResponse.json({ error: 'Missing required sync parameters' }, { status: 400 });
+    const apiKey = typeof payload?.apiKey === 'string' ? payload.apiKey.trim() : ''
+    const listId = typeof payload?.listId === 'string' ? payload.listId.trim() : ''
+
+    if (!apiKey || !listId || !Array.isArray(payload.contacts)) {
+      return NextResponse.json({ error: 'Missing required sync parameters' }, { status: 400 })
     }
 
-    const { apiKey, listId, contacts } = payload;
-    const errors: Array<{ email: string; error: string }> = [];
-    let syncedCount = 0;
+    const contacts = payload.contacts.filter(isSyncContact)
+    const errors: Array<{ email: string; error: string }> = []
+    let syncedCount = 0
 
-    // Process contacts list
-    for (const c of contacts) {
+    for (const contact of contacts) {
+      const status: SubscriptionStatus = contact.subscribedToNewsletter
+        ? 'SUBSCRIBED'
+        : 'UNSUBSCRIBED'
+
       try {
-        const status = c.subscribedToNewsletter ? 'SUBSCRIBED' : 'UNSUBSCRIBED';
         await syncContactToEmailOctopus(
           apiKey,
           listId,
-          c.email,
-          c.firstName || '',
-          c.lastName || '',
+          contact.email,
+          contact.firstName || '',
+          contact.lastName || '',
           status
-        );
-        syncedCount++;
-      } catch (err: any) {
-        console.error(`Failed to sync contact ${c.email}:`, err);
-        errors.push({ email: c.email, error: err.message || 'Unknown error' });
+        )
+        syncedCount += 1
+      } catch (error: unknown) {
+        // One bad address must not abort the whole run; collect and continue.
+        console.error(`Failed to sync contact ${contact.email}:`, error)
+        errors.push({ email: contact.email, error: getErrorMessage(error) })
       }
     }
 
     return NextResponse.json({
       success: true,
       syncedCount,
+      skippedCount: payload.contacts.length - contacts.length,
       errorsCount: errors.length,
       errors: errors.length > 0 ? errors : undefined,
-    });
-  } catch (error: any) {
-    console.error('EmailOctopus Sync Error:', error);
-    return NextResponse.json(
-      { error: error.message || 'Sync operation failed' },
-      { status: 500 }
-    );
+    })
+  } catch (error: unknown) {
+    console.error('EmailOctopus Sync Error:', error)
+
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 })
   }
 }
