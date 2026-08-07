@@ -11,8 +11,35 @@ spreadsheet import, status filter tabs, contact CRUD, dashboard) are not repeate
 | Phase | Status |
 |---|---|
 | 0 — Foundations | **Complete** (SQL unverified — see below) |
-| 1 — Auth + deploy | Not started |
+| 1.1 — Auth | **Code complete**, unauthenticated paths verified; signed-in paths blocked |
+| 1.2 — Deploy | **Blocked** — needs your Vercel account and DNS |
 | 2–6 | Not started |
+
+**Phase 1 delivered:** `src/proxy.ts` session gate · `src/lib/auth/` (DAL, route rules,
+open-redirect sanitiser, credential validation) · login page + Server Action · POST
+logout + sidebar control · security headers · robots exclusion.
+Gate: 149 unit tests green, typecheck clean, production build clean, 8 E2E green.
+
+### Blocked: there is no Supabase project
+
+Every value in `.env.local` is empty except `GEOAPIFY_API_KEY`. The CRM has never
+connected to a database, so there is no account to sign in with and the authenticated
+half of Phase 1 cannot be verified. **9 E2E specs skip** with an explicit reason rather
+than passing vacuously.
+
+To unblock, in order:
+
+1. Create a Supabase project. Put the URL, anon key, and service-role key in
+   `.env.local` (template: `.env.local.example`).
+2. Apply the migrations, then run `npm run db:verify` — the Phase 0 SQL has still never
+   been executed anywhere.
+3. In the Supabase dashboard: **disable public sign-ups** (the CRM is invite-only, and
+   nothing in the app enforces that — it is a project setting), then invite your user.
+4. Set Site URL and the redirect allowlist to the deployment domain, or login silently
+   fails on preview builds.
+5. Export `E2E_EMAIL` / `E2E_PASSWORD` to switch the 9 skipped specs on.
+
+Phase 1.2 additionally needs a Vercel account, the exact subdomain, and DNS access.
 
 **Phase 0 delivered:** migration `20260807000000` (soft delete, job types, contact status,
 `import_contacts` RPC) · three Supabase clients with credential isolation · DB types ·
