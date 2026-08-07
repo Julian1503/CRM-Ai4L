@@ -12,6 +12,10 @@
 
 # testing
 /coverage
+/test-results/
+/playwright-report/
+/blob-report/
+__pycache__/
 
 # next.js
 /.next/
@@ -32,6 +36,9 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# ...but the templates must be committed: README tells you to copy .env.local.example,
+# and `.env*` above was silently excluding it.
+!.env*.example
 
 # vercel
 .vercel
