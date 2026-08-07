@@ -31,14 +31,13 @@ const config: Config = {
   // route handlers are covered — the three things holding the current numbers down.
   // Baseline at Phase 0: statements 74.52 / branches 56.79 / functions 38.70 / lines 74.52.
   // Baseline at Phase 1: statements 74.09 / branches 64.67 / functions 43.63 / lines 74.09.
-  // Statements dipped marginally because the login page and form are covered by
-  // Playwright rather than Jest; branch and function coverage both rose.
+  // Baseline at Phase 2: statements 78.20 / branches 70.42 / functions 54.41 / lines 78.20.
   coverageThreshold: {
     global: {
-      statements: 74,
-      branches: 64,
-      functions: 43,
-      lines: 74,
+      statements: 78,
+      branches: 70,
+      functions: 54,
+      lines: 78,
     },
   },
 }

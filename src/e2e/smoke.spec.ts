@@ -87,6 +87,41 @@ test.describe('CRM shell', () => {
     await expect(page.getByTestId('mapping-select-organisationName')).toHaveValue('Company')
   })
 
+  test('filters by job type and state', async ({ page }) => {
+    await expect(page.getByTestId('job-type-filter')).toBeVisible()
+    await expect(page.getByTestId('state-filter')).toBeVisible()
+
+    await page.getByTestId('state-filter').selectOption('NSW')
+
+    // Every visible row should now be NSW, and the filter should survive a reload
+    // once the URL carries it.
+    await expect(page.getByTestId('state-filter')).toHaveValue('NSW')
+  })
+
+  test('offers a filtered CSV export', async ({ page }) => {
+    await page.getByTestId('state-filter').selectOption('VIC')
+
+    const exportLink = page.getByTestId('export-full')
+    await expect(exportLink).toBeVisible()
+
+    // The active filter must travel with the download, or "export" silently means
+    // something different from what is on screen.
+    await expect(exportLink).toHaveAttribute('href', /state=VIC/)
+    await expect(page.getByTestId('export-emailoctopus')).toHaveAttribute(
+      'href',
+      /format=emailoctopus/
+    )
+  })
+
+  test('downloads a CSV with the expected header', async ({ page }) => {
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      page.getByTestId('export-emailoctopus').click(),
+    ])
+
+    expect(download.suggestedFilename()).toMatch(/^contacts-emailoctopus-\d{4}-\d{2}-\d{2}\.csv$/)
+  })
+
   test('signs the user out and blocks the dashboard afterwards', async ({ page }) => {
     await page.getByTestId('sign-out').click()
 

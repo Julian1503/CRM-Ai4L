@@ -13,7 +13,37 @@ spreadsheet import, status filter tabs, contact CRUD, dashboard) are not repeate
 | 0 — Foundations | **Complete** (SQL unverified — see below) |
 | 1.1 — Auth | **Code complete**, unauthenticated paths verified; signed-in paths blocked |
 | 1.2 — Deploy | **Blocked** — needs your Vercel account and DNS |
-| 2–6 | Not started |
+| 2.2 — Filters | **Complete** (job type, state, status, search) |
+| 2.3 — CSV export | **Complete** (two formats, filter-aware, injection-safe) |
+| 2.4 — Soft delete | **Complete** (archive API + UI; no hard-delete path remains) |
+| 2.1 — `page.tsx` decomposition | **Deferred** — see below |
+| 3–6 | Not started |
+
+**Phase 2 delivered:** `src/lib/csv.ts` (RFC 4180 + formula-injection defence) ·
+`src/lib/contacts/query.ts` (validated filter parsing, PostgREST injection defence) ·
+`repository.ts` (archive/restore, bounded queries) · `export.ts` (two column sets) ·
+`/api/contacts/export` · `/api/contacts/[id]` archive+restore · `FilterBar` with job
+type and state controls · hard delete removed.
+Gate: 277 unit tests green, typecheck clean, lint clean, build clean, 11 E2E green.
+
+### Deferred: 2.1 page.tsx decomposition
+
+The plan required E2E coverage of current behaviour *before* refactoring. Those specs
+exist but **skip**, because there is no Supabase project to sign in against — so the
+safety net the refactor depends on does not currently exist. Rewriting a 1,300-line
+component with no database, no working dev hydration, and no runnable UI tests would be
+changing code that cannot be observed.
+
+What was done instead, without the refactor:
+- Filtering, export and archival all live in tested modules under `src/lib/contacts/`,
+  so the decomposition later becomes a move rather than a rewrite.
+- `FilterBar` is extracted, which is the first slice of it.
+- The export endpoint parses the *same* filter vocabulary the UI serialises, so
+  "export what I'm looking at" holds without the UI owning query logic.
+
+Still outstanding in 2.1: real routes per view, server-rendered contact list reading
+`await searchParams`, pagination UI, and an archive screen (the archive/restore **API**
+is done and tested; only the page is missing). Do this once sign-in works.
 
 **Phase 1 delivered:** `src/proxy.ts` session gate · `src/lib/auth/` (DAL, route rules,
 open-redirect sanitiser, credential validation) · login page + Server Action · POST

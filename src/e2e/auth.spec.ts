@@ -65,6 +65,34 @@ test.describe('unauthenticated access', () => {
     expect(await response.json()).toMatchObject({ error: expect.any(String) })
   })
 
+  test('protects the contact export, which returns the whole database', async ({
+    request,
+  }) => {
+    const response = await request.get('/api/contacts/export?format=full', {
+      maxRedirects: 0,
+    })
+
+    expect(response.status()).toBe(401)
+    // A redirect here would hand an anonymous caller an HTML page instead of a
+    // refusal, and a 200 would hand them the client list.
+    expect(await response.text()).not.toContain('EmailAddress')
+  })
+
+  test('protects contact archival', async ({ request }) => {
+    const response = await request.delete('/api/contacts/some-id', { maxRedirects: 0 })
+
+    expect(response.status()).toBe(401)
+  })
+
+  test('protects contact restoration', async ({ request }) => {
+    const response = await request.post('/api/contacts/some-id', {
+      data: {},
+      maxRedirects: 0,
+    })
+
+    expect(response.status()).toBe(401)
+  })
+
   test('protects the emailoctopus sync route, which acts on behalf of a user', async ({
     request,
   }) => {
