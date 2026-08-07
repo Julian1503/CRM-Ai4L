@@ -1,0 +1,44 @@
+{
+  "_comment": "EmailOctopus webhook payload shapes, matching what src/app/api/integrations/emailoctopus/webhook/route.ts reads today. Stripe and Calendly fixtures are recorded from real test-mode events in Phases 5.2 and 5.3 rather than guessed here.",
+  "subscribed": {
+    "event": "contact.subscribed",
+    "contact": {
+      "id": "00000000-1111-2222-3333-444444444444",
+      "email_address": "newsletter.signup@example.com",
+      "fields": {
+        "FirstName": "Grace",
+        "LastName": "Hopper"
+      },
+      "status": "SUBSCRIBED"
+    }
+  },
+  "unsubscribed": {
+    "event": "contact.unsubscribed",
+    "contact": {
+      "id": "00000000-1111-2222-3333-444444444444",
+      "email_address": "newsletter.signup@example.com",
+      "fields": {
+        "FirstName": "Grace",
+        "LastName": "Hopper"
+      },
+      "status": "UNSUBSCRIBED"
+    }
+  },
+  "unknownEvent": {
+    "event": "contact.bounced",
+    "contact": {
+      "email_address": "bounced@example.com"
+    }
+  },
+  "malformedMissingContact": {
+    "event": "contact.subscribed"
+  },
+  "malformedMissingEmail": {
+    "event": "contact.subscribed",
+    "contact": {
+      "fields": {
+        "FirstName": "No"
+      }
+    }
+  }
+}
