@@ -30,11 +30,14 @@ const config: Config = {
   // Phase 6 lifts them to the 80% project standard, once page.tsx is decomposed and the
   // route handlers are covered — the three things holding the current numbers down.
   // Baseline at Phase 0: statements 74.52 / branches 56.79 / functions 38.70 / lines 74.52.
+  // Baseline at Phase 1: statements 74.09 / branches 64.67 / functions 43.63 / lines 74.09.
+  // Statements dipped marginally because the login page and form are covered by
+  // Playwright rather than Jest; branch and function coverage both rose.
   coverageThreshold: {
     global: {
       statements: 74,
-      branches: 56,
-      functions: 38,
+      branches: 64,
+      functions: 43,
       lines: 74,
     },
   },

@@ -1,0 +1,144 @@
+import { expect, test } from '@playwright/test'
+
+/**
+ * Authentication gate behaviour.
+ *
+ * Everything here exercises the *unauthenticated* paths, which are the
+ * security-critical ones and need no Supabase project to verify. Signed-in journeys
+ * live in smoke.spec.ts and skip until credentials exist.
+ */
+
+test.describe('unauthenticated access', () => {
+  test('redirects the dashboard to /login', async ({ page }) => {
+    await page.goto('/')
+
+    await expect(page).toHaveURL(/\/login/)
+    await expect(page.getByRole('heading', { name: 'Sign in', level: 1 })).toBeVisible()
+  })
+
+  test('remembers the intended destination', async ({ page }) => {
+    await page.goto('/contacts?state=NSW')
+
+    const url = new URL(page.url())
+    expect(url.pathname).toBe('/login')
+    expect(url.searchParams.get('next')).toBe('/contacts?state=NSW')
+  })
+
+  // Open-redirect probes. These need the rendered form, so they skip while Supabase
+  // is unconfigured. The sanitiser itself is covered exhaustively by
+  // src/lib/auth/redirect.test.ts (15 attack vectors).
+  test.describe('next parameter sanitisation', () => {
+    test.beforeEach(async ({ page }) => {
+      await page.goto('/login')
+      const configMissing = await page
+        .getByTestId('config-error')
+        .isVisible()
+        .catch(() => false)
+      test.skip(configMissing, 'Supabase not configured, so the login form is not rendered')
+    })
+
+    test('never forwards an off-site next parameter', async ({ page }) => {
+      await page.goto('/login?next=https://evil.example.com/harvest')
+
+      await expect(page.locator('input[name="next"]')).toHaveValue('/')
+    })
+
+    test('never forwards a protocol-relative next parameter', async ({ page }) => {
+      await page.goto('/login?next=//evil.example.com')
+
+      await expect(page.locator('input[name="next"]')).toHaveValue('/')
+    })
+
+    test('preserves a legitimate relative destination', async ({ page }) => {
+      await page.goto('/login?next=/contacts%3Fstate%3DNSW')
+
+      await expect(page.locator('input[name="next"]')).toHaveValue('/contacts?state=NSW')
+    })
+  })
+
+  test('answers API routes with 401 rather than redirecting', async ({ request }) => {
+    const response = await request.get('/api/locations/autocomplete?text=sydney', {
+      maxRedirects: 0,
+    })
+
+    expect(response.status()).toBe(401)
+    expect(await response.json()).toMatchObject({ error: expect.any(String) })
+  })
+
+  test('protects the emailoctopus sync route, which acts on behalf of a user', async ({
+    request,
+  }) => {
+    const response = await request.post('/api/integrations/emailoctopus/sync', {
+      data: {},
+      maxRedirects: 0,
+    })
+
+    expect(response.status()).toBe(401)
+  })
+
+  test('lets the emailoctopus webhook through, since it carries no session', async ({
+    request,
+  }) => {
+    // A 400 from the handler proves the proxy did not block it; a 401 or 3xx would
+    // mean inbound webhooks are being rejected before they reach their signature check.
+    const response = await request.post('/api/integrations/emailoctopus/webhook', {
+      data: { nonsense: true },
+      maxRedirects: 0,
+    })
+
+    expect(response.status()).toBe(400)
+  })
+
+  test('serves static assets without redirecting them to /login', async ({ request }) => {
+    // A matcher that catches assets breaks CSS and JS on the login page itself.
+    const response = await request.get('/robots.txt', { maxRedirects: 0 })
+
+    expect(response.status()).toBe(200)
+    expect(await response.text()).toContain('Disallow: /')
+  })
+})
+
+test.describe('login page', () => {
+  test('rejects an empty submission client-side without calling the server', async ({
+    page,
+  }) => {
+    await page.goto('/login')
+
+    const configMissing = await page
+      .getByTestId('config-error')
+      .isVisible()
+      .catch(() => false)
+    test.skip(configMissing, 'Supabase not configured, so no form is rendered')
+
+    await page.getByRole('button', { name: 'Sign in' }).click()
+
+    await expect(page.getByText('Enter your email address.')).toBeVisible()
+    await expect(page.getByText('Enter your password.')).toBeVisible()
+  })
+
+  test('states plainly when sign-in is unavailable', async ({ page }) => {
+    await page.goto('/login')
+
+    const configMissing = await page
+      .getByTestId('config-error')
+      .isVisible()
+      .catch(() => false)
+    test.skip(!configMissing, 'Supabase is configured, so the form renders instead')
+
+    // The gate fails closed. It must say why rather than silently looping.
+    await expect(page.getByTestId('config-error')).toContainText('Supabase is not configured')
+  })
+})
+
+test.describe('security headers', () => {
+  test('sets the baseline hardening headers', async ({ request }) => {
+    const response = await request.get('/login')
+    const headers = response.headers()
+
+    expect(headers['x-content-type-options']).toBe('nosniff')
+    expect(headers['x-frame-options']).toBe('DENY')
+    expect(headers['referrer-policy']).toBe('strict-origin-when-cross-origin')
+    expect(headers['permissions-policy']).toContain('camera=()')
+    expect(headers['x-robots-tag']).toContain('noindex')
+  })
+})
