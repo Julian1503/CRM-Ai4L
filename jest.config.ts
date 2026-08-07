@@ -32,11 +32,12 @@ const config: Config = {
   // Baseline at Phase 0: statements 74.52 / branches 56.79 / functions 38.70 / lines 74.52.
   // Baseline at Phase 1: statements 74.09 / branches 64.67 / functions 43.63 / lines 74.09.
   // Baseline at Phase 2: statements 78.20 / branches 70.42 / functions 54.41 / lines 78.20.
+  // Baseline at Phase 3: statements 78.65 / branches 74.78 / functions 57.04 / lines 78.65.
   coverageThreshold: {
     global: {
       statements: 78,
-      branches: 70,
-      functions: 54,
+      branches: 74,
+      functions: 57,
       lines: 78,
     },
   },

@@ -17,7 +17,26 @@ spreadsheet import, status filter tabs, contact CRUD, dashboard) are not repeate
 | 2.3 — CSV export | **Complete** (two formats, filter-aware, injection-safe) |
 | 2.4 — Soft delete | **Complete** (archive API + UI; no hard-delete path remains) |
 | 2.1 — `page.tsx` decomposition | **Deferred** — see below |
-| 3–6 | Not started |
+| 3 — Newsletter intake | **Complete** (signature + idempotency + v2 client) |
+| 4–6 | Not started |
+
+**Phase 3 delivered:** `src/lib/webhooks/verify.ts` (HMAC + replay window +
+constant-time compare) · `idempotency.ts` + `webhook_events` ledger ·
+`src/lib/contacts/newsletter.ts` (creates contacts, not just updates) · rewritten
+webhook route · EmailOctopus **v2** client with 429/5xx retry · session checks added to
+the sync and import routes.
+Gate: 355 unit tests green, **lint green for the first time (0 errors)**, typecheck
+clean, build clean, 12 E2E green.
+
+Two things in Phase 3 are written against documented behaviour but **never exercised
+against the real services**, because no API key or webhook secret was available:
+- the EmailOctopus **webhook signature header name and encoding** (`verify.ts`)
+- the **v2 API contract** — endpoint, `status` vocabulary, error body (`emailOctopus.ts`)
+
+Both are isolated to a single file each and flagged in-code. Confirm against
+EmailOctopus documentation before go-live; a wrong signature format means every real
+webhook is rejected (fails closed, which is the safe direction, but it will look like
+the integration is simply broken).
 
 **Phase 2 delivered:** `src/lib/csv.ts` (RFC 4180 + formula-injection defence) ·
 `src/lib/contacts/query.ts` (validated filter parsing, PostgREST injection defence) ·

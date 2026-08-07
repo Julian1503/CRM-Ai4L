@@ -104,17 +104,33 @@ test.describe('unauthenticated access', () => {
     expect(response.status()).toBe(401)
   })
 
-  test('lets the emailoctopus webhook through, since it carries no session', async ({
+  test('lets the emailoctopus webhook through to its own signature check', async ({
     request,
   }) => {
-    // A 400 from the handler proves the proxy did not block it; a 401 or 3xx would
-    // mean inbound webhooks are being rejected before they reach their signature check.
     const response = await request.post('/api/integrations/emailoctopus/webhook', {
       data: { nonsense: true },
       maxRedirects: 0,
     })
 
-    expect(response.status()).toBe(400)
+    // Both the proxy and the handler answer 401, so the status alone proves nothing.
+    // The *message* is the discriminator: "Invalid signature" can only come from the
+    // handler, which means the request reached it rather than being gated upstream.
+    expect(response.status()).toBe(401)
+    expect(await response.json()).toMatchObject({ error: 'Invalid signature.' })
+  })
+
+  test('rejects an unsigned webhook rather than trusting it', async ({ request }) => {
+    // The handler writes with the service-role key, bypassing RLS. Without the
+    // signature check, anyone with the URL could inject or unsubscribe contacts.
+    const response = await request.post('/api/integrations/emailoctopus/webhook', {
+      data: {
+        event: 'contact.subscribed',
+        contact: { email_address: 'attacker@evil.example.com' },
+      },
+      maxRedirects: 0,
+    })
+
+    expect(response.status()).toBe(401)
   })
 
   test('serves static assets without redirecting them to /login', async ({ request }) => {
