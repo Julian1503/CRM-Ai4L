@@ -2,6 +2,18 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
+Copy `.env.local.example` to `.env.local` and configure the real service keys before running the app:
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=...
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+EMAILOCTOPUS_API_KEY=...
+EMAILOCTOPUS_LIST_ID=...
+GEOAPIFY_API_KEY=...
+```
+
+The app does not seed demo CRM data at runtime. Contacts, services, credentials, sync logs, and location suggestions come from Supabase, EmailOctopus, and Geoapify.
+
 First, run the development server:
 
 ```bash
