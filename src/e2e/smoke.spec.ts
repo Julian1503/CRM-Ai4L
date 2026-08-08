@@ -122,6 +122,38 @@ test.describe('CRM shell', () => {
     expect(download.suggestedFilename()).toMatch(/^contacts-emailoctopus-\d{4}-\d{2}-\d{2}\.csv$/)
   })
 
+  test('shows the campaigns workspace with a live segment count', async ({ page }) => {
+    await page.getByTestId('nav-item-campaigns').click()
+
+    await expect(
+      page.getByRole('heading', { name: 'Segments and campaigns', level: 1 })
+    ).toBeVisible()
+
+    // The audience size decides both who gets mail and how long the send runs, so it
+    // must be visible before anything is created.
+    await expect(page.getByTestId('segment-preview')).toBeVisible()
+    await expect(page.getByTestId('segment-state')).toBeVisible()
+    await expect(page.getByTestId('segment-job-type')).toBeVisible()
+  })
+
+  test('states that the email is authored in EmailOctopus, not here', async ({ page }) => {
+    // Non-obvious and load-bearing: the API cannot create campaigns, so the body
+    // lives in an EmailOctopus automation. Hiding that would strand the user.
+    await page.getByTestId('nav-item-campaigns').click()
+
+    await expect(page.getByText(/Started via API/)).toBeVisible()
+  })
+
+  test('requires an automation ID before a campaign can be approved', async ({ page }) => {
+    await page.getByTestId('nav-item-campaigns').click()
+
+    await expect(page.getByTestId('campaign-automation')).toBeVisible()
+    await expect(page.getByTestId('campaign-automation')).toHaveAttribute(
+      'placeholder',
+      /Required before approval/
+    )
+  })
+
   test('signs the user out and blocks the dashboard afterwards', async ({ page }) => {
     await page.getByTestId('sign-out').click()
 

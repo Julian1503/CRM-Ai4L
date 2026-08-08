@@ -93,6 +93,49 @@ test.describe('unauthenticated access', () => {
     expect(response.status()).toBe(401)
   })
 
+  test('protects segment listing and creation', async ({ request }) => {
+    expect((await request.get('/api/segments', { maxRedirects: 0 })).status()).toBe(401)
+    expect(
+      (await request.post('/api/segments', { data: { name: 'x' }, maxRedirects: 0 })).status()
+    ).toBe(401)
+  })
+
+  test('protects the segment preview, which counts real contacts', async ({ request }) => {
+    const response = await request.post('/api/segments/preview', {
+      data: { definition: {} },
+      maxRedirects: 0,
+    })
+
+    expect(response.status()).toBe(401)
+  })
+
+  test('protects campaign listing and creation', async ({ request }) => {
+    expect((await request.get('/api/campaigns', { maxRedirects: 0 })).status()).toBe(401)
+    expect(
+      (await request.post('/api/campaigns', { data: { name: 'x' }, maxRedirects: 0 })).status()
+    ).toBe(401)
+  })
+
+  test('protects campaign approval', async ({ request }) => {
+    // Approval authorises irreversible sending.
+    const response = await request.post('/api/campaigns/some-id/approve', {
+      data: {},
+      maxRedirects: 0,
+    })
+
+    expect(response.status()).toBe(401)
+  })
+
+  test('protects campaign sending', async ({ request }) => {
+    // The one endpoint that queues mail which cannot be recalled.
+    const response = await request.post('/api/campaigns/some-id/send', {
+      data: {},
+      maxRedirects: 0,
+    })
+
+    expect(response.status()).toBe(401)
+  })
+
   test('protects the emailoctopus sync route, which acts on behalf of a user', async ({
     request,
   }) => {

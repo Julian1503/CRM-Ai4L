@@ -21,7 +21,9 @@ spreadsheet import, status filter tabs, contact CRUD, dashboard) are not repeate
 | 4.1 — Segments | **Complete** |
 | 4.2 — Approval workflow | **Complete** (status machine enforced in the database) |
 | 4.3 — Send pipeline | **Complete** (adapter, rate limiter, resumable ledger) |
-| 4.4 — AI copy generation | **On hold** — pending merge-field ceiling check |
+| 4.4 — Segment & campaign API | **Complete** (8 routes, session-checked) |
+| 4.5 — Campaigns UI | **Complete** (unverified against a live database) |
+| 4.6 — AI copy generation | **On hold** — pending merge-field ceiling check |
 | 5–6 | Not started |
 
 **Phase 4 delivered:** `segments` / `campaigns` / `campaign_sends` schema with the status
@@ -30,7 +32,20 @@ Phase 2 filter vocabulary; forces subscribed-only) · `campaignStatus.ts` ·
 `providers/types.ts` adapter boundary + `providers/emailOctopus.ts` ·
 `rateLimiter.ts` (token bucket matching 100 @ 10/sec) · `send.ts` (resumable,
 deduplicated, chunkable fan-out).
-Gate: 436 unit tests green, lint 0 errors, typecheck clean, build clean.
+Plus `/api/segments`, `/api/segments/preview`, `/api/campaigns`,
+`/api/campaigns/[id]` (GET/PATCH), `/api/campaigns/[id]/approve`,
+`/api/campaigns/[id]/send`, and a Campaigns workspace in the sidebar.
+Gate: 492 unit tests green, lint 0 errors, typecheck clean, build clean, 17 E2E green.
+
+The UI surfaces the provider constraint rather than hiding it: the screen states that
+the email is authored in EmailOctopus as a "Started via API" automation, shows live
+audience size, and shows the estimated send duration *before* approval — because with a
+per-contact send, audience size translates directly into wall clock.
+
+PATCH deliberately refuses to set `approved`, `sending`, `sent` or `failed`. Those have
+dedicated endpoints so approval stays attributed and the irreversible step stays
+guarded; allowing them through a generic edit would let an ordinary field update smuggle
+a campaign past the human gate.
 
 **AI generation is on hold, correctly.** It is coupled to the provider answer, not
 independent of it: with `canSupplyBody: false` the only content route is contact custom
