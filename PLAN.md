@@ -18,7 +18,30 @@ spreadsheet import, status filter tabs, contact CRUD, dashboard) are not repeate
 | 2.4 — Soft delete | **Complete** (archive API + UI; no hard-delete path remains) |
 | 2.1 — `page.tsx` decomposition | **Deferred** — see below |
 | 3 — Newsletter intake | **Complete** (signature + idempotency + v2 client) |
-| 4–6 | Not started |
+| 4.1 — Segments | **Complete** |
+| 4.2 — Approval workflow | **Complete** (status machine enforced in the database) |
+| 4.3 — Send pipeline | **Complete** (adapter, rate limiter, resumable ledger) |
+| 4.4 — AI copy generation | **On hold** — pending merge-field ceiling check |
+| 5–6 | Not started |
+
+**Phase 4 delivered:** `segments` / `campaigns` / `campaign_sends` schema with the status
+machine enforced by a database trigger · `src/lib/marketing/segments.ts` (reuses the
+Phase 2 filter vocabulary; forces subscribed-only) · `campaignStatus.ts` ·
+`providers/types.ts` adapter boundary + `providers/emailOctopus.ts` ·
+`rateLimiter.ts` (token bucket matching 100 @ 10/sec) · `send.ts` (resumable,
+deduplicated, chunkable fan-out).
+Gate: 436 unit tests green, lint 0 errors, typecheck clean, build clean.
+
+**AI generation is on hold, correctly.** It is coupled to the provider answer, not
+independent of it: with `canSupplyBody: false` the only content route is contact custom
+fields merged into a UI-authored template, so there is no HTML body for a model to
+generate. Before shaping it, confirm on a free account (30–60 min):
+1. the merge-field ceiling — how many custom fields, and their length limits;
+2. whether automation sends surface in **any** report (currently recorded as
+   `perSendReporting: 'unknown'`, deliberately not guessed).
+
+If full API-driven campaign creation is a hard requirement, this becomes a provider
+selection decision — the adapter boundary is what keeps that swap contained.
 
 **Phase 3 delivered:** `src/lib/webhooks/verify.ts` (HMAC + replay window +
 constant-time compare) · `idempotency.ts` + `webhook_events` ledger ·
@@ -461,12 +484,39 @@ time rather than assuming. The existing test asserts the exact v1.6 URL and body
 
 ## PHASE 4 — Marketing agent (scope 3.3)
 
-> ⚠️ **Highest-uncertainty item in the plan.** Whether EmailOctopus's API supports *creating and
-> sending* a campaign programmatically must be verified before this phase is estimated firmly. If it
-> does not, the fallback is: the agent builds and syncs **segments/tags** into EmailOctopus, and the
-> actual send is triggered by an EmailOctopus automation. That fallback still satisfies "automates
-> outreach without manual list handling" but changes the UI and the send-tracking model. Verify first,
-> build second.
+> ✅ **RESOLVED 2026-08-08 — the EmailOctopus API cannot create or send campaigns.**
+> Campaign endpoints are read-only in both v1 and v2: `GET /campaigns`, `GET /campaigns/{id}`,
+> and `/reports*`. There is no POST/PUT/DELETE anywhere under `/campaigns`. Lists, contacts,
+> custom fields and tags have full CRUD, including a contact upsert accepting tags and field
+> values.
+>
+> **The only programmatic send trigger is `POST /automations/{id}/queue`.** It starts an
+> automation for *one contact*; the automation must use the "Started via API" trigger type, and
+> a contact can trigger it only once unless "Allow contacts to repeat" is enabled.
+>
+> Three consequences that reshape this phase:
+>
+> 1. **Send is per contact, not per broadcast.** One API call per recipient. Rate limit is a
+>    token bucket — 100 tokens refilling at 10/sec — so a 10k segment is ~17 minutes of
+>    queueing, plus our own retry and idempotency handling. With "Allow contacts to repeat" on
+>    for recurring sends, **deduplication becomes entirely our responsibility.**
+> 2. **AI-generated copy cannot reach the email body.** The template is authored in the
+>    EmailOctopus UI. The only injection route is contact custom fields merged into that
+>    template — short personalisation tokens, not a generated HTML body. The AI generation piece
+>    is therefore *coupled* to this answer, not independent of it as previously assumed.
+> 3. **Automation send tracking is undocumented.** Every reporting endpoint is keyed to a
+>    campaign id; there are no automation reporting endpoints. Per-send opens and clicks for
+>    automation-driven email probably do not come back through the API at all. This is the
+>    largest remaining unknown.
+>
+> **Approach:** build segments and the approval workflow provider-agnostically, behind an
+> adapter boundary at the send step. Hold the AI generation shape until the merge-field ceiling
+> and automation reporting are confirmed on a free account (30–60 min).
+>
+> If full API-driven campaign creation turns out to be a hard requirement rather than a
+> nice-to-have, **this is a provider-selection problem** — Mailchimp, Brevo and Resend Broadcasts
+> all support create-plus-send programmatically. The adapter boundary exists so that swap stays
+> contained.
 
 ### 4.1 Segments
 
