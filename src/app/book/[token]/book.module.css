@@ -1,0 +1,158 @@
+.page {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: var(--space-lg);
+  background: var(--bg-app);
+}
+
+.card {
+  width: min(34rem, 100%);
+  padding: clamp(1.75rem, 1rem + 3vw, 3rem);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 16px);
+  box-shadow: var(--shadow-lg);
+}
+
+.brand {
+  display: block;
+  margin-bottom: var(--space-xl);
+  font-family: var(--font-heading);
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+
+.brandDot {
+  color: var(--primary);
+}
+
+.title {
+  margin: 0 0 var(--space-md);
+  font-family: var(--font-heading);
+  font-size: clamp(1.6rem, 1.2rem + 1.8vw, 2.25rem);
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+  color: var(--text-primary);
+}
+
+/* The whole proposition is "worth $500, costs nothing", so the two numbers carry it.
+   Struck-through original beside a large zero, rather than a paragraph explaining it. */
+.priceRow {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  margin-bottom: var(--space-md);
+}
+
+.priceWas {
+  font-family: var(--font-heading);
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.priceNow {
+  font-family: var(--font-heading);
+  font-size: 3rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  color: var(--primary);
+}
+
+.lede {
+  margin: 0 0 var(--space-xl);
+  font-size: 1rem;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.cta {
+  width: 100%;
+  padding: 1rem 1.25rem;
+  font-family: var(--font-body);
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-on-primary);
+  background: var(--primary);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    background var(--duration-fast, 150ms) ease,
+    transform var(--duration-fast, 150ms) ease;
+}
+
+.cta:hover:not(:disabled) {
+  background: var(--primary-hover);
+}
+
+.cta:active:not(:disabled) {
+  transform: scale(0.99);
+}
+
+.cta:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+}
+
+.cta:disabled {
+  opacity: 0.65;
+  cursor: progress;
+}
+
+.error {
+  margin: 0;
+  padding: 0.75rem 0.875rem;
+  font-size: 0.875rem;
+  color: #8a1c1c;
+  background: var(--danger-bg);
+  border: 1px solid rgba(239, 68, 68, 0.28);
+  border-radius: var(--radius-sm);
+}
+
+/* Reassurance about not being charged belongs near the button, quietly. */
+.fineprint {
+  margin: var(--space-md) 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.confirmed {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  margin-bottom: var(--space-md);
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #146c35;
+}
+
+.calendlyFrame {
+  width: 100%;
+  min-height: 40rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cta {
+    transition: none;
+  }
+
+  .cta:active:not(:disabled) {
+    transform: none;
+  }
+}
