@@ -19,6 +19,36 @@ export type CampaignStatus =
   | 'sent'
   | 'failed'
 
+export type BookingStatus =
+  | 'pending'
+  | 'checkout_started'
+  | 'paid'
+  | 'booked'
+  | 'cancelled'
+  | 'expired'
+
+export type BookingRow = {
+  id: string
+  /** SHA-256 of the token in the email link; the raw token is never stored. */
+  token_hash: string
+  contact_id: string
+  campaign_id: string | null
+  status: BookingStatus
+  expires_at: string
+  consumed_at: string | null
+  stripe_session_id: string | null
+  stripe_promotion_code_id: string | null
+  calendly_event_uri: string | null
+  calendly_invitee_uri: string | null
+  scheduled_at: string | null
+  cancelled_at: string | null
+  list_amount_cents: number
+  charged_amount_cents: number | null
+  currency: string
+  created_at: string
+  updated_at: string
+}
+
 export type SegmentRow = {
   id: string
   name: string
@@ -190,6 +220,7 @@ export interface Database {
       segments: TableDef<SegmentRow>
       campaigns: TableDef<CampaignRow>
       campaign_sends: TableDef<CampaignSendRow>
+      bookings: TableDef<BookingRow>
     }
     Views: {
       /** contacts filtered to deleted_at IS NULL (security_invoker). */
@@ -204,6 +235,7 @@ export interface Database {
     Enums: {
       contact_status: ContactStatus
       campaign_status: CampaignStatus
+      booking_status: BookingStatus
     }
   }
 }
