@@ -33,6 +33,20 @@ describe('auth/routes', () => {
       expect(isPublicPath('/contacts/login')).toBe(false)
       expect(isPublicPath('/api/login')).toBe(false)
     })
+
+    it('opens the lead-facing booking pages', () => {
+      // Leads have no CRM account. The booking token is the credential instead.
+      expect(isPublicPath('/book/abc123')).toBe(true)
+      expect(isPublicPath('/book/abc123/scheduled')).toBe(true)
+      expect(isPublicPath('/api/booking/create-session')).toBe(true)
+    })
+
+    it('does not let the short /book prefix open unrelated routes', () => {
+      expect(isPublicPath('/bookkeeping')).toBe(false)
+      expect(isPublicPath('/books')).toBe(false)
+      expect(isPublicPath('/api/bookings')).toBe(false)
+      expect(isPublicPath('/api/bookings/export')).toBe(false)
+    })
   })
 
   describe('isWebhookPath', () => {

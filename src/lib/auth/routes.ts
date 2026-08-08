@@ -5,8 +5,17 @@
  * are directly unit-testable — a mistake here silently exposes the whole CRM.
  */
 
-/** Routes reachable without a session, so an unauthenticated user can sign in. */
-export const PUBLIC_PATHS = ['/login', '/auth/callback'] as const
+/**
+ * Routes reachable without a session.
+ *
+ * `/login` and `/auth/callback` exist so an unauthenticated user can sign in.
+ *
+ * `/book` and `/api/booking` are public by necessity: the visitor is a *lead* who has
+ * no CRM account and never will. They are not unprotected — the booking token is the
+ * credential (unguessable, single-use, expiring), checked on every request. See
+ * src/lib/booking/token.ts.
+ */
+export const PUBLIC_PATHS = ['/login', '/auth/callback', '/book', '/api/booking'] as const
 
 /**
  * Third-party webhook endpoints. These carry no session cookie, so the proxy must let
@@ -16,9 +25,13 @@ export const PUBLIC_PATHS = ['/login', '/auth/callback'] as const
  * would let any future route opt out of authentication just by being named `webhook`.
  *
  * Fail-closed by design — a new webhook is blocked until it is added here, which is the
- * safer direction to be wrong in. Stripe and Calendly endpoints join this list in Phase 5.
+ * safer direction to be wrong in.
  */
-export const WEBHOOK_PATHS = ['/api/integrations/emailoctopus/webhook'] as const
+export const WEBHOOK_PATHS = [
+  '/api/integrations/emailoctopus/webhook',
+  '/api/stripe/webhook',
+  '/api/calendly/webhook',
+] as const
 
 function normalise(pathname: string): string {
   // Treat '/x/' and '/x' identically, but keep the root as '/'.
