@@ -11,6 +11,53 @@
 
 export type ContactStatus = 'lead' | 'prospect' | 'customer' | 'archived'
 
+export type CampaignStatus =
+  | 'draft'
+  | 'in_review'
+  | 'approved'
+  | 'sending'
+  | 'sent'
+  | 'failed'
+
+export type SegmentRow = {
+  id: string
+  name: string
+  description: string | null
+  definition: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export type CampaignRow = {
+  id: string
+  name: string
+  segment_id: string | null
+  status: CampaignStatus
+  provider: string
+  /** EmailOctopus automation with the "Started via API" trigger. */
+  provider_automation_id: string | null
+  merge_fields: Record<string, string>
+  subject: string | null
+  notes: string | null
+  approved_at: string | null
+  approved_by: string | null
+  started_at: string | null
+  completed_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type CampaignSendRow = {
+  id: string
+  campaign_id: string
+  contact_id: string
+  status: 'pending' | 'sent' | 'failed' | 'skipped'
+  provider_reference: string | null
+  error: string | null
+  attempted_at: string | null
+  created_at: string
+}
+
 export type ContactRow = {
   id: string
   first_name: string
@@ -140,6 +187,9 @@ export interface Database {
       credentials: TableDef<CredentialRow>
       sync_logs: TableDef<SyncLogRow>
       webhook_events: TableDef<WebhookEventRow>
+      segments: TableDef<SegmentRow>
+      campaigns: TableDef<CampaignRow>
+      campaign_sends: TableDef<CampaignSendRow>
     }
     Views: {
       /** contacts filtered to deleted_at IS NULL (security_invoker). */
@@ -153,6 +203,7 @@ export interface Database {
     }
     Enums: {
       contact_status: ContactStatus
+      campaign_status: CampaignStatus
     }
   }
 }
