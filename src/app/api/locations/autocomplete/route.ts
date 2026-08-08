@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { getSession } from '@/lib/auth/dal';
+
+const NO_STORE = { 'Cache-Control': 'private, no-store' };
+
 export const dynamic = 'force-dynamic';
 
 type LocationSuggestion = {
@@ -113,18 +117,30 @@ function toSuggestion(result: GeoapifyAutocompleteResult): LocationSuggestion {
 }
 
 export async function GET(req: NextRequest) {
+  // Verified here, not just in proxy.ts: this route spends the client's Geoapify
+  // quota on every call, so an unauthenticated caller who finds the URL can run up
+  // their bill. proxy.ts is an optimistic gate by design.
+  const session = await getSession();
+
+  if (!session) {
+    return NextResponse.json(
+      { error: 'Authentication required.' },
+      { status: 401, headers: NO_STORE }
+    );
+  }
+
   const apiKey = process.env.GEOAPIFY_API_KEY?.trim();
 
   if (!apiKey) {
     return NextResponse.json(
       { error: 'Location autocomplete is not configured. Set GEOAPIFY_API_KEY on the server.' },
-      { status: 503 }
+      { status: 503, headers: NO_STORE }
     );
   }
 
   const query = req.nextUrl.searchParams.get('q')?.trim() || '';
   if (query.length < 3) {
-    return NextResponse.json({ suggestions: [] });
+    return NextResponse.json({ suggestions: [] }, { headers: NO_STORE });
   }
 
   const url = new URL('https://api.geoapify.com/v1/geocode/autocomplete');
@@ -149,7 +165,7 @@ export async function GET(req: NextRequest) {
     if (!response.ok) {
       return NextResponse.json(
         { error: `Geoapify autocomplete failed with status ${response.status}` },
-        { status: 502 }
+        { status: 502, headers: NO_STORE }
       );
     }
 
@@ -158,11 +174,11 @@ export async function GET(req: NextRequest) {
       ? payload.results.map(toSuggestion).filter((suggestion: LocationSuggestion) => suggestion.display_name)
       : [];
 
-    return NextResponse.json({ suggestions });
+    return NextResponse.json({ suggestions }, { headers: NO_STORE });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Location autocomplete request failed' },
-      { status: 502 }
+      { status: 502, headers: NO_STORE }
     );
   }
 }

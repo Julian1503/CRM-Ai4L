@@ -5,6 +5,9 @@ import { syncContactToEmailOctopus, type SubscriptionStatus } from '@/lib/emailO
 
 export const runtime = 'nodejs'
 
+// The error list echoes contact email addresses, so responses must not be cached.
+const NO_STORE = { 'Cache-Control': 'private, no-store' }
+
 type SyncContact = {
   email: string
   firstName?: string
@@ -41,7 +44,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const session = await getSession()
 
   if (!session) {
-    return NextResponse.json({ error: 'Authentication required.' }, { status: 401 })
+    return NextResponse.json(
+      { error: 'Authentication required.' },
+      { status: 401, headers: NO_STORE }
+    )
   }
 
   try {
@@ -51,7 +57,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const listId = typeof payload?.listId === 'string' ? payload.listId.trim() : ''
 
     if (!apiKey || !listId || !Array.isArray(payload.contacts)) {
-      return NextResponse.json({ error: 'Missing required sync parameters' }, { status: 400 })
+      return NextResponse.json(
+        { error: 'Missing required sync parameters' },
+        { status: 400, headers: NO_STORE }
+      )
     }
 
     const contacts = payload.contacts.filter(isSyncContact)
@@ -86,10 +95,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       skippedCount: payload.contacts.length - contacts.length,
       errorsCount: errors.length,
       errors: errors.length > 0 ? errors : undefined,
-    })
+    }, { headers: NO_STORE })
   } catch (error: unknown) {
     console.error('EmailOctopus Sync Error:', error)
 
-    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 })
+    return NextResponse.json(
+      { error: getErrorMessage(error) },
+      { status: 500, headers: NO_STORE }
+    )
   }
 }
