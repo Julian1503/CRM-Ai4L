@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, staging]
+  pull_request:
+
+# A newer push supersedes an in-flight run on the same ref.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      # Placeholders only. The suite must pass without real credentials — every secret
+      # fails closed, and tests that need a live service skip with an explicit reason
+      # rather than passing vacuously.
+      NEXT_PUBLIC_SUPABASE_URL: https://ci.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-anon-key
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Lint
+        run: npx eslint src --max-warnings=100
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # Enforces the coverage ratchet: thresholds sit just below the measured baseline,
+      # so any drop fails the build rather than going unnoticed.
+      - name: Unit tests and coverage
+        run: npm run test:coverage
+
+      - name: Production build
+        run: npm run build
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      # Runs against the production build. Signed-in specs skip without E2E_EMAIL /
+      # E2E_PASSWORD; the unauthenticated security specs always run.
+      - name: End-to-end tests
+        run: npx playwright test --project=chromium
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

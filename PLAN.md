@@ -27,7 +27,41 @@ spreadsheet import, status filter tabs, contact CRUD, dashboard) are not repeate
 | 5.1 — Booking tokens | **Complete** |
 | 5.2 — Stripe checkout | **Complete** (unverified against a live account) |
 | 5.3 — Calendly | **Complete** (needs a paid Calendly plan to function) |
-| 6 | Not started |
+| 6 — Hardening | **Complete** (a11y/visual regression partly blocked) |
+
+**Phase 6 delivered:** `src/lib/security.test.ts` — structural invariants asserting every
+API route authenticates, every webhook verifies its signature and reads the raw body,
+service-role usage stays confined to sessionless routes, and authenticated responses are
+uncacheable · label/input association across `ContactDrawer` · README rewritten from the
+create-next-app stub · GitHub Actions CI enforcing the whole gate.
+Gate: 679 unit tests green, lint 0 errors, typecheck clean, build clean, 22 E2E green.
+Coverage 87.4% statements / 79.7% branches / 71.9% functions.
+
+**The structural security test found three real defects on its first run:**
+1. `/api/locations/autocomplete` had **no session check** — it proxies to Geoapify with
+   the client's API key, so anyone reaching it could burn their quota. `proxy.ts` gated
+   it, but that is the optimistic layer only.
+2. `/api/import/parse` returned parsed spreadsheet contents with no `no-store`.
+3. `/api/integrations/emailoctopus/sync` echoed contact email addresses in its error
+   list, also cacheable.
+All three fixed. This is the class of failure that is silent — no throw, no failing
+test, nothing obviously wrong in review.
+
+**Accessibility:** every field in `ContactDrawer` was unlabelled for assistive
+technology — labels were siblings with no `htmlFor` (WCAG 1.3.1 / 3.3.2). Fixed for all
+15 fields and pinned by tests. `LoginForm` already carried correct `aria-invalid` /
+`aria-describedby`, now covered.
+
+**Not delivered, and why:** automated axe scans and visual-regression baselines at
+320/768/1024/1440 were scoped for this phase. They are only meaningful against rendered
+authenticated screens, which cannot be reached — the signed-in E2E specs skip for want
+of a Supabase account. Capturing baselines from the two public pages alone would give
+false confidence. Do this with the deferred `page.tsx` decomposition, once sign-in works.
+
+**Coverage:** statements and lines now exceed the 80% project standard. Branches (79.7%)
+and functions (71.9%) do not, and the shortfall is concentrated in `src/app/page.tsx` at
+42% function coverage. Raising those means doing the Phase 2.1 decomposition, not
+writing more tests around a component that resists them.
 
 **Phase 5 delivered:** `bookings` schema · `src/lib/booking/token.ts` (single-use,
 expiring, hashed) + `repository.ts` · `src/lib/stripe/` (config, $500→$0 checkout) ·
