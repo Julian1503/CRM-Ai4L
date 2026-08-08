@@ -266,8 +266,8 @@ export default function ContactDrawer({
             <h3 className={styles.sectionTitle}>Basic Info</h3>
             <div className={styles.grid2}>
               <div className={styles.field}>
-                <label className={styles.label}>First Name</label>
-                <input
+                <label className={styles.label} htmlFor="contact-first-name">First Name</label>
+                <input id="contact-first-name"
                   type="text"
                   className={styles.input}
                   value={formData.firstName || ''}
@@ -278,8 +278,8 @@ export default function ContactDrawer({
                 )}
               </div>
               <div className={styles.field}>
-                <label className={styles.label}>Last Name</label>
-                <input
+                <label className={styles.label} htmlFor="contact-last-name">Last Name</label>
+                <input id="contact-last-name"
                   type="text"
                   className={styles.input}
                   value={formData.lastName || ''}
@@ -292,8 +292,8 @@ export default function ContactDrawer({
             </div>
 
             <div className={styles.field}>
-              <label className={styles.label}>Preferred Name</label>
-              <input
+              <label className={styles.label} htmlFor="contact-preferred-name">Preferred Name</label>
+              <input id="contact-preferred-name"
                 type="text"
                 className={styles.input}
                 value={formData.preferredName || ''}
@@ -302,8 +302,8 @@ export default function ContactDrawer({
             </div>
 
             <div className={styles.field}>
-              <label className={styles.label}>Email Address</label>
-              <input
+              <label className={styles.label} htmlFor="contact-email-address">Email Address</label>
+              <input id="contact-email-address"
                 type="email"
                 className={styles.input}
                 value={formData.email || ''}
@@ -316,8 +316,8 @@ export default function ContactDrawer({
 
             <div className={styles.grid2}>
               <div className={styles.field}>
-                <label className={styles.label}>Mobile Number</label>
-                <input
+                <label className={styles.label} htmlFor="contact-mobile-number">Mobile Number</label>
+                <input id="contact-mobile-number"
                   type="text"
                   className={styles.input}
                   value={formData.mobileNumber || ''}
@@ -325,8 +325,8 @@ export default function ContactDrawer({
                 />
               </div>
               <div className={styles.field}>
-                <label className={styles.label}>Work Phone</label>
-                <input
+                <label className={styles.label} htmlFor="contact-work-phone">Work Phone</label>
+                <input id="contact-work-phone"
                   type="text"
                   className={styles.input}
                   value={formData.workPhone || ''}
@@ -340,8 +340,8 @@ export default function ContactDrawer({
           <div className={styles.section}>
             <h3 className={styles.sectionTitle}>Organisation</h3>
             <div className={styles.field}>
-              <label className={styles.label}>Organisation Name</label>
-              <input
+              <label className={styles.label} htmlFor="contact-organisation-name">Organisation Name</label>
+              <input id="contact-organisation-name"
                 type="text"
                 className={styles.input}
                 value={formData.organisationName || ''}
@@ -350,8 +350,8 @@ export default function ContactDrawer({
             </div>
             <div className={styles.grid2}>
               <div className={styles.field}>
-                <label className={styles.label}>Department</label>
-                <input
+                <label className={styles.label} htmlFor="contact-department">Department</label>
+                <input id="contact-department"
                   type="text"
                   className={styles.input}
                   value={formData.department || ''}
@@ -359,8 +359,8 @@ export default function ContactDrawer({
                 />
               </div>
               <div className={styles.field}>
-                <label className={styles.label}>Position / Title</label>
-                <input
+                <label className={styles.label} htmlFor="contact-position-title">Position / Title</label>
+                <input id="contact-position-title"
                   type="text"
                   className={styles.input}
                   value={formData.position || ''}
@@ -374,8 +374,8 @@ export default function ContactDrawer({
           <div className={styles.section}>
             <h3 className={styles.sectionTitle}>Location</h3>
             <div className={styles.field} style={{ position: 'relative' }} ref={suggestionsRef}>
-              <label className={styles.label}>Address</label>
-              <input
+              <label className={styles.label} htmlFor="contact-address">Address</label>
+              <input id="contact-address"
                 type="text"
                 className={styles.input}
                 value={formData.address || ''}
@@ -411,8 +411,8 @@ export default function ContactDrawer({
             
             <div className={styles.grid2}>
               <div className={styles.field}>
-                <label className={styles.label}>Suburb</label>
-                <input
+                <label className={styles.label} htmlFor="contact-suburb">Suburb</label>
+                <input id="contact-suburb"
                   type="text"
                   className={styles.input}
                   value={formData.suburb || ''}
@@ -420,10 +420,10 @@ export default function ContactDrawer({
                 />
               </div>
               <div className={styles.field} style={{ position: 'relative' }}>
-                <label className={styles.label}>State</label>
+                <label className={styles.label} htmlFor="contact-state">State</label>
                 {(formData.country || 'Australia').toLowerCase() === 'australia' ? (
                   <>
-                    <input
+                    <input id="contact-state"
                       type="text"
                       className={styles.input}
                       value={formData.state || ''}
@@ -445,8 +445,8 @@ export default function ContactDrawer({
             
             <div className={styles.grid2}>
               <div className={styles.field}>
-                <label className={styles.label}>Postcode</label>
-                <input
+                <label className={styles.label} htmlFor="contact-postcode">Postcode</label>
+                <input id="contact-postcode"
                   type="text"
                   className={styles.input}
                   value={formData.postcode || ''}
@@ -454,8 +454,8 @@ export default function ContactDrawer({
                 />
               </div>
               <div className={styles.field} style={{ position: 'relative' }} >
-                <label className={styles.label}>Country</label>
-                <input
+                <label className={styles.label} htmlFor="contact-country">Country</label>
+                <input id="contact-country"
                   type="text"
                   className={styles.input}
                   value={formData.country || ''}
@@ -485,7 +485,7 @@ export default function ContactDrawer({
 
             {formData.isCustomer && (
               <div className={styles.field} style={{ marginTop: '14px' }}>
-                <label className={styles.label}>Services Bought</label>
+                <label className={styles.label} htmlFor="contact-services-bought">Services Bought</label>
                 <div className={styles.servicesGrid}>
                   {availableServices.map((service) => (
                     <div 
@@ -493,7 +493,7 @@ export default function ContactDrawer({
                       className={styles.serviceItem}
                       onClick={() => handleServiceToggle(service.id)}
                     >
-                      <input
+                      <input id="contact-services-bought"
                         type="checkbox"
                         className={styles.checkbox}
                         checked={(formData.servicesBought || []).includes(service.id)}
