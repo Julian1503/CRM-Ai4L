@@ -176,6 +176,56 @@ test.describe('unauthenticated access', () => {
     expect(response.status()).toBe(401)
   })
 
+  test('lets a lead reach the booking page without an account', async ({ page }) => {
+    // Leads are not CRM users. Gating this behind /login would make every campaign
+    // link a dead end.
+    await page.goto('/book/some-token')
+
+    expect(new URL(page.url()).pathname).toBe('/book/some-token')
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+  })
+
+  test('shows one message for an unrecognised booking token', async ({ page }) => {
+    // Distinguishing "expired" from "not found" would let someone probe for valid
+    // tokens.
+    await page.goto('/book/definitely-not-a-real-token')
+
+    await expect(page.getByText(/no longer valid/i)).toBeVisible()
+  })
+
+  test('does not gate the booking checkout endpoint behind a session', async ({
+    request,
+  }) => {
+    const response = await request.post('/api/booking/create-session', {
+      data: {},
+      maxRedirects: 0,
+    })
+
+    // Any status but 401 proves it reached the handler; the token is the credential.
+    expect(response.status()).not.toBe(401)
+    expect([400, 404, 410, 503]).toContain(response.status())
+  })
+
+  test('rejects an unsigned Stripe webhook', async ({ request }) => {
+    const response = await request.post('/api/stripe/webhook', {
+      data: { id: 'evt_1', type: 'checkout.session.completed' },
+      maxRedirects: 0,
+    })
+
+    expect(response.status()).toBe(401)
+  })
+
+  test('rejects an unsigned Calendly webhook', async ({ request }) => {
+    // Without this an attacker could mark arbitrary consultations as booked.
+    const response = await request.post('/api/calendly/webhook', {
+      data: { event: 'invitee.created', payload: { uri: 'x' } },
+      maxRedirects: 0,
+    })
+
+    expect(response.status()).toBe(401)
+    expect(await response.json()).toMatchObject({ error: 'Invalid signature.' })
+  })
+
   test('serves static assets without redirecting them to /login', async ({ request }) => {
     // A matcher that catches assets breaks CSS and JS on the login page itself.
     const response = await request.get('/robots.txt', { maxRedirects: 0 })

@@ -24,7 +24,40 @@ spreadsheet import, status filter tabs, contact CRUD, dashboard) are not repeate
 | 4.4 — Segment & campaign API | **Complete** (8 routes, session-checked) |
 | 4.5 — Campaigns UI | **Complete** (unverified against a live database) |
 | 4.6 — AI copy generation | **On hold** — pending merge-field ceiling check |
-| 5–6 | Not started |
+| 5.1 — Booking tokens | **Complete** |
+| 5.2 — Stripe checkout | **Complete** (unverified against a live account) |
+| 5.3 — Calendly | **Complete** (needs a paid Calendly plan to function) |
+| 6 | Not started |
+
+**Phase 5 delivered:** `bookings` schema · `src/lib/booking/token.ts` (single-use,
+expiring, hashed) + `repository.ts` · `src/lib/stripe/` (config, $500→$0 checkout) ·
+`/api/booking/create-session` · `/api/stripe/webhook` · `/api/calendly/webhook` ·
+lead-facing `/book/[token]` and `/book/[token]/scheduled`.
+Gate: 585 unit tests green, lint 0 errors, typecheck clean, build clean, 22 E2E green.
+
+Design decisions worth reviewing:
+- **A single 100%-off coupon, not per-lead promotion codes.** The plan called for a
+  promotion code per lead with `max_redemptions: 1`; that is redundant because single
+  use is already enforced by the booking token, checked before a session is created.
+  One reusable coupon avoids an extra API call and an extra object per recipient.
+- **The link is consumed when checkout starts, not when payment completes.** A forwarded
+  copy therefore cannot open a second checkout even if the first is abandoned.
+- **`payment_intent_data` is deliberately not set.** At a $0 total Stripe creates no
+  PaymentIntent, so passing it may be rejected. The booking id travels in session
+  metadata, which is always present.
+- **`/book` and `/api/booking` are public.** The visitor is a lead with no CRM account;
+  the booking token is the credential. Prefix-collision tests guard `/bookkeeping` and
+  `/api/bookings`.
+
+Unverified against live services (no Stripe or Calendly account was available):
+- the Stripe Checkout call shape, and whether a 100%-off session behaves as expected
+  at $0;
+- the Calendly payload shape, and whether `utm_content` reliably returns under
+  `tracking` — there is an email fallback for when it does not.
+
+⚠️ **Calendly webhooks require a paid plan (Standard or above).** Without one no
+`invitee.created` ever arrives and bookings stay stuck at `paid` — the appointment
+happens but the CRM never records it. Confirm the client's plan before go-live.
 
 **Phase 4 delivered:** `segments` / `campaigns` / `campaign_sends` schema with the status
 machine enforced by a database trigger · `src/lib/marketing/segments.ts` (reuses the
