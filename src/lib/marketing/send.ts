@@ -1,0 +1,184 @@
+import type { SupabaseClient } from '@supabase/supabase-js'
+
+import type { CampaignRow, Database } from '@/lib/db/types'
+
+import type { CampaignProvider } from './providers/types'
+import { TokenBucket } from './rateLimiter'
+import type { SegmentMembers } from './segments'
+
+/**
+ * Campaign send fan-out.
+ *
+ * EmailOctopus has no broadcast send — the only trigger is
+ * `POST /automations/{id}/queue`, addressed to one contact. So a "send" here is a loop
+ * over the segment, paced against a token bucket, with every outcome written to
+ * `campaign_sends`.
+ *
+ * The ledger is what makes this survivable:
+ * - Resumable. Only `pending` rows are processed, so a run that dies mid-way picks up
+ *   where it left off rather than re-sending to everyone.
+ * - Deduplicated. `unique (campaign_id, contact_id)` is the guarantee, because with
+ *   "Allow contacts to repeat" enabled the provider will happily send twice.
+ * - Chunkable. `maxToProcess` bounds one invocation, so a 10k segment (~17 minutes of
+ *   queueing) can be spread across scheduled runs rather than one long request.
+ */
+
+export type SendProgress = {
+  total: number
+  sent: number
+  failed: number
+  remaining: number
+}
+
+type PendingSend = {
+  id: string
+  contact_id: string
+  contact: { email: string; first_name: string; last_name: string } | null
+}
+
+/**
+ * Creates one pending ledger row per segment member.
+ *
+ * Conflicts are ignored rather than erroring: re-preparing a campaign after adding
+ * contacts to its segment should top up the ledger, not fail.
+ */
+export async function prepareCampaignSends(
+  db: SupabaseClient<Database>,
+  campaignId: string,
+  members: SegmentMembers['members']
+): Promise<number> {
+  if (members.length === 0) {
+    return 0
+  }
+
+  const rows = members.map((member) => ({
+    campaign_id: campaignId,
+    contact_id: member.id,
+    status: 'pending' as const,
+  }))
+
+  const { error } = await db
+    .from('campaign_sends')
+    .upsert(rows, { onConflict: 'campaign_id,contact_id', ignoreDuplicates: true })
+
+  if (error) {
+    throw new Error(`Could not prepare campaign sends: ${error.message}`)
+  }
+
+  return rows.length
+}
+
+/**
+ * Processes pending sends for a campaign.
+ *
+ * A retryable failure leaves the row `pending` so a later run picks it up, and stalls
+ * the whole bucket — backing off one call while the rest of the fan-out keeps firing
+ * just prolongs the rate limiting. A non-retryable failure is recorded as `failed`,
+ * since retrying a bad request only burns quota.
+ */
+export async function executeCampaignSends(
+  db: SupabaseClient<Database>,
+  provider: CampaignProvider,
+  campaign: Pick<CampaignRow, 'id' | 'provider_automation_id' | 'merge_fields'>,
+  options: { maxToProcess?: number; bucket?: TokenBucket } = {}
+): Promise<SendProgress> {
+  const maxToProcess = options.maxToProcess ?? 500
+  const bucket =
+    options.bucket ??
+    new TokenBucket({
+      capacity: provider.capabilities.rateLimit.capacity,
+      refillPerSecond: provider.capabilities.rateLimit.refillPerSecond,
+    })
+
+  const { data, error } = await db
+    .from('campaign_sends')
+    .select('id, contact_id, contact:contacts(email, first_name, last_name)')
+    .eq('campaign_id', campaign.id)
+    .eq('status', 'pending')
+    .limit(maxToProcess)
+
+  if (error) {
+    throw new Error(`Could not load pending sends: ${error.message}`)
+  }
+
+  const pending = (data ?? []) as unknown as PendingSend[]
+  let sent = 0
+  let failed = 0
+
+  for (const row of pending) {
+    const contact = row.contact
+
+    if (!contact?.email) {
+      await markSend(db, row.id, 'failed', { error: 'Contact has no email address.' })
+      failed += 1
+      continue
+    }
+
+    // Paced before the call, not after a 429 — the limit is known up front.
+    await bucket.acquire()
+
+    // Personalisation must land on the contact first: the provider merges these
+    // fields into a template it owns, and cannot accept a body from us.
+    const mergeFields = campaign.merge_fields ?? {}
+    if (Object.keys(mergeFields).length > 0) {
+      const fieldOutcome = await provider.setContactFields(contact.email, mergeFields)
+
+      if (!fieldOutcome.ok) {
+        if (fieldOutcome.retryable) {
+          if (fieldOutcome.retryAfterMs) bucket.pauseFor(fieldOutcome.retryAfterMs)
+          continue
+        }
+
+        await markSend(db, row.id, 'failed', { error: fieldOutcome.error })
+        failed += 1
+        continue
+      }
+    }
+
+    const outcome = await provider.triggerSend({
+      campaignHandle: campaign.provider_automation_id ?? '',
+      email: contact.email,
+      firstName: contact.first_name ?? '',
+      lastName: contact.last_name ?? '',
+    })
+
+    if (outcome.ok) {
+      await markSend(db, row.id, 'sent', { reference: outcome.reference })
+      sent += 1
+      continue
+    }
+
+    if (outcome.retryable) {
+      // Left pending on purpose so the next run retries it.
+      if (outcome.retryAfterMs) bucket.pauseFor(outcome.retryAfterMs)
+      continue
+    }
+
+    await markSend(db, row.id, 'failed', { error: outcome.error })
+    failed += 1
+  }
+
+  return {
+    total: pending.length,
+    sent,
+    failed,
+    remaining: pending.length - sent - failed,
+  }
+}
+
+async function markSend(
+  db: SupabaseClient<Database>,
+  id: string,
+  status: 'sent' | 'failed',
+  details: { reference?: string | null; error?: string }
+): Promise<void> {
+  await db
+    .from('campaign_sends')
+    .update({
+      status,
+      provider_reference: details.reference ?? null,
+      error: details.error ?? null,
+      attempted_at: new Date().toISOString(),
+    })
+    .eq('id', id)
+}

@@ -20,6 +20,7 @@ const CHAINABLE = [
   'limit',
   'update',
   'insert',
+  'upsert',
   'delete',
   'single',
   'maybeSingle',
