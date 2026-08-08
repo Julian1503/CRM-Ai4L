@@ -1,0 +1,307 @@
+.layout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+/* Stated before anything else because the constraint is genuinely surprising:
+   you cannot author the email in this product. Styled as guidance, not an error. */
+.constraint {
+  padding: var(--space-md);
+  font-size: 0.85rem;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  background: var(--bg-cream);
+  border: 1px solid var(--accent-muted);
+  border-radius: var(--radius-sm);
+}
+
+.constraint strong {
+  color: var(--text-primary);
+}
+
+.error {
+  padding: 0.75rem 0.875rem;
+  font-size: 0.85rem;
+  color: #8a1c1c;
+  background: var(--danger-bg);
+  border: 1px solid rgba(239, 68, 68, 0.28);
+  border-radius: var(--radius-sm);
+}
+
+.panel {
+  padding: var(--space-lg);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 12px);
+  box-shadow: var(--shadow-sm);
+}
+
+.panelTitle {
+  margin: 0 0 0.25rem;
+  font-family: var(--font-heading);
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+
+.panelHint {
+  margin: 0 0 var(--space-lg);
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+.formRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: var(--space-md);
+  margin-bottom: var(--space-md);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3125rem;
+}
+
+.label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.input {
+  width: 100%;
+  padding: 0.5rem 0.6875rem;
+  font-family: var(--font-body);
+  font-size: 0.875rem;
+  color: var(--text-primary);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.input:focus-visible {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-muted);
+}
+
+/* The audience size is the most consequential number on the page — it decides both
+   who gets mail and how long the send runs. Given weight accordingly. */
+.previewRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+  padding: var(--space-md);
+  margin-bottom: var(--space-md);
+  background: var(--bg-surface);
+  border-radius: var(--radius-sm);
+}
+
+.preview {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.previewCount {
+  font-family: var(--font-heading);
+  font-size: 1.75rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--primary);
+}
+
+.previewLabel {
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+.previewMeta {
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+
+.previewMeta::before {
+  content: '·';
+  margin-right: 0.5rem;
+}
+
+.previewWarning {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--warning);
+}
+
+.primaryBtn,
+.secondaryBtn,
+.dangerBtn {
+  padding: 0.5rem 0.875rem;
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--duration-fast, 150ms) ease;
+}
+
+.primaryBtn {
+  color: var(--text-on-primary);
+  background: var(--primary);
+  border: 1px solid var(--primary);
+}
+
+.primaryBtn:hover:not(:disabled) {
+  background: var(--primary-hover);
+}
+
+.secondaryBtn {
+  color: var(--text-primary);
+  background: transparent;
+  border: 1px solid var(--border);
+}
+
+.secondaryBtn:hover:not(:disabled) {
+  border-color: var(--primary);
+}
+
+/* Sending queues real mail that cannot be recalled, so it does not look like an
+   ordinary button. */
+.dangerBtn {
+  color: #fff;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+.dangerBtn:hover:not(:disabled) {
+  background: #e07c05;
+}
+
+.primaryBtn:disabled,
+.secondaryBtn:disabled,
+.dangerBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.primaryBtn:focus-visible,
+.secondaryBtn:focus-visible,
+.dangerBtn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: var(--space-md) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.listItem,
+.campaignItem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: 0.75rem 0.875rem;
+  background: var(--bg-surface);
+  border-radius: var(--radius-sm);
+}
+
+.listItem {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.125rem;
+}
+
+.campaignMain {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.itemName {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.itemMeta {
+  font-size: 0.78125rem;
+  color: var(--text-secondary);
+}
+
+.empty {
+  padding: var(--space-md);
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+
+.status {
+  padding: 0.1875rem 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.status_draft {
+  color: var(--text-secondary);
+  background: rgba(113, 125, 138, 0.12);
+}
+
+.status_in_review {
+  color: #7a4405;
+  background: var(--warning-bg);
+}
+
+.status_approved {
+  color: #0b6b8a;
+  background: var(--info-bg);
+}
+
+.status_sending {
+  color: #7a4405;
+  background: var(--warning-bg);
+}
+
+.status_sent {
+  color: #146c35;
+  background: var(--success-bg);
+}
+
+.status_failed {
+  color: #8a1c1c;
+  background: var(--danger-bg);
+}
+
+.actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+@media (max-width: 768px) {
+  .campaignItem {
+    flex-wrap: wrap;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .primaryBtn,
+  .secondaryBtn,
+  .dangerBtn {
+    transition: none;
+  }
+}

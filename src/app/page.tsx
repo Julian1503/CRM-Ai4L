@@ -36,6 +36,7 @@ import { getSupabaseClient, hasSupabaseConfig } from '@/lib/supabaseClient';
 import { mapAndValidateRows } from '@/lib/excelParser';
 import { importContacts } from '@/lib/contacts/import';
 import FilterBar, { type StatusFilter } from '@/components/contacts/FilterBar';
+import MarketingView from '@/components/marketing/MarketingView';
 
 type ServiceOption = { id: string; name: string };
 type SyncLog = { id: string; event_text: string; status: string; created_at: string };
@@ -808,6 +809,25 @@ export default function App() {
               isLoading={isLoading}
             />
 
+          </>
+        )}
+
+        {currentView === 'campaigns' && (
+          <>
+            <header className={styles.headerSection}>
+              <div className={styles.titleGroup}>
+                <div className={styles.eyebrow}>
+                  <span className={styles.eyebrowDot} />
+                  Outreach
+                </div>
+                <h1 className={styles.pageTitle}>Segments and campaigns</h1>
+                <span className={styles.pageSubtitle}>
+                  Build an audience from the database, then approve and send.
+                </span>
+              </div>
+            </header>
+
+            <MarketingView jobTypes={jobTypes} />
           </>
         )}
 
