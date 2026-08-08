@@ -1,0 +1,124 @@
+/**
+ * @jest-environment node
+ */
+import { NextRequest } from 'next/server'
+
+import { createDbMock, createQueryBuilderMock } from '@/test/supabaseMock'
+
+const mockGetSession = jest.fn()
+const mockCreateServerClient = jest.fn()
+
+jest.mock('@/lib/auth/dal', () => ({ getSession: () => mockGetSession() }))
+jest.mock('@/lib/supabase/server', () => ({
+  createSupabaseServerClient: () => mockCreateServerClient(),
+}))
+
+import { GET, POST } from './route'
+
+const URL_PATH = 'https://crm.example.com/api/segments'
+
+function post(body: unknown) {
+  return POST(
+    new NextRequest(URL_PATH, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  )
+}
+
+function setup(insertResult: unknown = { data: { id: 'seg-1' }, error: null }) {
+  const segments = createQueryBuilderMock(insertResult)
+  const contacts = createQueryBuilderMock({ data: [], error: null, count: 12 })
+
+  const db = createDbMock((table: string) => (table === 'segments' ? segments : contacts))
+  mockCreateServerClient.mockResolvedValue(db)
+
+  return { db, segments, contacts }
+}
+
+describe('/api/segments', () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    mockGetSession.mockResolvedValue({ userId: 'u1', email: 'admin@example.com' })
+    setup()
+  })
+
+  it('refuses an unauthenticated read', async () => {
+    mockGetSession.mockResolvedValue(null)
+
+    expect((await GET()).status).toBe(401)
+    expect(mockCreateServerClient).not.toHaveBeenCalled()
+  })
+
+  it('refuses an unauthenticated write', async () => {
+    mockGetSession.mockResolvedValue(null)
+
+    expect((await post({ name: 'NSW leads' })).status).toBe(401)
+  })
+
+  it('requires a name', async () => {
+    expect((await post({ name: '   ' })).status).toBe(400)
+  })
+
+  it('rejects a non-object body', async () => {
+    const response = await POST(
+      new NextRequest(URL_PATH, { method: 'POST', body: 'not json' })
+    )
+
+    expect(response.status).toBe(400)
+  })
+
+  it('stores a normalised definition', async () => {
+    const { segments } = setup()
+
+    await post({ name: 'NSW electricians', definition: { state: 'nsw', jobTypeId: 'job-1' } })
+
+    const insert = segments.argsFor('insert') as [Record<string, unknown>]
+    expect(insert[0].definition).toEqual({ state: 'NSW', jobTypeId: 'job-1' })
+  })
+
+  it('discards junk from the definition rather than storing it', async () => {
+    // A stored definition drives a live query later; unrecognised keys must not
+    // survive into the database.
+    const { segments } = setup()
+
+    await post({
+      name: 'Odd',
+      definition: { state: 'VIC', sort: 'password', evil: 'DROP TABLE', pageSize: '999999' },
+    })
+
+    const insert = segments.argsFor('insert') as [Record<string, unknown>]
+    const definition = insert[0].definition as Record<string, unknown>
+
+    expect(definition).toEqual({ state: 'VIC' })
+    expect(definition).not.toHaveProperty('evil')
+    expect(definition).not.toHaveProperty('pageSize')
+  })
+
+  it('reports the member count of the new segment', async () => {
+    setup()
+
+    const response = await post({ name: 'All subscribed' })
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({ memberCount: 12 })
+  })
+
+  it('returns 409 for a duplicate name rather than a 500', async () => {
+    setup({ data: null, error: { code: '23505', message: 'duplicate key' } })
+
+    const response = await post({ name: 'NSW leads' })
+
+    expect(response.status).toBe(409)
+    await expect(response.json()).resolves.toMatchObject({
+      error: expect.stringMatching(/already exists/i),
+    })
+  })
+
+  it('surfaces an unexpected failure as 500', async () => {
+    setup({ data: null, error: { message: 'connection reset' } })
+
+    expect((await post({ name: 'x' })).status).toBe(500)
+  })
+})
