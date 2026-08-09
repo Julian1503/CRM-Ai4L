@@ -6,7 +6,7 @@ import { createDbMock, createQueryBuilderMock } from '@/test/supabaseMock'
 import type { CampaignProvider } from './providers/types'
 import { EMAILOCTOPUS_CAPABILITIES } from './providers/emailOctopus'
 import { TokenBucket } from './rateLimiter'
-import { executeCampaignSends, prepareCampaignSends } from './send'
+import { BOOKING_URL_MERGE_FIELD, executeCampaignSends, prepareCampaignSends } from './send'
 
 function contactRow(id: string, email = `${id}@example.com`) {
   return { id, contact_id: id, contact: { email, first_name: 'A', last_name: 'B' } }
@@ -170,6 +170,122 @@ describe('executeCampaignSends', () => {
     await executeCampaignSends(db as never, provider, campaign, { bucket: fastBucket() })
 
     expect(provider.setContactFields).not.toHaveBeenCalled()
+  })
+
+  describe('booking links', () => {
+    /** campaign_sends reads first, then bookings insert returns an id. */
+    function setupWithBookings(pending: unknown[]) {
+      const builder = createQueryBuilderMock([
+        { data: pending, error: null },
+        { data: { id: 'bk-1' }, error: null },
+        { data: { id: 'bk-2' }, error: null },
+        { data: { id: 'bk-3' }, error: null },
+      ])
+      return { db: createDbMock(builder), builder }
+    }
+
+    it('gives each recipient a booking link', async () => {
+      // Without this the campaign email has no call to action and the entire
+      // consultation funnel is unreachable.
+      const { db } = setupWithBookings([contactRow('c1')])
+      const provider = fakeProvider()
+
+      await executeCampaignSends(db as never, provider, campaign, {
+        bucket: fastBucket(),
+        baseUrl: 'https://crm.example.com',
+      })
+
+      const [, fields] = (provider.setContactFields as jest.Mock).mock.calls[0]
+      expect(fields[BOOKING_URL_MERGE_FIELD]).toMatch(
+        /^https:\/\/crm\.example\.com\/book\/[A-Za-z0-9_-]{43,}$/
+      )
+    })
+
+    it('gives different recipients different links', async () => {
+      // A shared link would let the first recipient consume everyone's booking.
+      const { db } = setupWithBookings([contactRow('c1'), contactRow('c2')])
+      const provider = fakeProvider()
+
+      await executeCampaignSends(db as never, provider, campaign, {
+        bucket: fastBucket(),
+        baseUrl: 'https://crm.example.com',
+      })
+
+      const calls = (provider.setContactFields as jest.Mock).mock.calls
+      expect(calls[0][1][BOOKING_URL_MERGE_FIELD]).not.toBe(
+        calls[1][1][BOOKING_URL_MERGE_FIELD]
+      )
+    })
+
+    it('keeps the campaign merge fields alongside the link', async () => {
+      const { db } = setupWithBookings([contactRow('c1')])
+      const provider = fakeProvider()
+
+      await executeCampaignSends(
+        db as never,
+        provider,
+        { ...campaign, merge_fields: { Headline: 'Free consult' } },
+        { bucket: fastBucket(), baseUrl: 'https://crm.example.com' }
+      )
+
+      const [, fields] = (provider.setContactFields as jest.Mock).mock.calls[0]
+      expect(fields.Headline).toBe('Free consult')
+      expect(fields[BOOKING_URL_MERGE_FIELD]).toBeDefined()
+    })
+
+    it('does not double the slash when baseUrl has a trailing one', async () => {
+      const { db } = setupWithBookings([contactRow('c1')])
+      const provider = fakeProvider()
+
+      await executeCampaignSends(db as never, provider, campaign, {
+        bucket: fastBucket(),
+        baseUrl: 'https://crm.example.com/',
+      })
+
+      const [, fields] = (provider.setContactFields as jest.Mock).mock.calls[0]
+      expect(fields[BOOKING_URL_MERGE_FIELD]).not.toContain('.com//book')
+    })
+
+    it('records the booking against the campaign and contact', async () => {
+      const { db, builder } = setupWithBookings([contactRow('c1')])
+
+      await executeCampaignSends(db as never, fakeProvider(), campaign, {
+        bucket: fastBucket(),
+        baseUrl: 'https://crm.example.com',
+      })
+
+      const insert = builder.argsFor('insert') as [Record<string, unknown>]
+      expect(insert[0]).toMatchObject({ contact_id: 'c1', campaign_id: 'camp-1' })
+    })
+
+    it('fails the recipient rather than sending a dead link', async () => {
+      // An email whose call to action goes nowhere is worse than no email.
+      const builder = createQueryBuilderMock([
+        { data: [contactRow('c1')], error: null },
+        { data: null, error: { message: 'insert denied' } },
+      ])
+      const provider = fakeProvider()
+
+      const progress = await executeCampaignSends(
+        createDbMock(builder) as never,
+        provider,
+        campaign,
+        { bucket: fastBucket(), baseUrl: 'https://crm.example.com' }
+      )
+
+      expect(progress).toMatchObject({ sent: 0, failed: 1 })
+      expect(provider.triggerSend).not.toHaveBeenCalled()
+    })
+
+    it('sends without a link when no baseUrl is configured', async () => {
+      const { db } = setup([contactRow('c1')])
+      const provider = fakeProvider()
+
+      await executeCampaignSends(db as never, provider, campaign, { bucket: fastBucket() })
+
+      expect(provider.setContactFields).not.toHaveBeenCalled()
+      expect(provider.triggerSend).toHaveBeenCalled()
+    })
   })
 
   it('records a non-retryable failure and moves on', async () => {

@@ -32,7 +32,7 @@ const CHUNK_SIZE = 200
  * ledger makes that safe and resumable.
  */
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: RouteContext
 ): Promise<NextResponse> {
   const guard = await requireSessionOr401()
@@ -118,8 +118,14 @@ export async function POST(
 
     const provider = createEmailOctopusProvider({ apiKey, listId })
 
+    // Booking links must be absolute and must point at the deployed host, not at
+    // whatever origin happened to serve this request. Falls back to the request origin
+    // so local development still produces working links.
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL?.trim() || request.nextUrl.origin
+
     const progress = await executeCampaignSends(db, provider, campaign, {
       maxToProcess: CHUNK_SIZE,
+      baseUrl,
     })
 
     // Anything still pending means a retryable failure; leave the campaign in

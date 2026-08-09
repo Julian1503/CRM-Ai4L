@@ -1,10 +1,20 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
+import { createBooking } from '@/lib/booking/repository'
 import type { CampaignRow, Database } from '@/lib/db/types'
 
 import type { CampaignProvider } from './providers/types'
 import { TokenBucket } from './rateLimiter'
 import type { SegmentMembers } from './segments'
+
+/**
+ * Merge field carrying each recipient's personal booking link.
+ *
+ * The EmailOctopus list must have a custom field with this tag, and the automation
+ * template must reference it (`{{BookingUrl}}`). Without both, the email sends with an
+ * empty link and the whole booking funnel silently does nothing.
+ */
+export const BOOKING_URL_MERGE_FIELD = 'BookingUrl'
 
 /**
  * Campaign send fan-out.
@@ -80,7 +90,16 @@ export async function executeCampaignSends(
   db: SupabaseClient<Database>,
   provider: CampaignProvider,
   campaign: Pick<CampaignRow, 'id' | 'provider_automation_id' | 'merge_fields'>,
-  options: { maxToProcess?: number; bucket?: TokenBucket } = {}
+  options: {
+    maxToProcess?: number
+    bucket?: TokenBucket
+    /**
+     * Origin for booking links, e.g. https://crm.example.com. When set, each recipient
+     * gets a personal single-use booking link merged into their contact fields — this
+     * is what connects a campaign to the consultation funnel.
+     */
+    baseUrl?: string
+  } = {}
 ): Promise<SendProgress> {
   const maxToProcess = options.maxToProcess ?? 500
   const bucket =
@@ -117,9 +136,34 @@ export async function executeCampaignSends(
     // Paced before the call, not after a 429 — the limit is known up front.
     await bucket.acquire()
 
+    // Mint the booking link for this recipient.
+    //
+    // Deliberately minted per attempt rather than reused: only the token's hash is
+    // stored, so an earlier token cannot be reconstructed on a retry. A superseded
+    // booking is harmless — its email never went out, and it expires on its own.
+    const mergeFields: Record<string, string> = { ...(campaign.merge_fields ?? {}) }
+
+    if (options.baseUrl) {
+      try {
+        const { token } = await createBooking(db, {
+          contactId: row.contact_id,
+          campaignId: campaign.id,
+        })
+
+        mergeFields[BOOKING_URL_MERGE_FIELD] = `${options.baseUrl.replace(/\/$/, '')}/book/${token}`
+      } catch (bookingError) {
+        // Sending an email whose call to action is a dead link is worse than not
+        // sending it, so this fails the recipient rather than proceeding.
+        await markSend(db, row.id, 'failed', {
+          error: bookingError instanceof Error ? bookingError.message : 'Could not create booking link.',
+        })
+        failed += 1
+        continue
+      }
+    }
+
     // Personalisation must land on the contact first: the provider merges these
     // fields into a template it owns, and cannot accept a body from us.
-    const mergeFields = campaign.merge_fields ?? {}
     if (Object.keys(mergeFields).length > 0) {
       const fieldOutcome = await provider.setContactFields(contact.email, mergeFields)
 
