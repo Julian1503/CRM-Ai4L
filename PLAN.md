@@ -28,6 +28,30 @@ spreadsheet import, status filter tabs, contact CRUD, dashboard) are not repeate
 | 5.2 — Stripe checkout | **Complete** (unverified against a live account) |
 | 5.3 — Calendly | **Complete** (needs a paid Calendly plan to function) |
 | 6 — Hardening | **Complete** (a11y/visual regression partly blocked) |
+| Gap closure | **Complete** — booking links wired; archive screen shipped |
+
+**Gap closure (post-Phase 6):** `createBooking()` existed and was tested but had **zero
+production callers** — the campaign send never minted booking tokens, so requirement 3.3
+("emails route recipients to book a consultation") did not work end to end. Both halves
+were built; the join was missing. Now each recipient gets a personal single-use link in
+the `BookingUrl` merge field. Also shipped the archive screen (`/api/contacts` +
+`ArchiveView`), completing "records archived, not permanently removed" — archiving
+worked, but nothing in the UI listed or restored them.
+
+⚠️ **EmailOctopus setup required for booking links to work:** the list needs a custom
+field tagged `BookingUrl`, and the automation template must reference `{{BookingUrl}}`.
+Without both, the email sends with an empty link and the funnel silently does nothing.
+`NEXT_PUBLIC_APP_URL` must also be set to the deployed origin.
+
+**A real runtime bug found by E2E, not by the build or unit tests:** `login/actions.ts`
+exported `INITIAL_LOGIN_STATE`, a plain object, from a `'use server'` module. Next.js
+rejects that at runtime — *"A 'use server' file can only export async functions"* — and
+the whole module fails to evaluate, taking the login page with it. **The login page had
+been broken since Phase 1.** It survived because the build does not check it, Jest
+imports the module without the Server Actions transform, and the E2E skip guard treated
+a crashed page as "Supabase not configured" and skipped. Fixed by moving the constant to
+`login/state.ts`; a structural test now asserts every `'use server'` module exports only
+async functions, and the E2E guard asserts the page rendered before deciding to skip.
 
 **Phase 6 delivered:** `src/lib/security.test.ts` — structural invariants asserting every
 API route authenticates, every webhook verifies its signature and reads the raw body,

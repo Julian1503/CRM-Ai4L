@@ -13,7 +13,7 @@
     "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit",
     "db:types": "supabase gen types typescript --linked --schema public > src/lib/db/types.ts",
-    "db:verify": "supabase db execute --file supabase/tests/verify_20260807000000.sql"
+    "db:verify": "supabase db query --linked --file supabase/tests/verify_20260807000000.sql"
   },
   "dependencies": {
     "@gsap/react": "^2.1.2",
