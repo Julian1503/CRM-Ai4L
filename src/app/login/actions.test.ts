@@ -18,7 +18,8 @@ jest.mock('next/navigation', () => ({
   redirect: (path: string) => mockRedirect(path),
 }))
 
-import { INITIAL_LOGIN_STATE, login } from './actions'
+import { login } from './actions'
+import { INITIAL_LOGIN_STATE } from './state'
 
 const ORIGINAL_ENV = process.env
 

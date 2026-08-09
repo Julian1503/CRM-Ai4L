@@ -158,3 +158,48 @@ describe('cache safety', () => {
     expect(usesHelper || setsHeader).toBe(true)
   })
 })
+
+describe("'use server' modules", () => {
+  const SRC_ROOT = join(process.cwd(), 'src')
+
+  function collectSourceFiles(dir: string, acc: string[] = []): string[] {
+    for (const entry of readdirSync(dir)) {
+      const full = join(dir, entry)
+
+      if (statSync(full).isDirectory()) {
+        collectSourceFiles(full, acc)
+      } else if (/\.(ts|tsx)$/.test(entry) && !/\.test\.(ts|tsx)$/.test(entry)) {
+        acc.push(full)
+      }
+    }
+
+    return acc
+  }
+
+  const serverActionFiles = collectSourceFiles(SRC_ROOT)
+    .map((file) => ({
+      path: relative(process.cwd(), file).split(sep).join('/'),
+      content: readFileSync(file, 'utf8'),
+    }))
+    .filter(({ content }) => /^\s*['"]use server['"]/m.test(content))
+
+  it.each(serverActionFiles.map((file) => [file.path, file] as const))(
+    '%s exports only async functions',
+    (_path, file) => {
+      // Next.js rejects any other export at runtime with "A 'use server' file can only
+      // export async functions", and the whole module fails to evaluate — taking the
+      // page with it. Neither the build nor Jest catches this: Jest imports the module
+      // directly, without the Server Actions transform. It only appears when the page
+      // is actually rendered, which is how it survived several phases here.
+      const valueExports = [...file.content.matchAll(/^export\s+(?!type\b|interface\b)(\w+)/gm)]
+        .map((match) => match[1])
+        .filter((keyword) => keyword !== 'async')
+
+      expect(valueExports).toEqual([])
+    }
+  )
+
+  it('finds the server action modules, so an empty sweep cannot pass', () => {
+    expect(serverActionFiles.length).toBeGreaterThan(0)
+  })
+})

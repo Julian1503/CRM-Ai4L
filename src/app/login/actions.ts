@@ -7,12 +7,11 @@ import { sanitizeNextPath } from '@/lib/auth/redirect'
 import { isSupabaseConfigured } from '@/lib/supabase/config'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 
-export type LoginState = {
-  error: string | null
-  fieldErrors?: { email?: string; password?: string }
-}
+import type { LoginState } from './state'
 
-export const INITIAL_LOGIN_STATE: LoginState = { error: null }
+// LoginState and INITIAL_LOGIN_STATE live in ./state because a 'use server' module may
+// only export async functions; exporting a constant from here breaks the whole module
+// at runtime.
 
 /**
  * Signs a user in with email and password.

@@ -5,7 +5,6 @@ let currentState: { error: string | null; fieldErrors?: Record<string, string> }
 
 jest.mock('./actions', () => ({
   login: (...args: unknown[]) => mockLogin(...args),
-  INITIAL_LOGIN_STATE: { error: null },
 }))
 
 // useActionState drives this component; the state is what matters, not the transition.

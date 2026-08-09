@@ -8,6 +8,23 @@ import { expect, test } from '@playwright/test'
  * live in smoke.spec.ts and skip until credentials exist.
  */
 
+/**
+ * True when the login page is rendering its "Supabase not configured" notice.
+ *
+ * Asserts the page actually rendered first. Without that check a *broken* login page
+ * looks identical to a configured one — the config notice simply is not there — so a
+ * runtime error silently turns into a skipped test. That is exactly how a 'use server'
+ * export violation survived several phases here.
+ */
+async function isConfigNoticeShown(page: import('@playwright/test').Page): Promise<boolean> {
+  await expect(page.getByRole('heading', { name: 'Sign in', level: 1 })).toBeVisible()
+
+  return page
+    .getByTestId('config-error')
+    .isVisible()
+    .catch(() => false)
+}
+
 test.describe('unauthenticated access', () => {
   test('redirects the dashboard to /login', async ({ page }) => {
     await page.goto('/')
@@ -30,10 +47,7 @@ test.describe('unauthenticated access', () => {
   test.describe('next parameter sanitisation', () => {
     test.beforeEach(async ({ page }) => {
       await page.goto('/login')
-      const configMissing = await page
-        .getByTestId('config-error')
-        .isVisible()
-        .catch(() => false)
+      const configMissing = await isConfigNoticeShown(page)
       test.skip(configMissing, 'Supabase not configured, so the login form is not rendered')
     })
 
@@ -76,6 +90,13 @@ test.describe('unauthenticated access', () => {
     // A redirect here would hand an anonymous caller an HTML page instead of a
     // refusal, and a 200 would hand them the client list.
     expect(await response.text()).not.toContain('EmailAddress')
+  })
+
+  test('protects the contact list, including the archive view', async ({ request }) => {
+    expect((await request.get('/api/contacts', { maxRedirects: 0 })).status()).toBe(401)
+    expect(
+      (await request.get('/api/contacts?includeArchived=true', { maxRedirects: 0 })).status()
+    ).toBe(401)
   })
 
   test('protects contact archival', async ({ request }) => {
@@ -241,10 +262,7 @@ test.describe('login page', () => {
   }) => {
     await page.goto('/login')
 
-    const configMissing = await page
-      .getByTestId('config-error')
-      .isVisible()
-      .catch(() => false)
+    const configMissing = await isConfigNoticeShown(page)
     test.skip(configMissing, 'Supabase not configured, so no form is rendered')
 
     await page.getByRole('button', { name: 'Sign in' }).click()
@@ -256,10 +274,7 @@ test.describe('login page', () => {
   test('states plainly when sign-in is unavailable', async ({ page }) => {
     await page.goto('/login')
 
-    const configMissing = await page
-      .getByTestId('config-error')
-      .isVisible()
-      .catch(() => false)
+    const configMissing = await isConfigNoticeShown(page)
     test.skip(!configMissing, 'Supabase is configured, so the form renders instead')
 
     // The gate fails closed. It must say why rather than silently looping.

@@ -3,7 +3,8 @@
 import { useActionState } from 'react'
 import { useFormStatus } from 'react-dom'
 
-import { INITIAL_LOGIN_STATE, login, type LoginState } from './actions'
+import { login } from './actions'
+import { INITIAL_LOGIN_STATE, type LoginState } from './state'
 import styles from './login.module.css'
 
 function SubmitButton() {
