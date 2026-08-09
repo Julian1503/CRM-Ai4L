@@ -37,6 +37,7 @@ import { mapAndValidateRows } from '@/lib/excelParser';
 import { importContacts } from '@/lib/contacts/import';
 import FilterBar, { type StatusFilter } from '@/components/contacts/FilterBar';
 import MarketingView from '@/components/marketing/MarketingView';
+import ArchiveView from '@/components/contacts/ArchiveView';
 
 type ServiceOption = { id: string; name: string };
 type SyncLog = { id: string; event_text: string; status: string; created_at: string };
@@ -809,6 +810,25 @@ export default function App() {
               isLoading={isLoading}
             />
 
+          </>
+        )}
+
+        {currentView === 'archive' && (
+          <>
+            <header className={styles.headerSection}>
+              <div className={styles.titleGroup}>
+                <div className={styles.eyebrow}>
+                  <span className={styles.eyebrowDot} />
+                  Retained Records
+                </div>
+                <h1 className={styles.pageTitle}>Archived contacts</h1>
+                <span className={styles.pageSubtitle}>
+                  Archived records are kept, never deleted, and can be restored.
+                </span>
+              </div>
+            </header>
+
+            <ArchiveView />
           </>
         )}
 
