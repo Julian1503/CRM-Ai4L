@@ -4,7 +4,9 @@
 import { createDbMock, createQueryBuilderMock } from '@/test/supabaseMock'
 
 import {
+  countBookingsByStatus,
   createBooking,
+  fetchBookings,
   findBookingByToken,
   markBookingCancelled,
   markBookingPaid,
@@ -195,5 +197,153 @@ describe('markBookingCancelled', () => {
     const builder = createQueryBuilderMock({ data: [], error: null })
 
     await expect(markBookingCancelled(createDbMock(builder) as never, 'x')).resolves.toBe(false)
+  })
+})
+
+describe('fetchBookings', () => {
+  const filters = {
+    status: null,
+    campaignId: null,
+    sort: 'created' as const,
+    dir: 'desc' as const,
+    page: 1,
+    pageSize: 50,
+  }
+
+  it('never selects the token hash into a browser-bound payload', async () => {
+    // Only a hash, so it opens nothing on its own -- but it is the credential's shadow
+    // and has no reason to reach a client. The cheapest guarantee is not selecting it.
+    const builder = createQueryBuilderMock({ data: [], error: null, count: 0 })
+
+    await fetchBookings(createDbMock(builder) as never, filters)
+
+    const [projection] = builder.argsFor('select') as [string]
+    expect(projection).not.toContain('token_hash')
+    expect(projection).not.toContain('*')
+  })
+
+  it('joins the contact and campaign so a row is readable without a second lookup', async () => {
+    const builder = createQueryBuilderMock({ data: [], error: null, count: 0 })
+
+    await fetchBookings(createDbMock(builder) as never, filters)
+
+    const [projection] = builder.argsFor('select') as [string]
+    expect(projection).toContain('contact:contacts(')
+    expect(projection).toContain('campaign:campaigns(')
+  })
+
+  it('asks for an exact count, so the pager reports the funnel not the page', async () => {
+    const builder = createQueryBuilderMock({ data: [], error: null, count: 0 })
+
+    await fetchBookings(createDbMock(builder) as never, filters)
+
+    const [, options] = builder.argsFor('select') as [string, { count?: string }]
+    expect(options.count).toBe('exact')
+  })
+
+  it('applies a status filter when one is set', async () => {
+    const builder = createQueryBuilderMock({ data: [], error: null, count: 0 })
+
+    await fetchBookings(createDbMock(builder) as never, { ...filters, status: 'booked' })
+
+    expect(builder.argsFor('eq')).toEqual(['status', 'booked'])
+  })
+
+  it('does not filter on status when none is set', async () => {
+    const builder = createQueryBuilderMock({ data: [], error: null, count: 0 })
+
+    await fetchBookings(createDbMock(builder) as never, filters)
+
+    expect(builder.allFor('eq')).toHaveLength(0)
+  })
+
+  it('scopes to a campaign when asked, so one send can be measured', async () => {
+    const builder = createQueryBuilderMock({ data: [], error: null, count: 0 })
+
+    await fetchBookings(createDbMock(builder) as never, { ...filters, campaignId: 'camp-1' })
+
+    expect(builder.argsFor('eq')).toEqual(['campaign_id', 'camp-1'])
+  })
+
+  it('maps the sort key to a column rather than passing it through', async () => {
+    const builder = createQueryBuilderMock({ data: [], error: null, count: 0 })
+
+    await fetchBookings(createDbMock(builder) as never, { ...filters, sort: 'scheduled' })
+
+    const [column, options] = builder.argsFor('order') as [
+      string,
+      { ascending: boolean; nullsFirst: boolean },
+    ]
+    expect(column).toBe('scheduled_at')
+    expect(options.ascending).toBe(false)
+    // Unscheduled bookings have no date; they belong after the real appointments.
+    expect(options.nullsFirst).toBe(false)
+  })
+
+  it('bounds the query to the requested page', async () => {
+    const builder = createQueryBuilderMock({ data: [], error: null, count: 0 })
+
+    await fetchBookings(createDbMock(builder) as never, { ...filters, page: 2, pageSize: 25 })
+
+    expect(builder.argsFor('range')).toEqual([25, 49])
+  })
+
+  it('returns the rows and the total', async () => {
+    const rows = [{ id: 'b1', status: 'booked' }]
+    const builder = createQueryBuilderMock({ data: rows, error: null, count: 42 })
+
+    const result = await fetchBookings(createDbMock(builder) as never, filters)
+
+    expect(result.rows).toEqual(rows)
+    expect(result.total).toBe(42)
+  })
+
+  it('surfaces a database failure rather than reporting an empty funnel', async () => {
+    // An empty list and a failed query look identical on screen, and one of them is a
+    // silent claim that no lead ever booked.
+    const builder = createQueryBuilderMock({ data: null, error: { message: 'denied' }, count: null })
+
+    await expect(fetchBookings(createDbMock(builder) as never, filters)).rejects.toThrow('denied')
+  })
+})
+
+describe('countBookingsByStatus', () => {
+  it('returns a count for every status', async () => {
+    const builder = createQueryBuilderMock({ count: 3, error: null })
+
+    const counts = await countBookingsByStatus(createDbMock(builder) as never)
+
+    expect(counts).toEqual({
+      pending: 3,
+      checkout_started: 3,
+      paid: 3,
+      booked: 3,
+      cancelled: 3,
+      expired: 3,
+    })
+  })
+
+  it('counts with head:true so it never pulls rows back to count them', async () => {
+    const builder = createQueryBuilderMock({ count: 0, error: null })
+
+    await countBookingsByStatus(createDbMock(builder) as never)
+
+    const [, options] = builder.argsFor('select') as [string, { head?: boolean; count?: string }]
+    expect(options.head).toBe(true)
+    expect(options.count).toBe('exact')
+  })
+
+  it('treats a null count as zero rather than undefined', async () => {
+    const builder = createQueryBuilderMock({ count: null, error: null })
+
+    const counts = await countBookingsByStatus(createDbMock(builder) as never)
+
+    expect(counts.booked).toBe(0)
+  })
+
+  it('surfaces a failure', async () => {
+    const builder = createQueryBuilderMock({ count: null, error: { message: 'denied' } })
+
+    await expect(countBookingsByStatus(createDbMock(builder) as never)).rejects.toThrow('denied')
   })
 })

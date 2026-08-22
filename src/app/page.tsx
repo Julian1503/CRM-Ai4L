@@ -40,6 +40,7 @@ import { importContacts } from '@/lib/contacts/import';
 import FilterBar, { type StatusFilter } from '@/components/contacts/FilterBar';
 import MarketingView from '@/components/marketing/MarketingView';
 import ArchiveView from '@/components/contacts/ArchiveView';
+import BookingsView from '@/components/bookings/BookingsView';
 import Pagination from '@/components/ui/Pagination';
 
 type ServiceOption = { id: string; name: string };
@@ -726,6 +727,9 @@ export default function App() {
         postcode: data.postcode || null,
         country: data.country || null,
         organisation_id: orgId,
+        // Empty string is the "Not set" option, which has to become NULL rather than an
+        // empty uuid -- Postgres rejects the latter, and the drawer sends '' for it.
+        job_type_id: data.jobTypeId || null,
         department: data.department || null,
         position: data.position || null,
         notes: data.notes || null,
@@ -1026,6 +1030,26 @@ export default function App() {
             </header>
 
             <MarketingView jobTypes={jobTypes} />
+          </>
+        )}
+
+        {currentView === 'bookings' && (
+          <>
+            <header className={styles.headerSection}>
+              <div className={styles.titleGroup}>
+                <div className={styles.eyebrow}>
+                  <span className={styles.eyebrowDot} />
+                  Consultations
+                </div>
+                <h1 className={styles.pageTitle}>Consultation bookings</h1>
+                <span className={styles.pageSubtitle}>
+                  Every booking link a campaign sent, and how far each one got — from
+                  the $500 consultation claimed at $0 through to a scheduled time.
+                </span>
+              </div>
+            </header>
+
+            <BookingsView />
           </>
         )}
 
@@ -1541,6 +1565,7 @@ export default function App() {
         onSave={handleSaveContact}
         onDelete={handleArchiveContact}
         availableServices={services}
+        jobTypes={jobTypes}
       />
     </div>
   );

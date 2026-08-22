@@ -403,3 +403,13 @@ fieldset.field > legend {
   outline: 2px solid var(--border-focus, currentColor);
   outline-offset: 2px;
 }
+
+/* Explains what a field is actually used for, where the label alone does not.
+   Job type in particular looks optional until you know the segments depend on it. */
+.hint {
+  display: block;
+  margin-top: 0.3rem;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+}

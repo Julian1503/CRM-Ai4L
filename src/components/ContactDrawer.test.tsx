@@ -30,6 +30,11 @@ const services = [
   { id: 'svc-2', name: 'Training' },
 ]
 
+const jobTypes = [
+  { id: 'jt-1', name: 'Registered Training Organisation' },
+  { id: 'jt-2', name: 'Learning and Development' },
+]
+
 function setup(overrides: Partial<Parameters<typeof ContactDrawer>[0]> = {}) {
   const onSave = jest.fn().mockResolvedValue(undefined)
   const onClose = jest.fn()
@@ -42,6 +47,7 @@ function setup(overrides: Partial<Parameters<typeof ContactDrawer>[0]> = {}) {
       onSave={onSave}
       onDelete={onDelete}
       availableServices={services}
+      jobTypes={jobTypes}
       {...overrides}
     />
   )
@@ -401,6 +407,69 @@ describe('ContactDrawer', () => {
 
       await waitFor(() => expect(onSave).toHaveBeenCalled())
       expect(onSave.mock.calls[0][0].subscribedToNewsletter).toBe(true)
+    })
+  })
+})
+
+describe('job type', () => {
+  it('offers every job type, plus an explicit unset option', () => {
+    setup()
+
+    const select = screen.getByTestId('contact-job-type') as HTMLSelectElement
+    const options = Array.from(select.options).map((option) => option.textContent)
+
+    expect(options).toEqual([
+      'Not set',
+      'Registered Training Organisation',
+      'Learning and Development',
+    ])
+  })
+
+  it('is labelled, so it is reachable by assistive technology', () => {
+    setup()
+
+    expect(screen.getByLabelText(/job type/i)).toBe(screen.getByTestId('contact-job-type'))
+  })
+
+  it('shows the job type the contact already has', () => {
+    setup({ contact: { ...contact, jobTypeId: 'jt-2' } })
+
+    expect((screen.getByTestId('contact-job-type') as HTMLSelectElement).value).toBe('jt-2')
+  })
+
+  it('saves a newly chosen job type', async () => {
+    const { onSave } = setup()
+
+    fireEvent.change(screen.getByTestId('contact-job-type'), { target: { value: 'jt-1' } })
+    fireEvent.click(screen.getByRole('button', { name: /save/i }))
+
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ jobTypeId: 'jt-1' }))
+    })
+  })
+
+  it('does not clear an existing job type when another field is edited', async () => {
+    // The drawer rebuilds its draft from the contact on open. If jobTypeId were left
+    // out of that seed, every ordinary edit would save it as empty and silently undo
+    // the classification the tag-sync script assigned.
+    const { onSave } = setup({ contact: { ...contact, jobTypeId: 'jt-2' } })
+
+    fireEvent.change(screen.getByLabelText(/preferred name/i), { target: { value: 'Addy' } })
+    fireEvent.click(screen.getByRole('button', { name: /save/i }))
+
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ jobTypeId: 'jt-2' }))
+    })
+  })
+
+  it('sends an empty value when the job type is cleared, not the previous id', async () => {
+    const { onSave } = setup({ contact: { ...contact, jobTypeId: 'jt-2' } })
+
+    fireEvent.change(screen.getByTestId('contact-job-type'), { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: /save/i }))
+
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ jobTypeId: '' }))
     })
   })
 })

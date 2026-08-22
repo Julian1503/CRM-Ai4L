@@ -5,9 +5,9 @@
  * retirement would break the only working integration in the product.
  *
  * ---------------------------------------------------------------------------
- * NOTE: verified against the documented v2 shape, not against a live account — no API
- * key was available. Confirm the endpoint, the `status` vocabulary and the error body
- * before go-live; all three are isolated in this file.
+ * Endpoint verified against the live API (2026-08-22): `PUT /lists/{id}/contacts` is
+ * create-or-update and validates `email_address` in the body. The `status` vocabulary
+ * and error body are still taken from the documentation.
  * ---------------------------------------------------------------------------
  */
 
@@ -68,6 +68,12 @@ async function readErrorMessage(response: Response): Promise<string> {
 /**
  * Creates or updates a contact on an EmailOctopus list.
  *
+ * PUT, not POST. `POST /lists/{id}/contacts` *creates*, and answers 409 for an address
+ * already on the list — which, syncing an established list, is nearly every contact. A
+ * 409 is a 4xx, so the retry logic below correctly treats it as fatal, and a full sync
+ * would die on its first existing contact. `PUT` is the create-or-update form and is
+ * what the campaign send path already uses (marketing/providers/emailOctopus.ts).
+ *
  * Retries only on 429 and 5xx. A 4xx is a request problem — retrying it just burns
  * quota and delays the real error.
  */
@@ -98,7 +104,7 @@ export async function syncContactToEmailOctopus(
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const response = await fetch(url, {
-      method: 'POST',
+      method: 'PUT',
       headers: {
         // v2 authenticates by bearer token. v1.6 put the key in the body, which
         // leaked it into request logs.

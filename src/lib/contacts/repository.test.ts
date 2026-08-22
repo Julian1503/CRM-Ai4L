@@ -1,7 +1,9 @@
 import { createDbMock, createQueryBuilderMock } from '@/test/supabaseMock'
 
 import { parseContactFilters } from './query'
-import { applyContactFilters, archiveContact, contactSource, restoreContact } from './repository'
+import { applyContactFilters, archiveContact, contactSource, restoreContact,
+  findOrganisationIdsMatching,
+} from './repository'
 
 describe('contactSource', () => {
   it('reads through the active_contacts view by default', () => {
@@ -163,5 +165,53 @@ describe('restoreContact', () => {
     await expect(restoreContact(db as never, 'contact-1')).rejects.toThrow(
       /already an active contact with that email/i
     )
+  })
+})
+
+describe('findOrganisationIdsMatching', () => {
+  it('returns the ids of organisations whose name matches', async () => {
+    const builder = createQueryBuilderMock({ data: [{ id: 'o1' }, { id: 'o2' }], error: null })
+
+    const ids = await findOrganisationIdsMatching(createDbMock(builder) as never, 'acme')
+
+    expect(ids).toEqual(['o1', 'o2'])
+    expect(builder.argsFor('ilike')).toEqual(['name', '%acme%'])
+  })
+
+  it('escapes LIKE metacharacters so a term matches literally', () => {
+    const builder = createQueryBuilderMock({ data: [], error: null })
+
+    return findOrganisationIdsMatching(createDbMock(builder) as never, '100%_test').then(() => {
+      // Unescaped, `%` matches everything and `_` matches any character.
+      expect(builder.argsFor('ilike')).toEqual(['name', String.raw`%100\%\_test%`])
+    })
+  })
+
+  it('bounds the lookup, because the ids end up in a URL', async () => {
+    const builder = createQueryBuilderMock({ data: [], error: null })
+
+    await findOrganisationIdsMatching(createDbMock(builder) as never, 'a')
+
+    expect(builder.argsFor('limit')).toEqual([100])
+  })
+
+  it('does not query at all for an empty term', async () => {
+    const db = createDbMock(createQueryBuilderMock({ data: [], error: null }))
+
+    expect(await findOrganisationIdsMatching(db as never, '  ')).toEqual([])
+    expect(db.from).not.toHaveBeenCalled()
+  })
+
+  it('degrades to no organisation matches rather than failing the whole search', async () => {
+    // Organisation is one of several fields the search covers. Losing it should narrow
+    // the results, not turn a search into an error page.
+    const builder = createQueryBuilderMock({ data: null, error: { message: 'denied' } })
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+
+    await expect(
+      findOrganisationIdsMatching(createDbMock(builder) as never, 'acme')
+    ).resolves.toEqual([])
+
+    warn.mockRestore()
   })
 })

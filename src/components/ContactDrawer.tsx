@@ -15,6 +15,15 @@ interface ContactDrawerProps {
   onSave: (data: ContactFormData) => Promise<void>;
   onDelete?: (id: string) => Promise<void>;
   availableServices: { id: string; name: string }[];
+  /**
+   * Job types available to assign.
+   *
+   * Job type is one of the contact fields the client filters and segments on, and until
+   * now it could only be set by a spreadsheet import or the EmailOctopus tag-sync
+   * script -- so a contact added by hand, or created by the newsletter webhook, was
+   * permanently invisible to every job-type segment.
+   */
+  jobTypes: { id: string; name: string }[];
 }
 
 type ContactFormData = Partial<Omit<TableContact, 'organisation'>> & {
@@ -40,6 +49,7 @@ export default function ContactDrawer({
   onSave,
   onDelete,
   availableServices,
+  jobTypes,
 }: ContactDrawerProps) {
   const [formData, setFormData] = useState<ContactFormData>({});
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
@@ -181,6 +191,10 @@ export default function ContactDrawer({
         department: contact.department || '',
         position: contact.position || '',
         notes: contact.notes || '',
+        // Must be seeded from the contact: without it an edit to any other field saves
+        // jobTypeId as undefined and silently clears a classification the tag-sync
+        // script had already assigned.
+        jobTypeId: contact.jobTypeId || '',
         isCustomer: contact.isCustomer ?? false,
         servicesBought: contact.servicesBought || [],
         subscribedToNewsletter: contact.subscribedToNewsletter ?? false,
@@ -370,6 +384,25 @@ export default function ContactDrawer({
                   onChange={(e) => handleInputChange('position', e.target.value)}
                 />
               </div>
+            </div>
+            <div className={styles.field}>
+              <label className={styles.label} htmlFor="contact-job-type">Job Type</label>
+              <select id="contact-job-type"
+                className={styles.input}
+                value={formData.jobTypeId || ''}
+                onChange={(e) => handleInputChange('jobTypeId', e.target.value)}
+                data-testid="contact-job-type"
+              >
+                <option value="">Not set</option>
+                {jobTypes.map((jobType) => (
+                  <option key={jobType.id} value={jobType.id}>
+                    {jobType.name}
+                  </option>
+                ))}
+              </select>
+              <span className={styles.hint}>
+                Drives the job-type filter and every segment built on it.
+              </span>
             </div>
           </div>
 

@@ -27,12 +27,20 @@ describe('createConsultationCheckout', () => {
     expect(args.discounts).toEqual([{ coupon: 'coupon_1' }])
   })
 
-  it('does not demand a card for a zero-value checkout', async () => {
+  it('does not send payment_method_collection, which Stripe allows only in subscription mode', async () => {
+    // The parameter reads as exactly what this flow wants ("do not collect a card when
+    // the total is 0"), which is why it was here. But the Stripe API restricts it to
+    // `mode: 'subscription'`, so sending it from a `payment`-mode session risks the
+    // create call being rejected outright -- and a rejected session means the lead
+    // sees "Could not start booking" instead of a checkout.
+    //
+    // It is also unnecessary: a payment-mode session whose total is 0 already skips
+    // payment-method collection on Stripe's side.
     const { stripe, create } = stripeDouble()
 
     await createConsultationCheckout(stripe, params)
 
-    expect(create.mock.calls[0][0].payment_method_collection).toBe('if_required')
+    expect(create.mock.calls[0][0]).not.toHaveProperty('payment_method_collection')
   })
 
   it('carries the booking id so the webhook can attribute the payment', async () => {

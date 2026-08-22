@@ -39,9 +39,12 @@ export async function createConsultationCheckout(
     line_items: [{ price: params.priceId, quantity: 1 }],
     discounts: [{ coupon: params.couponId }],
 
-    // With a 100% discount the total is zero, and Stripe should not demand a card for
-    // a zero-value checkout.
-    payment_method_collection: 'if_required',
+    // `payment_method_collection: 'if_required'` deliberately NOT set. It describes
+    // exactly what is wanted here -- skip the card when the total is zero -- but the
+    // Stripe API restricts it to `mode: 'subscription'`, and sending a parameter that
+    // is invalid for the mode risks the create call being rejected. A payment-mode
+    // session that totals zero after the coupon already skips collection on Stripe's
+    // side, so the parameter buys nothing and costs the whole booking if it throws.
 
     customer_email: params.email,
     success_url: params.successUrl,

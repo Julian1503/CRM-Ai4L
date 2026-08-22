@@ -6,6 +6,7 @@ import {
   contactFiltersToSearchParams,
   escapeLikePattern,
   parseContactFilters,
+  SEARCH_ORGANISATION_CAP,
 } from './query'
 
 describe('parseContactFilters', () => {
@@ -228,5 +229,42 @@ describe('contactFiltersToSearchParams', () => {
     const reparsed = parseContactFilters(contactFiltersToSearchParams(original))
 
     expect(reparsed.q).toBe('ada lovelace')
+  })
+})
+
+describe('buildSearchOrExpression — organisation', () => {
+  it('widens the search to contacts of a matching organisation', () => {
+    const expression = buildSearchOrExpression('acme', ['org-1', 'org-2'])
+
+    expect(expression).toContain('organisation_id.in.(org-1,org-2)')
+  })
+
+  it('omits the organisation clause when nothing matched', () => {
+    const expression = buildSearchOrExpression('acme', [])
+
+    expect(expression).not.toContain('organisation_id')
+  })
+
+  it('drops an id that is not a plain id shape', () => {
+    // Ids come from our own database, but they are still interpolated into the
+    // PostgREST grammar — a value carrying a comma or a paren would inject a clause.
+    const expression = buildSearchOrExpression('acme', ['org-1', 'x),status.eq.archived,('])
+
+    expect(expression).toContain('organisation_id.in.(org-1)')
+    expect(expression).not.toContain('status.eq.archived')
+  })
+
+  it('caps how many organisations one term can expand to', () => {
+    // PostgREST filters travel in the URL; an unbounded list fails on request length.
+    const ids = Array.from({ length: SEARCH_ORGANISATION_CAP + 50 }, (_, i) => `org-${i}`)
+
+    const expression = buildSearchOrExpression('a', ids)!
+    const listed = expression.slice(expression.indexOf('organisation_id.in.(')).split(',')
+
+    expect(listed).toHaveLength(SEARCH_ORGANISATION_CAP)
+  })
+
+  it('still returns null for an empty term even with organisations supplied', () => {
+    expect(buildSearchOrExpression('   ', ['org-1'])).toBeNull()
   })
 })

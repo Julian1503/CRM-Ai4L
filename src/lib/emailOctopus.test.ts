@@ -36,13 +36,21 @@ describe('syncContactToEmailOctopus', () => {
   })
 
   describe('v2 contract', () => {
-    it('posts to the v2 contacts endpoint', async () => {
+    it('upserts against the v2 contacts endpoint', async () => {
+      // PUT, not POST. `POST /lists/{id}/contacts` creates, and answers 409 for an
+      // address already on the list -- which, for a full sync of an established list,
+      // is nearly every contact. A 409 is a 4xx, so the retry logic correctly treats
+      // it as fatal and the sync dies on its first existing contact.
+      //
+      // `PUT /lists/{id}/contacts` is create-or-update, verified against the live API.
+      // It is also what the campaign send path already uses (marketing/providers).
       mockFetch.mockResolvedValueOnce(ok())
 
       await sync()
 
-      const [url] = mockFetch.mock.calls[0]
+      const [url, init] = mockFetch.mock.calls[0]
       expect(url).toBe('https://api.emailoctopus.com/lists/list-1/contacts')
+      expect(init.method).toBe('PUT')
     })
 
     it('authenticates with a bearer token, not a key in the body', async () => {

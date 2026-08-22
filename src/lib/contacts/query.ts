@@ -37,7 +37,14 @@ export const SORT_COLUMNS: Record<ContactSortKey, string> = {
   created: 'created_at',
 }
 
-/** Columns the free-text search covers. */
+/**
+ * Columns on `contacts` the free-text search covers.
+ *
+ * Organisation is searched too, but it lives on a joined table rather than here — see
+ * `buildSearchOrExpression`. Phone numbers are deliberately excluded: they are stored
+ * as typed, so a substring search over them matches on formatting as often as on the
+ * number, and the client's data has none of them populated in any case.
+ */
 const SEARCH_COLUMNS = ['first_name', 'last_name', 'email'] as const
 
 export type ContactFilters = {
@@ -106,13 +113,32 @@ function quoteFilterValue(value: string): string {
 }
 
 /**
+ * Upper bound on how many organisations a search term may expand to.
+ *
+ * Organisation is not a column on `contacts`, so searching it means resolving matching
+ * organisation ids first and adding them to the filter as `organisation_id.in.(...)`.
+ * PostgREST filters travel in the URL, so an unbounded list of ids is a request that
+ * fails on length rather than a slow one. A term matching more than this many
+ * organisations is too broad to be a useful search anyway.
+ */
+export const SEARCH_ORGANISATION_CAP = 100
+
+/**
  * Builds the `.or()` expression for a free-text search, or null when there is no term.
  *
- * NOTE: the quoting behaviour is pinned by unit tests but has not been exercised
- * against a live PostgREST instance — no database was available. Worth confirming with
- * a term containing a comma and a quote once the Supabase project exists.
+ * `organisationIds` widens the search to contacts belonging to organisations whose name
+ * matched. They are resolved by the caller because it takes a second query, and this
+ * function is pure so the escaping can be tested without a database.
+ *
+ * Verified against live PostgREST (2026-08-22): a term crafted to close its own quote
+ * and append `status.eq.archived` is accepted as a literal search string and matches 0
+ * rows, where a successful injection would have returned the whole table. The escaping
+ * below is what makes that true, not PostgREST's own parsing.
  */
-export function buildSearchOrExpression(term: string): string | null {
+export function buildSearchOrExpression(
+  term: string,
+  organisationIds: readonly string[] = []
+): string | null {
   const trimmed = term.trim()
 
   if (trimmed === '') {
@@ -120,8 +146,20 @@ export function buildSearchOrExpression(term: string): string | null {
   }
 
   const pattern = quoteFilterValue(`%${escapeLikePattern(trimmed)}%`)
+  const clauses = SEARCH_COLUMNS.map((column) => `${column}.ilike.${pattern}`)
 
-  return SEARCH_COLUMNS.map((column) => `${column}.ilike.${pattern}`).join(',')
+  // Ids come from our own database, never from the user -- but they are still
+  // interpolated into the PostgREST grammar, so anything that is not a plain id shape
+  // is dropped rather than trusted.
+  const safeIds = organisationIds
+    .filter((id) => /^[0-9a-zA-Z-]+$/.test(id))
+    .slice(0, SEARCH_ORGANISATION_CAP)
+
+  if (safeIds.length > 0) {
+    clauses.push(`organisation_id.in.(${safeIds.join(',')})`)
+  }
+
+  return clauses.join(',')
 }
 
 /** Serialises filters back to a query string, omitting defaults. */

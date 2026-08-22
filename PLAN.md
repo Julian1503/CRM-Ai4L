@@ -29,6 +29,7 @@ spreadsheet import, status filter tabs, contact CRUD, dashboard) are not repeate
 | 5.3 — Calendly | **Complete** (needs a paid Calendly plan to function) |
 | 6 — Hardening | **Complete** — coverage now clears 80% on all four metrics |
 | Gap closure | **Complete** — booking links wired; archive screen shipped |
+| Audit closure | **Complete** — bookings screen; 2 live-API defects fixed |
 
 **Stage 1 prepared (2026-08-22): everything deployable that does not need the account.**
 
@@ -62,6 +63,77 @@ call.
 Still blocked, and only on the client: the Vercel account, the exact subdomain, and DNS.
 Until a public HTTPS host exists none of the three webhooks can be exercised, so phases 3,
 5.2 and 5.3 stay unverifiable however complete their code is.
+
+---
+
+**Audit closure, stage 2 (2026-08-22): the five code gaps a requirements audit found.**
+
+An audit against the client's written requirements turned up one requirement implemented
+in the database and nowhere else, two live-API defects, and two data-entry gaps. Nothing
+here needs an account or a credential — that is the remaining blocker, and it is
+deliberately untouched by this pass.
+
+- **Bookings had no read side.** Requirement 5.5 asks that booking and payment status be
+  reflected in the application. Both webhooks have written `bookings` since Phase 5 and
+  **nothing ever read the table** — no screen, no route, no query outside
+  `lib/booking/`. Added `fetchBookings` / `countBookingsByStatus`, `/api/bookings`, and a
+  Bookings screen in the sidebar. It leads with *Claimed, no time chosen* rather than with
+  completed bookings, because that count is both the follow-up list and the signature of
+  Calendly webhooks not arriving; a screen that only celebrated conversions would have
+  hidden the one failure the client is most exposed to. `charged_amount_cents` renders as
+  an em dash until Stripe confirms — showing `$0` for an unconfirmed booking would claim a
+  completed transaction that has not happened. `token_hash` is excluded from the
+  projection and a test pins that.
+
+- **`payment_method_collection: 'if_required'` was invalid for the mode.** It describes
+  exactly what a $0 consultation wants, which is why it was there — but the Stripe API
+  restricts it to `mode: 'subscription'` and this is a `payment`-mode session. A rejected
+  create means the lead sees "Could not start booking" instead of a checkout. Removed; a
+  payment-mode session totalling zero already skips collection on Stripe's side.
+
+- **The EmailOctopus sync used POST where it needed PUT.** `POST /lists/{id}/contacts`
+  creates and answers **409** for an address already on the list — which, syncing an
+  established 5,202-contact list, is nearly every contact. 409 is a 4xx, so the retry
+  logic correctly treated it as fatal and a full sync would have died on its first
+  existing contact. `PUT` is the create-or-update form, **verified against the live API**,
+  and is what the campaign send path already used.
+
+- **Job type could not be set by hand.** It is a required filterable field, and the only
+  ways to assign one were a spreadsheet import or `db:sync-job-types`. So every contact
+  added through the drawer — and every contact the newsletter webhook creates — was
+  permanently invisible to every job-type segment. Added a select to `ContactDrawer`.
+  Note the trap this walked into: the drawer rebuilds its draft from the contact on open,
+  so `jobTypeId` had to be seeded there too — without it, editing *any* field would have
+  silently cleared a classification the tag-sync script had assigned. A test pins it.
+
+- **Search missed organisation.** Organisation is not a column on `contacts`, so it needs
+  its ids resolved first and folded into the same `.or()` as
+  `organisation_id.in.(...)`. Bounded at 100, because PostgREST filters travel in the URL
+  and an unbounded list fails on request length rather than being slow. Threaded through
+  `fetchContacts` and `resolveSegmentMembers` both, so a segment saved from a search means
+  the same thing as the search it came from.
+
+**Three things were verified against live services rather than reasoned about**, and one
+of them retired a note that had stood since Phase 2:
+
+1. `PUT /lists/{id}/contacts` is a real upsert (422s on a blank `email_address` rather
+   than 404ing), and `GET /automations` really does **404** — the automation id still has
+   to be copied from the dashboard by hand.
+2. The bookings projection, both embedded joins, `order(...nullslast)` and the ranged
+   count all return 200 against the live schema.
+3. **The PostgREST search quoting works.** `query.ts` had carried "pinned by unit tests
+   but never exercised against a live instance" since Phase 2. A term crafted to close its
+   own quote and append `status.eq.archived` is accepted as a literal string and matches
+   **0 rows**, where a successful injection would have returned all 5,202. Note retired.
+
+Gate: **1,044 unit tests green** (was 973), coverage 92.1 / 82.7 / 81.6 / 92.1, lint 0
+errors, typecheck clean, build clean.
+
+**Still open, and all of it needs accounts rather than code:** the deployment and
+subdomain, real Stripe and Calendly credentials, the EmailOctopus automation, and the
+webhook registrations. Two data gaps also remain and no code can close them —
+**location/state is null for all 5,202 contacts**, so every state filter and state segment
+matches nothing, and every contact is `prospect`, so status segmentation has one bucket.
 
 ---
 

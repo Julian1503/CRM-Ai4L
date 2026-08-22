@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import { parseContactFilters, type ContactFilters } from '@/lib/contacts/query'
-import { applyContactFilters } from '@/lib/contacts/repository'
+import { applyContactFilters, findOrganisationIdsMatching } from '@/lib/contacts/repository'
 import type { ContactRow, Database } from '@/lib/db/types'
 
 /**
@@ -100,13 +100,19 @@ export async function resolveSegmentMembers(
     page: 1,
   }
 
+  // A segment saved from a contact search carries the same `q`, so it has to resolve
+  // organisations the same way the contact list does -- otherwise the audience preview
+  // and the list it was built from silently disagree.
+  const organisationIds = filters.q ? await findOrganisationIdsMatching(db, filters.q) : []
+
   const query = db
     .from('active_contacts')
     .select('id, email, first_name, last_name', { count: 'exact' })
 
   const { data, error, count } = await (applyContactFilters(
     query as never,
-    filters
+    filters,
+    { organisationIds }
   ) as unknown as PromiseLike<{
     data: SegmentMembers['members'] | null
     error: { message: string } | null

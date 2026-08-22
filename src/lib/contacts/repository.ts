@@ -3,8 +3,10 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ContactRow, Database } from '@/lib/db/types'
 
 import {
+  SEARCH_ORGANISATION_CAP,
   SORT_COLUMNS,
   buildSearchOrExpression,
+  escapeLikePattern,
   getPageRange,
   type ContactFilters,
 } from './query'
@@ -38,8 +40,23 @@ type Filterable = {
   range: (from: number, to: number) => Filterable
 }
 
+export type ContactFilterOptions = {
+  /**
+   * Organisations whose name matched the search term.
+   *
+   * Resolved by the caller (see `findOrganisationIdsMatching`) because organisation is
+   * a joined table rather than a column, and PostgREST cannot OR across an embedded
+   * resource and its parent in one expression.
+   */
+  organisationIds?: readonly string[]
+}
+
 /** Applies filters, ordering and a bounded range to a contacts query. */
-export function applyContactFilters<T extends Filterable>(query: T, filters: ContactFilters): T {
+export function applyContactFilters<T extends Filterable>(
+  query: T,
+  filters: ContactFilters,
+  options: ContactFilterOptions = {}
+): T {
   let result: Filterable = query
 
   if (filters.includeArchived) {
@@ -64,7 +81,7 @@ export function applyContactFilters<T extends Filterable>(query: T, filters: Con
   }
 
   if (filters.q) {
-    const expression = buildSearchOrExpression(filters.q)
+    const expression = buildSearchOrExpression(filters.q, options.organisationIds ?? [])
     if (expression) {
       result = result.or(expression)
     }
@@ -84,12 +101,51 @@ export type ContactPage = {
   total: number
 }
 
+/**
+ * Finds organisations whose name matches a search term.
+ *
+ * Searching by organisation is a stated requirement, and organisation lives on its own
+ * table — so a single query cannot express it. This resolves the ids, and the caller
+ * folds them into the contact filter. Bounded: see SEARCH_ORGANISATION_CAP.
+ *
+ * A failure here is swallowed on purpose. Organisation is one of several fields the
+ * search covers, and losing it should narrow the results, not turn the whole search
+ * into an error page.
+ */
+export async function findOrganisationIdsMatching(
+  db: SupabaseClient<Database>,
+  term: string
+): Promise<string[]> {
+  const trimmed = term.trim()
+
+  if (trimmed === '') {
+    return []
+  }
+
+  const { data, error } = await db
+    .from('organisations')
+    .select('id')
+    .ilike('name', `%${escapeLikePattern(trimmed)}%`)
+    .limit(SEARCH_ORGANISATION_CAP)
+
+  if (error) {
+    console.warn(`Organisation search skipped: ${error.message}`)
+    return []
+  }
+
+  return (data ?? []).map((row) => row.id)
+}
+
 /** Fetches one page of contacts along with the total matching count. */
 export async function fetchContacts(
   db: SupabaseClient<Database>,
   filters: ContactFilters
 ): Promise<ContactPage> {
   const select = '*, organisation:organisations(name), job_type:job_types(name)'
+
+  // Resolved before the contact query so the ids can join the same `.or()` — a contact
+  // matches if their own name, email or position matches, *or* their organisation did.
+  const organisationIds = filters.q ? await findOrganisationIdsMatching(db, filters.q) : []
 
   // Branch rather than passing a union to .from(): supabase-js overloads on the
   // relation name, and a union satisfies neither overload.
@@ -99,7 +155,8 @@ export async function fetchContacts(
 
   const { data, error, count } = await (applyContactFilters(
     query as unknown as Filterable,
-    filters
+    filters,
+    { organisationIds }
   ) as unknown as PromiseLike<{
     data: ContactRow[] | null
     error: { message: string } | null

@@ -191,7 +191,8 @@ src/
 ├── components/           UI, grouped by surface
 └── lib/
     ├── auth/             DAL, route classification, open-redirect sanitiser
-    ├── booking/          Single-use expiring tokens, booking persistence
+    ├── booking/          Single-use expiring tokens, booking persistence, and the
+    │                     funnel read model behind the Bookings screen
     ├── contacts/         Filter parsing, repository, CSV export, import
     ├── marketing/        Segments, campaign status machine, copy generation, send
     │   │                 pipeline. mergeFields.ts is the contract every other
@@ -217,6 +218,12 @@ blocked by the auth gate until it is added there.
 in force. `getAdminClient()` uses the service-role key and **bypasses RLS entirely** — it
 is confined to webhooks and the public booking routes, which have no session. A structural
 test enforces that confinement.
+
+**A booking that reaches `paid` and stops is the failure to watch for.** It means the
+lead claimed the free consultation and never chose a time — and it is also exactly what a
+Calendly webhook outage looks like, which is a live risk on plans below Standard. The
+Bookings screen leads with that count and says so, rather than only counting completed
+bookings, because a screen that celebrates conversions hides this one.
 
 **Sending is per-recipient.** The EmailOctopus API cannot create or send campaigns; the
 only trigger is a per-contact automation queue against a 100-token bucket refilling at
