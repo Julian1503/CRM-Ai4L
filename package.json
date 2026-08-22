@@ -12,6 +12,7 @@
     "test:coverage": "jest --coverage",
     "test:e2e": "playwright test",
     "verify:deployment": "node --env-file-if-exists=.env.local scripts/verify-deployment.mjs",
+    "vercel:env": "node --env-file-if-exists=.env.local scripts/vercel-env-push.mjs",
     "typecheck": "tsc --noEmit",
     "db:types": "npx supabase gen types typescript --linked --schema public > src/lib/db/types.ts",
     "db:verify": "npm run db:verify:contacts && npm run db:verify:webhooks && npm run db:verify:campaigns && npm run db:verify:bookings",

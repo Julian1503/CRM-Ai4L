@@ -47,8 +47,21 @@ only correct relative to where Postgres actually is.
 
 ## 3. Environment variables
 
-Set these in **Vercel → Project → Settings → Environment Variables**, for Production
-(and Preview, if previews are used).
+Set these with `npm run vercel:env -- <environment>`, which reads `.env.local`, applies
+the manifest below, and pushes each value over stdin so it stays out of the process list
+and the shell history:
+
+```bash
+npm run vercel:env -- preview --dry-run   # classify without sending anything
+npm run vercel:env -- preview
+npm run vercel:env -- production
+```
+
+It skips any value that is still identical to the one in `.env.local.example` — comparing
+against the example rather than pattern-matching on `your-`, so it stays correct as the
+example changes — and refuses to push the four that must never be set on Vercel. The
+dashboard works too; the script exists because fifteen variables done by hand is how a
+deployment ends up with a placeholder Stripe secret and a green checkmark.
 
 ### Required — the app will not function without them
 
