@@ -1,15 +1,18 @@
 import { getSupabaseClient } from './supabaseClient';
 
-// Mock Supabase JS client
-jest.mock('@supabase/supabase-js', () => {
+// Mock the browser Supabase client. getSupabaseClient() builds it with
+// createBrowserClient from @supabase/ssr so the session comes from cookies, not
+// localStorage — see src/lib/supabaseClient.ts.
+jest.mock('@supabase/ssr', () => {
   const mockFrom = jest.fn();
+  const client = {
+    from: mockFrom,
+    auth: {
+      getSession: jest.fn(() => Promise.resolve({ data: { session: null }, error: null })),
+    },
+  };
   return {
-    createClient: jest.fn(() => ({
-      from: mockFrom,
-      auth: {
-        getSession: jest.fn(() => Promise.resolve({ data: { session: null }, error: null })),
-      },
-    })),
+    createBrowserClient: jest.fn(() => client),
   };
 });
 

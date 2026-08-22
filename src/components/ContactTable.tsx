@@ -5,6 +5,8 @@ import styles from './ContactTable.module.css';
 import { gsap } from 'gsap';
 import { useGSAP } from '@gsap/react';
 
+import { prefersReducedMotion } from '@/lib/motion';
+
 export interface TableContact {
   id: string;
   firstName: string;
@@ -49,6 +51,7 @@ export default function ContactTable({
   const containerRef = useRef<HTMLDivElement>(null);
 
   useGSAP(() => {
+    if (prefersReducedMotion()) return;
     if (isLoading || contacts.length === 0) return;
 
     gsap.fromTo(

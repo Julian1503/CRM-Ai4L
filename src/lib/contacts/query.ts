@@ -1,4 +1,12 @@
 import type { ContactStatus } from '@/lib/db/types'
+import {
+  DEFAULT_PAGE_SIZE,
+  MAX_PAGE_SIZE,
+  type ParamInput,
+  getPageRange as getRange,
+  readPageParams,
+  readTrimmed,
+} from '@/lib/pagination'
 
 /**
  * Contact list filtering, sorting and pagination.
@@ -18,8 +26,7 @@ export type ContactSortKey = (typeof CONTACT_SORT_KEYS)[number]
 
 const CONTACT_STATUSES: ContactStatus[] = ['lead', 'prospect', 'customer', 'archived']
 
-export const DEFAULT_PAGE_SIZE = 50
-export const MAX_PAGE_SIZE = 200
+export { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE }
 
 /** Columns each sort key maps to. Keeps arbitrary column names out of `.order()`. */
 export const SORT_COLUMNS: Record<ContactSortKey, string> = {
@@ -46,32 +53,6 @@ export type ContactFilters = {
   pageSize: number
 }
 
-type ParamInput = URLSearchParams | Record<string, string | string[] | undefined>
-
-function readParam(input: ParamInput, key: string): string | null {
-  if (input instanceof URLSearchParams) {
-    return input.get(key)
-  }
-
-  const value = input[key]
-
-  if (Array.isArray(value)) {
-    // Next.js surfaces a repeated query param as an array. Take the first rather than
-    // joining, which would produce a nonsense value like "NSW,VIC".
-    return value[0] ?? null
-  }
-
-  return value ?? null
-}
-
-function readTrimmed(input: ParamInput, key: string): string | null {
-  const value = readParam(input, key)
-  if (typeof value !== 'string') return null
-
-  const trimmed = value.trim()
-  return trimmed === '' ? null : trimmed
-}
-
 function readBoolean(input: ParamInput, key: string): boolean | null {
   const value = readTrimmed(input, key)?.toLowerCase()
 
@@ -80,17 +61,6 @@ function readBoolean(input: ParamInput, key: string): boolean | null {
 
   // Anything else is unset, not false — a typo must not silently filter the list.
   return null
-}
-
-function readPositiveInt(input: ParamInput, key: string, fallback: number, max?: number): number {
-  const raw = readTrimmed(input, key)
-  const parsed = raw === null ? Number.NaN : Number.parseInt(raw, 10)
-
-  if (!Number.isFinite(parsed) || parsed < 1) {
-    return fallback
-  }
-
-  return max === undefined ? parsed : Math.min(parsed, max)
 }
 
 export function parseContactFilters(input: ParamInput): ContactFilters {
@@ -110,8 +80,7 @@ export function parseContactFilters(input: ParamInput): ContactFilters {
     includeArchived: readBoolean(input, 'includeArchived') ?? false,
     sort: sort && CONTACT_SORT_KEYS.includes(sort) ? sort : 'name',
     dir: dir === 'desc' ? 'desc' : 'asc',
-    page: readPositiveInt(input, 'page', 1),
-    pageSize: readPositiveInt(input, 'pageSize', DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE),
+    ...readPageParams(input),
   }
 }
 
@@ -175,7 +144,5 @@ export function contactFiltersToSearchParams(filters: ContactFilters): URLSearch
 
 /** Inclusive row range for `.range()`, derived from page and pageSize. */
 export function getPageRange(filters: ContactFilters): { from: number; to: number } {
-  const from = (filters.page - 1) * filters.pageSize
-
-  return { from, to: from + filters.pageSize - 1 }
+  return getRange(filters)
 }

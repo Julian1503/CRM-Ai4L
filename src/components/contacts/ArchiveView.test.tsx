@@ -43,11 +43,82 @@ describe('ArchiveView', () => {
     routeFetch(listHandler)
   })
 
-  it('requests only archived contacts', async () => {
+  it('requests only archived contacts, for an explicit page', async () => {
     render(<ArchiveView />)
 
+    // The page must be explicit: /api/contacts always bounds its result set, so
+    // omitting it pins the view to page 1 while still reporting the full count.
     await waitFor(() =>
-      expect(mockFetch).toHaveBeenCalledWith('/api/contacts?includeArchived=true')
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/contacts?includeArchived=true&page=1&pageSize=50'
+      )
+    )
+  })
+
+  it('pages through an archive larger than one screen', async () => {
+    routeFetch({
+      'GET /api/contacts?includeArchived=true': jsonResponse({ contacts: archived, total: 120 }),
+    })
+
+    render(<ArchiveView />)
+
+    // waitFor on the *content*, not findBy on the element. The summary node is
+    // rendered from the first paint (Pagination keeps the page-size control alive even
+    // with no results), so findByTestId resolves immediately against a node still
+    // reading "No archived contacts" and the assertion races the fetch.
+    await waitFor(() =>
+      expect(screen.getByTestId('archive-pagination-summary')).toHaveTextContent(
+        'Showing 1–50 of 120'
+      )
+    )
+
+    fireEvent.click(screen.getByTestId('archive-pagination-next'))
+
+    await waitFor(() =>
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/contacts?includeArchived=true&page=2&pageSize=50'
+      )
+    )
+  })
+
+  it('resets to the first page when the page size changes', async () => {
+    routeFetch({
+      'GET /api/contacts?includeArchived=true': jsonResponse({ contacts: archived, total: 120 }),
+    })
+
+    render(<ArchiveView />)
+
+    fireEvent.click(await screen.findByTestId('archive-pagination-next'))
+    await waitFor(() => expect(screen.getByTestId('archive-pagination-position')).toHaveTextContent('Page 2'))
+
+    fireEvent.change(screen.getByTestId('archive-pagination-size'), { target: { value: '100' } })
+
+    await waitFor(() =>
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/contacts?includeArchived=true&page=1&pageSize=100'
+      )
+    )
+  })
+
+  it('steps back a page when the last row on it is restored', async () => {
+    routeFetch({
+      'GET /api/contacts?includeArchived=true': jsonResponse({ contacts: archived, total: 51 }),
+      'POST /api/contacts/c1': jsonResponse({ contact: { id: 'c1' } }),
+    })
+
+    render(<ArchiveView />)
+
+    fireEvent.click(await screen.findByTestId('archive-pagination-next'))
+    await waitFor(() => expect(screen.getByTestId('archive-pagination-position')).toHaveTextContent('Page 2'))
+
+    // Restoring the only row on the last page would otherwise strand the user on an
+    // empty page.
+    fireEvent.click(screen.getByTestId('restore-c1'))
+
+    await waitFor(() =>
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/contacts?includeArchived=true&page=1&pageSize=50'
+      )
     )
   })
 

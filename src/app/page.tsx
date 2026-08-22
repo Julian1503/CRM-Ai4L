@@ -28,6 +28,8 @@ import styles from './page.module.css';
 import statsStyles from '@/components/DashboardStats.module.css';
 import { gsap } from 'gsap';
 import { useGSAP } from '@gsap/react';
+
+import { prefersReducedMotion } from '@/lib/motion';
 import Sidebar, { ActiveView } from '@/components/Sidebar';
 import DashboardStats from '@/components/DashboardStats';
 import ContactTable, { TableContact } from '@/components/ContactTable';
@@ -38,6 +40,7 @@ import { importContacts } from '@/lib/contacts/import';
 import FilterBar, { type StatusFilter } from '@/components/contacts/FilterBar';
 import MarketingView from '@/components/marketing/MarketingView';
 import ArchiveView from '@/components/contacts/ArchiveView';
+import Pagination from '@/components/ui/Pagination';
 
 type ServiceOption = { id: string; name: string };
 type SyncLog = { id: string; event_text: string; status: string; created_at: string };
@@ -97,6 +100,50 @@ function formatContactFromDatabase(contact: DbContact, contactServices: string[]
   };
 }
 
+/**
+ * Ceiling on the reference tables that feed dropdowns (services, job types,
+ * credentials). They must load whole rather than by page, but still need a bound:
+ * PostgREST caps a read at 1000 rows and reports nothing when it does, so an unbounded
+ * query silently returns a prefix instead of failing.
+ */
+const REFERENCE_LIMIT = 200;
+
+/** Sync log entries per page. Short: it is a sidebar timeline, not a report. */
+const SYNC_LOG_PAGE_SIZE = 20;
+
+/**
+ * Service IDs for the contacts on screen, keyed by contact.
+ *
+ * Scoped to the given IDs rather than reading the whole join table, which was the other
+ * unbounded query behind this page.
+ */
+async function fetchServicesForContacts(contactIds: string[]): Promise<Map<string, string[]>> {
+  const byContact = new Map<string, string[]>();
+
+  if (contactIds.length === 0 || !hasSupabaseConfig) {
+    return byContact;
+  }
+
+  const { data, error } = await getSupabaseClient()
+    .from('contact_services')
+    .select('contact_id, service_id')
+    .in('contact_id', contactIds);
+
+  if (error) throw error;
+
+  for (const join of (data || []) as ContactServiceJoin[]) {
+    const existing = byContact.get(join.contact_id);
+
+    if (existing) {
+      existing.push(join.service_id);
+    } else {
+      byContact.set(join.contact_id, [join.service_id]);
+    }
+  }
+
+  return byContact;
+}
+
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Unknown error';
 }
@@ -127,6 +174,9 @@ export default function App() {
   const mainContentRef = useRef<HTMLElement>(null);
 
   useGSAP(() => {
+    // Decorative entrance only. Skipping it leaves the panes at their final rendered
+    // state, which is what "instant transition" means -- see src/lib/motion.ts.
+    if (prefersReducedMotion()) return;
     if (!mainContentRef.current) return;
 
     // Smoothly stagger animate mount states of direct child panes inside main workspace
@@ -157,9 +207,17 @@ export default function App() {
   const [sortKey, setSortKey] = useState('name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   
+  const [contactsPage, setContactsPage] = useState(1);
+  const [contactsPageSize, setContactsPageSize] = useState(50);
+  const [contactsTotal, setContactsTotal] = useState(0);
+  const [isContactsLoading, setIsContactsLoading] = useState(true);
+
+  // Counted in the database rather than over the loaded rows: with the list paginated,
+  // counting what is in memory would report the size of the current page.
+  const [stats, setStats] = useState({ total: 0, customers: 0, prospects: 0, subscribers: 0 });
+
   const [isDatabaseConnected, setIsDatabaseConnected] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
 
   // Spreadsheet Importer states
   const [importFile, setImportFile] = useState<{ name: string; size: number } | null>(null);
@@ -194,96 +252,211 @@ export default function App() {
   const [emailOctopusApiKey, setEmailOctopusApiKey] = useState('');
   const [emailOctopusListId, setEmailOctopusListId] = useState('');
   const [syncLogs, setSyncLogs] = useState<SyncLog[]>([]);
+  const [syncLogsPage, setSyncLogsPage] = useState(1);
+  const [syncLogsTotal, setSyncLogsTotal] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
   const isConnected = emailOctopusApiKey.trim() !== '' && emailOctopusListId.trim() !== '';
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const loadLiveData = React.useCallback(async () => {
-    setIsLoading(true);
+  // The single description of "what the user is looking at", serialised with the
+  // parameter names src/lib/contacts/query.ts parses. Filtering and sorting run in the
+  // database now that only one page of contacts is in memory — and the export reuses
+  // the same string, so "export" still means "export what I am looking at" rather than
+  // a second, drifting query path.
+  const contactQuery = React.useMemo(() => {
+    const params = new URLSearchParams();
+    if (searchQuery.trim()) params.set('q', searchQuery.trim());
+    if (jobTypeFilter) params.set('jobTypeId', jobTypeFilter);
+    if (stateFilter) params.set('state', stateFilter);
+    if (statusFilter === 'customer') params.set('status', 'customer');
+    if (statusFilter === 'prospect') params.set('status', 'prospect');
+    if (statusFilter === 'subscribed') params.set('subscribed', 'true');
+    params.set('sort', sortKey);
+    params.set('dir', sortDir);
+    return params.toString();
+  }, [searchQuery, jobTypeFilter, stateFilter, statusFilter, sortKey, sortDir]);
 
+  const exportQuery = contactQuery ? `&${contactQuery}` : '';
+
+  /**
+   * Reference data: services, job types and integration credentials.
+   *
+   * Contacts, the dashboard counters and the sync log each load separately below — they
+   * are paginated and re-fetch on their own schedule, while this is the small, whole
+   * data the rest of the screen is built from.
+   */
+  const loadLiveData = React.useCallback(async () => {
     if (!hasSupabaseConfig) {
-      setContacts([]);
       setServices([]);
       setJobTypes([]);
-      setSyncLogs([]);
       setEmailOctopusApiKey('');
       setEmailOctopusListId('');
       setIsDatabaseConnected(false);
       setConnectionError('Supabase is not configured. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to load CRM data.');
-      setIsLoading(false);
       return;
     }
 
     try {
       const db = getSupabaseClient();
 
-      const { data: contactData, error: contactError } = await db
-        .from('contacts')
-        .select(`
-          *,
-          organisation:organisations(name)
-        `)
-        .order('created_at', { ascending: false });
-
-      if (contactError) throw contactError;
-
-      const { data: joinData, error: joinError } = await db.from('contact_services').select('*');
-      if (joinError) throw joinError;
-
-      const { data: serviceData, error: serviceError } = await db.from('services').select('*').order('name');
+      // These feed dropdowns, so they load whole rather than by page — but still
+      // bounded, because an unbounded read stops at PostgREST's cap in silence.
+      const { data: serviceData, error: serviceError } = await db
+        .from('services')
+        .select('*')
+        .order('name')
+        .limit(REFERENCE_LIMIT);
       if (serviceError) throw serviceError;
 
-      const { data: jobTypeData, error: jobTypeError } = await db.from('job_types').select('*').order('name');
+      const { data: jobTypeData, error: jobTypeError } = await db
+        .from('job_types')
+        .select('*')
+        .order('name')
+        .limit(REFERENCE_LIMIT);
       if (jobTypeError) throw jobTypeError;
 
-      const { data: credentialsData, error: credentialsError } = await db.from('credentials').select('*');
+      const { data: credentialsData, error: credentialsError } = await db
+        .from('credentials')
+        .select('*')
+        .limit(REFERENCE_LIMIT);
       if (credentialsError) throw credentialsError;
 
-      const { data: logsData, error: logsError } = await db
-        .from('sync_logs')
-        .select('*')
-        .order('created_at', { ascending: false });
-      if (logsError) throw logsError;
-
-      const contactsFromDb = (contactData || []) as DbContact[];
-      const joinsFromDb = (joinData || []) as ContactServiceJoin[];
       const credentialsFromDb = (credentialsData || []) as Credential[];
-      const logsFromDb = (logsData || []) as SyncLog[];
 
-      const formattedContacts = contactsFromDb.map((contact) => {
-        const contactServices = joinsFromDb
-          .filter((join) => join.contact_id === contact.id)
-          .map((join) => join.service_id);
-        return formatContactFromDatabase(contact, contactServices);
-      });
-
-      setContacts(formattedContacts);
       setServices(((serviceData || []) as ServiceOption[]).map((service) => ({ id: service.id, name: service.name })));
       setJobTypes(((jobTypeData || []) as ServiceOption[]).map((jobType) => ({ id: jobType.id, name: jobType.name })));
       setEmailOctopusApiKey(credentialsFromDb.find((credential) => credential.key === 'emailoctopus_api_key')?.value || '');
       setEmailOctopusListId(credentialsFromDb.find((credential) => credential.key === 'emailoctopus_list_id')?.value || '');
-      setSyncLogs(logsFromDb.map((log) => ({
+      setIsDatabaseConnected(true);
+      setConnectionError(null);
+    } catch (error) {
+      const message = getErrorMessage(error);
+      setServices([]);
+      setJobTypes([]);
+      setIsDatabaseConnected(false);
+      setConnectionError(`Supabase connection failed: ${message}`);
+      console.error('Supabase connection failed:', error);
+    }
+  }, []);
+
+  /**
+   * Dashboard counters, counted in the database.
+   *
+   * `head: true` asks for the count without the rows, so this stays cheap however large
+   * the table grows.
+   */
+  const loadStats = React.useCallback(async () => {
+    if (!hasSupabaseConfig) {
+      setStats({ total: 0, customers: 0, prospects: 0, subscribers: 0 });
+      return;
+    }
+
+    try {
+      const db = getSupabaseClient();
+
+      const [totalResult, customerResult, subscriberResult] = await Promise.all([
+        db.from('active_contacts').select('id', { count: 'exact', head: true }),
+        db.from('active_contacts').select('id', { count: 'exact', head: true }).eq('is_customer', true),
+        db.from('active_contacts').select('id', { count: 'exact', head: true }).eq('subscribed_to_newsletter', true),
+      ]);
+
+      const total = totalResult.count ?? 0;
+      const customers = customerResult.count ?? 0;
+
+      setStats({
+        total,
+        customers,
+        // Derived rather than counted separately: a prospect is defined as "not a
+        // customer", so a third query could disagree with the first two.
+        prospects: Math.max(0, total - customers),
+        subscribers: subscriberResult.count ?? 0,
+      });
+    } catch (error) {
+      console.error('Failed to load contact counts', error);
+    }
+  }, []);
+
+  /** One page of the sync activity timeline, newest first. */
+  const loadSyncLogs = React.useCallback(async () => {
+    if (!hasSupabaseConfig) {
+      setSyncLogs([]);
+      setSyncLogsTotal(0);
+      return;
+    }
+
+    try {
+      const db = getSupabaseClient();
+      const from = (syncLogsPage - 1) * SYNC_LOG_PAGE_SIZE;
+
+      const { data, error, count } = await db
+        .from('sync_logs')
+        .select('*', { count: 'exact' })
+        .order('created_at', { ascending: false })
+        .range(from, from + SYNC_LOG_PAGE_SIZE - 1);
+
+      if (error) throw error;
+
+      setSyncLogs(((data || []) as SyncLog[]).map((log) => ({
         id: log.id,
         event_text: log.event_text,
         status: log.status,
         created_at: log.created_at,
       })));
-      setIsDatabaseConnected(true);
-      setConnectionError(null);
+      setSyncLogsTotal(count ?? 0);
     } catch (error) {
-      const message = getErrorMessage(error);
-      setContacts([]);
-      setServices([]);
-      setJobTypes([]);
-      setSyncLogs([]);
-      setIsDatabaseConnected(false);
-      setConnectionError(`Supabase connection failed: ${message}`);
-      console.error('Supabase connection failed:', error);
-    } finally {
-      setIsLoading(false);
+      console.error('Failed to load sync logs', error);
     }
-  }, []);
+  }, [syncLogsPage]);
+
+  /**
+   * One page of contacts, filtered and sorted by the database.
+   *
+   * Goes through /api/contacts rather than querying Supabase from the browser, because
+   * that route already parses and whitelists every filter, sort key and page bound.
+   */
+  const loadContacts = React.useCallback(async () => {
+    if (!hasSupabaseConfig) {
+      setContacts([]);
+      setContactsTotal(0);
+      setIsContactsLoading(false);
+      return;
+    }
+
+    setIsContactsLoading(true);
+
+    try {
+      const params = new URLSearchParams(contactQuery);
+      params.set('page', String(contactsPage));
+      params.set('pageSize', String(contactsPageSize));
+
+      const response = await fetch(`/api/contacts?${params.toString()}`);
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error || `Could not load contacts (HTTP ${response.status})`);
+      }
+
+      const body = await response.json();
+      const rows = (body.contacts ?? []) as DbContact[];
+      const servicesByContact = await fetchServicesForContacts(rows.map((row) => row.id));
+
+      setContacts(rows.map((row) => formatContactFromDatabase(row, servicesByContact.get(row.id) ?? [])));
+      setContactsTotal(body.total ?? 0);
+    } catch (error) {
+      console.error('Failed to load contacts', error);
+      setContacts([]);
+      setContactsTotal(0);
+      setConnectionError(`Could not load contacts: ${getErrorMessage(error)}`);
+    } finally {
+      setIsContactsLoading(false);
+    }
+  }, [contactQuery, contactsPage, contactsPageSize]);
+
+  /** Re-reads everything a write can have changed. */
+  const refreshData = React.useCallback(async () => {
+    await Promise.all([loadLiveData(), loadContacts(), loadStats(), loadSyncLogs()]);
+  }, [loadLiveData, loadContacts, loadStats, loadSyncLogs]);
 
   const recordSyncLog = React.useCallback(async (eventText: string, status: 'success' | 'failed' | 'info') => {
     const db = getSupabaseClient();
@@ -303,9 +476,16 @@ export default function App() {
       created_at: data.created_at,
     };
 
-    setSyncLogs((prev) => [log, ...prev]);
+    setSyncLogsTotal((prev) => prev + 1);
+
+    // Only the first page shows the newest entry; prepending onto a later page would
+    // put a row on a page it does not belong to.
+    if (syncLogsPage === 1) {
+      setSyncLogs((prev) => [log, ...prev].slice(0, SYNC_LOG_PAGE_SIZE));
+    }
+
     return log;
-  }, []);
+  }, [syncLogsPage]);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -415,7 +595,7 @@ export default function App() {
       // .upsert({ onConflict: 'email' }) cannot target. See src/lib/contacts/import.ts.
       const result = await importContacts(getSupabaseClient(), mapped);
 
-      await loadLiveData();
+      await refreshData();
 
       const summary = [
         `${result.inserted} added`,
@@ -447,16 +627,60 @@ export default function App() {
     loadLiveData();
   }, [loadLiveData]);
 
-  // Compute Dashboard Totals
-  const totalContactsCount = contacts.length;
-  const customersCount = contacts.filter((c) => c.isCustomer).length;
-  const prospectsCount = contacts.filter((c) => !c.isCustomer).length;
-  const newsletterSubscribersCount = contacts.filter((c) => c.subscribedToNewsletter).length;
+  // Each of these re-runs on its own dependencies — the contact list when a filter,
+  // sort or page changes, the timeline when its page does — so paging one does not
+  // re-fetch the rest of the screen.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadContacts();
+  }, [loadContacts]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadStats();
+  }, [loadStats]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadSyncLogs();
+  }, [loadSyncLogs]);
+
+  // Dashboard Totals — counted in the database by loadStats. Counting the loaded rows
+  // would report the size of the current page rather than of the CRM.
+  const {
+    total: totalContactsCount,
+    customers: customersCount,
+    prospects: prospectsCount,
+    subscribers: newsletterSubscribersCount,
+  } = stats;
 
   // Sorting Handler
   const handleSort = (key: string) => {
     setSortDir((prev) => (sortKey === key && prev === 'asc' ? 'desc' : 'asc'));
     setSortKey(key);
+    setContactsPage(1);
+  };
+
+  // Filter handlers. Each returns to page 1: a filter applied while on page 7 would
+  // otherwise request a page the narrowed result set may not have.
+  const handleSearchChange = (value: string) => {
+    setSearchQuery(value);
+    setContactsPage(1);
+  };
+
+  const handleStatusChange = (value: StatusFilter) => {
+    setStatusFilter(value);
+    setContactsPage(1);
+  };
+
+  const handleJobTypeChange = (value: string) => {
+    setJobTypeFilter(value);
+    setContactsPage(1);
+  };
+
+  const handleStateChange = (value: string) => {
+    setStateFilter(value);
+    setContactsPage(1);
   };
 
   // Save / Update / Insert Contact Handler
@@ -538,7 +762,7 @@ export default function App() {
         if (joinInsertError) throw joinInsertError;
       }
 
-      await loadLiveData();
+      await refreshData();
 
       if (emailOctopusApiKey.trim() !== '' && emailOctopusListId.trim() !== '') {
         fetch('/api/integrations/emailoctopus/sync', {
@@ -581,7 +805,7 @@ export default function App() {
         throw new Error(body.error || `Archive failed (HTTP ${response.status})`);
       }
 
-      await loadLiveData();
+      await refreshData();
     } catch (err) {
       console.error('Failed to archive contact', err);
       alert(`Failed to archive contact: ${getErrorMessage(err)}`);
@@ -601,7 +825,7 @@ export default function App() {
       );
 
       if (error) throw error;
-      await loadLiveData();
+      await refreshData();
       alert('Settings saved successfully!');
     } catch (err) {
       console.error('Settings save error:', err);
@@ -612,6 +836,9 @@ export default function App() {
   const handleManualSync = async () => {
     setIsSyncing(true);
     try {
+      // No contact list: the browser only holds the page on screen, so the route reads
+      // the full book server-side. Sending contacts.map(...) here would have quietly
+      // synced one page and reported it as a complete run.
       const response = await fetch('/api/integrations/emailoctopus/sync', {
         method: 'POST',
         headers: {
@@ -620,12 +847,6 @@ export default function App() {
         body: JSON.stringify({
           apiKey: emailOctopusApiKey,
           listId: emailOctopusListId,
-          contacts: contacts.map((contact) => ({
-            email: contact.email,
-            firstName: contact.firstName,
-            lastName: contact.lastName,
-            subscribedToNewsletter: contact.subscribedToNewsletter,
-          })),
         }),
       });
 
@@ -651,63 +872,6 @@ export default function App() {
       setIsSyncing(false);
     }
   };
-
-  // Serialised with the same parameter names the export route parses
-  // (src/lib/contacts/query.ts), so "export" always means "export what I am
-  // looking at" rather than a second, drifting query path.
-  const exportQuery = React.useMemo(() => {
-    const params = new URLSearchParams();
-    if (searchQuery.trim()) params.set('q', searchQuery.trim());
-    if (jobTypeFilter) params.set('jobTypeId', jobTypeFilter);
-    if (stateFilter) params.set('state', stateFilter);
-    if (statusFilter === 'customer') params.set('status', 'customer');
-    if (statusFilter === 'prospect') params.set('status', 'prospect');
-    if (statusFilter === 'subscribed') params.set('subscribed', 'true');
-    const query = params.toString();
-    return query ? `&${query}` : '';
-  }, [searchQuery, jobTypeFilter, stateFilter, statusFilter]);
-
-  // Search & Filter Computation
-  const filteredContacts = contacts
-    .filter((contact) => {
-      // 1. Search Query Match
-      const searchStr = `${contact.firstName} ${contact.lastName} ${contact.preferredName} ${contact.email} ${contact.organisation?.name || ''} ${contact.position || ''}`.toLowerCase();
-      if (!searchStr.includes(searchQuery.toLowerCase())) return false;
-
-      // 2. Filter Tab Match
-      if (statusFilter === 'customer' && !contact.isCustomer) return false;
-      if (statusFilter === 'prospect' && contact.isCustomer) return false;
-      if (statusFilter === 'subscribed' && !contact.subscribedToNewsletter) return false;
-
-      // 3. Job type and location
-      if (jobTypeFilter && contact.jobTypeId !== jobTypeFilter) return false;
-      if (stateFilter && (contact.state || '').toUpperCase() !== stateFilter) return false;
-
-      return true;
-    })
-    .sort((a, b) => {
-      // 3. Sort Execution
-      let valA = '';
-      let valB = '';
-
-      if (sortKey === 'name') {
-        valA = `${a.firstName} ${a.lastName}`.toLowerCase();
-        valB = `${b.firstName} ${b.lastName}`.toLowerCase();
-      } else if (sortKey === 'organisation') {
-        valA = (a.organisation?.name || '').toLowerCase();
-        valB = (b.organisation?.name || '').toLowerCase();
-      } else if (sortKey === 'status') {
-        valA = a.isCustomer ? 'customer' : 'prospect';
-        valB = b.isCustomer ? 'customer' : 'prospect';
-      } else if (sortKey === 'newsletter') {
-        valA = a.subscribedToNewsletter ? 'yes' : 'no';
-        valB = b.subscribedToNewsletter ? 'yes' : 'no';
-      }
-
-      if (valA < valB) return sortDir === 'asc' ? -1 : 1;
-      if (valA > valB) return sortDir === 'asc' ? 1 : -1;
-      return 0;
-    });
 
   return (
     <div className={styles.appContainer}>
@@ -788,26 +952,40 @@ export default function App() {
 
             <FilterBar
               searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
+              onSearchChange={handleSearchChange}
               statusFilter={statusFilter}
-              onStatusChange={setStatusFilter}
+              onStatusChange={handleStatusChange}
               jobTypes={jobTypes}
               jobTypeFilter={jobTypeFilter}
-              onJobTypeChange={setJobTypeFilter}
+              onJobTypeChange={handleJobTypeChange}
               stateFilter={stateFilter}
-              onStateChange={setStateFilter}
+              onStateChange={handleStateChange}
               exportQuery={exportQuery}
-              resultCount={filteredContacts.length}
+              resultCount={contactsTotal}
             />
 
             {/* Contacts Table layout */}
             <ContactTable
-              contacts={filteredContacts}
+              contacts={contacts}
               onSelectContact={setSelectedContact}
               onSort={handleSort}
               sortKey={sortKey}
               sortDir={sortDir}
-              isLoading={isLoading}
+              isLoading={isContactsLoading}
+            />
+
+            <Pagination
+              page={contactsPage}
+              pageSize={contactsPageSize}
+              total={contactsTotal}
+              onPageChange={setContactsPage}
+              onPageSizeChange={(size) => {
+                setContactsPageSize(size);
+                setContactsPage(1);
+              }}
+              label="contacts"
+              isLoading={isContactsLoading}
+              testId="contacts-pagination"
             />
 
           </>
@@ -1241,6 +1419,15 @@ export default function App() {
                       ))
                     )}
                   </div>
+
+                  <Pagination
+                    page={syncLogsPage}
+                    pageSize={SYNC_LOG_PAGE_SIZE}
+                    total={syncLogsTotal}
+                    onPageChange={setSyncLogsPage}
+                    label="sync events"
+                    testId="sync-logs-pagination"
+                  />
                 </div>
               </div>
             </div>

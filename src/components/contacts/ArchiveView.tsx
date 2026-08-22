@@ -2,6 +2,8 @@
 
 import React, { useCallback, useEffect, useState } from 'react'
 
+import Pagination from '@/components/ui/Pagination'
+
 import styles from './ArchiveView.module.css'
 
 type ArchivedContact = {
@@ -33,6 +35,8 @@ function formatDate(value: string | null): string {
 export default function ArchiveView() {
   const [contacts, setContacts] = useState<ArchivedContact[]>([])
   const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(50)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [restoringId, setRestoringId] = useState<string | null>(null)
@@ -42,7 +46,12 @@ export default function ArchiveView() {
     setError(null)
 
     try {
-      const response = await fetch('/api/contacts?includeArchived=true')
+      // The page has to be requested explicitly: /api/contacts always bounds its result
+      // set, so omitting it silently pinned this view to the first page while still
+      // reporting the full archive count.
+      const response = await fetch(
+        `/api/contacts?includeArchived=true&page=${page}&pageSize=${pageSize}`
+      )
 
       if (!response.ok) {
         const body = await response.json().catch(() => ({}))
@@ -57,7 +66,7 @@ export default function ArchiveView() {
     } finally {
       setIsLoading(false)
     }
-  }, [])
+  }, [page, pageSize])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -78,7 +87,13 @@ export default function ArchiveView() {
         throw new Error(body.error || 'Could not restore this contact.')
       }
 
-      await load()
+      // Restoring the only row on the last page would otherwise leave the user staring
+      // at an empty page with no obvious way back.
+      if (contacts.length === 1 && page > 1) {
+        setPage(page - 1)
+      } else {
+        await load()
+      }
     } catch (restoreError) {
       setError(restoreError instanceof Error ? restoreError.message : 'Could not restore.')
     } finally {
@@ -147,6 +162,20 @@ export default function ArchiveView() {
           </tbody>
         </table>
       )}
+
+      <Pagination
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        onPageChange={setPage}
+        onPageSizeChange={(size) => {
+          setPageSize(size)
+          setPage(1)
+        }}
+        label="archived contacts"
+        isLoading={isLoading}
+        testId="archive-pagination"
+      />
     </div>
   )
 }

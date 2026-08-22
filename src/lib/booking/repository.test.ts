@@ -27,11 +27,14 @@ describe('createBooking', () => {
 
   it('never puts the contact id in the link', async () => {
     const builder = createQueryBuilderMock({ data: { id: 'b1' }, error: null })
+    // A full UUID, not a short stub: the token is 43 random base64url characters, so a
+    // two-character id collides with it by chance roughly once in a hundred runs.
+    const contactId = '3f2a9c74-5b1e-4d8a-9f60-7c21ab4e0d53'
 
-    const { token } = await createBooking(createDbMock(builder) as never, { contactId: 'c1' })
+    const { token } = await createBooking(createDbMock(builder) as never, { contactId })
 
     // Email links leak — forwarded, logged by gateways, captured by link scanners.
-    expect(token).not.toContain('c1')
+    expect(token).not.toContain(contactId)
   })
 
   it('sets an expiry', async () => {

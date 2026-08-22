@@ -197,19 +197,44 @@ export type ImportContactPayloadRow = {
 // `Relationships` is required by postgrest-js's GenericTable/GenericView constraint.
 // Omitting it makes `Database` fail `extends GenericSchema`, at which point supabase-js
 // silently degrades to untyped queries and `rpc()` args resolve to `undefined`.
-// Left empty because nothing here relies on typed embedded-resource selects yet;
+// Defaults to empty; tables whose foreign keys are used in embedded-resource selects
+// (`select('*, organisation:organisations(name)')`) must declare them, or postgrest-js
+// resolves the embed to SelectQueryError instead of the joined row.
 // `npm run db:types` fills these in properly against the live schema.
-type TableDef<Row, Insert = Partial<Row>, Update = Partial<Row>> = {
+type TableDef<
+  Row,
+  Insert = Partial<Row>,
+  Update = Partial<Row>,
+  Relationships extends readonly unknown[] = [],
+> = {
   Row: Row
   Insert: Insert
   Update: Update
-  Relationships: []
+  Relationships: Relationships
 }
+
+/** Foreign keys declared in 20260603000000_init_schema and 20260807000000_soft_delete_and_segmentation. */
+type ContactRelationships = [
+  {
+    foreignKeyName: 'contacts_organisation_id_fkey'
+    columns: ['organisation_id']
+    isOneToOne: false
+    referencedRelation: 'organisations'
+    referencedColumns: ['id']
+  },
+  {
+    foreignKeyName: 'contacts_job_type_id_fkey'
+    columns: ['job_type_id']
+    isOneToOne: false
+    referencedRelation: 'job_types'
+    referencedColumns: ['id']
+  },
+]
 
 export interface Database {
   public: {
     Tables: {
-      contacts: TableDef<ContactRow>
+      contacts: TableDef<ContactRow, Partial<ContactRow>, Partial<ContactRow>, ContactRelationships>
       organisations: TableDef<OrganisationRow>
       job_types: TableDef<JobTypeRow>
       services: TableDef<ServiceRow>
