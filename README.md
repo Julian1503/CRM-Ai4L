@@ -57,18 +57,68 @@ setting. In the Supabase dashboard:
 | `NEXT_PUBLIC_SUPABASE_URL` | Everything | |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Everything | Public by design; RLS is what protects data |
 | `SUPABASE_SERVICE_ROLE_KEY` | Webhooks, booking pages | **Bypasses RLS.** Server only — never prefix `NEXT_PUBLIC_` |
-| `EMAILOCTOPUS_API_KEY` / `_LIST_ID` | Newsletter sync | |
-| `EMAILOCTOPUS_WEBHOOK_SECRET` | Newsletter intake | Without it the webhook rejects everything |
+| `EMAILOCTOPUS_API_KEY` / `_LIST_ID` | Newsletter sync | The list id is the UUID in the list's dashboard URL |
+| `EMAILOCTOPUS_WEBHOOK_SECRET` | Newsletter intake | Per-endpoint secret; without it the webhook rejects everything |
 | `GEOAPIFY_API_KEY` | Address autocomplete | |
 | `STRIPE_SECRET_KEY` | Booking | |
 | `STRIPE_CONSULTATION_PRICE_ID` | Booking | A $500 AUD one-off Price |
 | `STRIPE_CONSULTATION_COUPON_ID` | Booking | A 100%-off Coupon, `duration: once` |
 | `STRIPE_WEBHOOK_SECRET` | Booking | From the `checkout.session.completed` endpoint |
 | `CALENDLY_WEBHOOK_SECRET` | Scheduling | **Requires a paid Calendly plan** |
+| `ANTHROPIC_API_KEY` | AI campaign copy | Server only. Without it copy is typed by hand and the button says so |
 | `NEXT_PUBLIC_CALENDLY_SCHEDULING_URL` | Scheduling | The 30-minute event type link |
 
 Every secret fails **closed**: a missing webhook secret rejects all deliveries rather than
 accepting them, and a missing Supabase config denies access rather than granting it.
+
+### EmailOctopus webhook
+
+Register one endpoint under **Settings → Webhooks**, pointing at
+`https://<host>/api/integrations/emailoctopus/webhook`. It must be HTTPS and publicly
+reachable; tunnel it (`cloudflared`, `ngrok`) to test locally.
+
+| Setting | Value | Why |
+|---|---|---|
+| Contact events | Created, Updated, Deleted | `deleted` ends the subscription; it never deletes the CRM record |
+| Email events | Unsubscribed only | Clicked/opened/bounced/complained have nowhere to go in the schema yet — they are acknowledged and dropped |
+| Exclude events from an API request | **Checked** | The CRM pushes contacts to EmailOctopus itself; without this every sync echoes straight back |
+| Exclude events from an import | Checked | Unless bulk imports should create CRM leads |
+
+Copy the endpoint's signing secret into `EMAILOCTOPUS_WEBHOOK_SECRET`. Deliveries are
+signed `sha256=<hmac>` in an `EmailOctopus-Signature` header, and carry an **array** of up
+to 1000 events buffered over roughly a minute — each is claimed separately in
+`webhook_events`, so a partial failure retries only the events that actually failed.
+
+---
+
+## Campaign copy
+
+The Campaigns screen writes seven short merge-field values, not an email body. That is not
+a design preference — the EmailOctopus API cannot accept a body at all, so the template
+lives in their dashboard and the only route content takes into a send is contact custom
+fields merged into it.
+
+`docs/EMAILOCTOPUS_SETUP.md` has the full picture: the field list, the automation setup,
+the rate limit and what it means for send duration, and the two things that still cannot
+be verified. Read it before the first real send.
+
+Two gates sit between generated text and a recipient's inbox:
+
+- **Validation.** `src/lib/marketing/mergeFields.ts` is the single source of truth for
+  which fields exist and how long each may be. The model's tool schema is derived from it,
+  and the same validator runs on hand-typed edits — an operator cannot overrun the
+  template either. It also refuses any attempt to set `BookingUrl`, which is minted per
+  recipient at send time; a generated value there would replace every recipient's real
+  booking link with one dead URL.
+- **Approval.** Generation writes to a `draft` campaign and never changes that. Approval
+  is a separate, attributed endpoint, and the database enforces the status machine with a
+  trigger — an unapproved campaign cannot reach `sending` through any code path, including
+  direct SQL.
+
+Contact details never reach the model. Generation is per *segment*: the prompt carries the
+filters and the audience size, and `redactPii` strips emails and phone numbers from the
+free-text fields an operator could hide one in — typically a segment saved from a contact
+search.
 
 ---
 
@@ -90,7 +140,20 @@ E2E should exercise the shipped artifact, and because `next dev` does not curren
 hydrate in this environment (see `PLAN.md`).
 
 Signed-in E2E specs **skip** unless `E2E_EMAIL` and `E2E_PASSWORD` are set and point at a
-real account. They skip loudly rather than passing vacuously.
+real account. They skip loudly rather than passing vacuously. With credentials set the
+suite runs 111 specs across chromium, firefox and webkit; the 3 that still skip assert
+the "sign-in unavailable" screen, which only renders when Supabase is *not* configured.
+
+Three things to know before running it:
+
+- `npx playwright install` — firefox and webkit binaries are not installed by default,
+  and their absence fails 18 specs on a missing executable rather than on anything real.
+- Port 3000 must be free. `reuseExistingServer` is on locally, so a stale `next start`
+  is silently adopted; a wedged one accepts connections, answers none, and hangs the
+  whole run with no output.
+- Workers are capped at 3 and the per-test budget is 60s. The constraint is one
+  `next start` and one remote Supabase project, not CPU — at Playwright's default width
+  a different spec times out on each run.
 
 ---
 
@@ -109,8 +172,11 @@ src/
     ├── auth/             DAL, route classification, open-redirect sanitiser
     ├── booking/          Single-use expiring tokens, booking persistence
     ├── contacts/         Filter parsing, repository, CSV export, import
-    ├── marketing/        Segments, campaign status machine, send pipeline
+    ├── marketing/        Segments, campaign status machine, copy generation, send
+    │   │                 pipeline. mergeFields.ts is the contract every other
+    │   │                 piece derives from
     │   └── providers/    Provider adapter boundary
+    ├── motion.ts         prefers-reduced-motion, checked before any GSAP timeline
     ├── stripe/           Checkout ($500 list → $0 charged)
     ├── supabase/         Browser / server / service-role clients
     └── webhooks/         HMAC verification, idempotency ledger
@@ -152,6 +218,7 @@ a *partial* index (`WHERE deleted_at IS NULL`), which is why bulk import goes th
 - **E2E** — Playwright against a production build.
 
 Coverage is a **ratchet**: thresholds sit just below the measured baseline so it cannot
-regress, and are raised as tests are added. Statements and lines are past the 80% project
-standard; branches and functions are not, and the shortfall is concentrated in
-`src/app/page.tsx`, whose decomposition is still outstanding.
+regress, and are raised as tests are added. All four metrics now clear the 80% project
+standard (91.7 / 82.8 / 81.0 / 91.7). `src/app/page.tsx` remains the weakest file at 44%
+function coverage; its decomposition is still outstanding, but it is no longer what is
+holding the number down.

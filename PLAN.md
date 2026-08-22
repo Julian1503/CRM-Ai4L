@@ -11,7 +11,7 @@ spreadsheet import, status filter tabs, contact CRUD, dashboard) are not repeate
 | Phase | Status |
 |---|---|
 | 0 — Foundations | **Complete** (SQL unverified — see below) |
-| 1.1 — Auth | **Code complete**, unauthenticated paths verified; signed-in paths blocked |
+| 1.1 — Auth | **Complete** — Supabase project live, 5,202 contacts loaded |
 | 1.2 — Deploy | **Blocked** — needs your Vercel account and DNS |
 | 2.2 — Filters | **Complete** (job type, state, status, search) |
 | 2.3 — CSV export | **Complete** (two formats, filter-aware, injection-safe) |
@@ -23,12 +23,111 @@ spreadsheet import, status filter tabs, contact CRUD, dashboard) are not repeate
 | 4.3 — Send pipeline | **Complete** (adapter, rate limiter, resumable ledger) |
 | 4.4 — Segment & campaign API | **Complete** (8 routes, session-checked) |
 | 4.5 — Campaigns UI | **Complete** (unverified against a live database) |
-| 4.6 — AI copy generation | **On hold** — pending merge-field ceiling check |
+| 4.6 — AI copy generation | **Complete** — merge fields created on the live list |
 | 5.1 — Booking tokens | **Complete** |
 | 5.2 — Stripe checkout | **Complete** (unverified against a live account) |
 | 5.3 — Calendly | **Complete** (needs a paid Calendly plan to function) |
-| 6 — Hardening | **Complete** (a11y/visual regression partly blocked) |
+| 6 — Hardening | **Complete** — coverage now clears 80% on all four metrics |
 | Gap closure | **Complete** — booking links wired; archive screen shipped |
+
+**Phase 4.6 delivered (2026-08-20):** the last open piece of the marketing agent.
+
+`src/lib/marketing/mergeFields.ts` — the contract everything else derives from: seven
+named slots with hard character caps, the tool schema handed to the model, the validator
+run on the result, and `findMissingMergeFields` for checking a provider list. ·
+`prompt.ts` (system prompt, per-campaign brief, retry feedback, `redactPii`) ·
+`generateCampaign.ts` (strict tool use, one retry that names the specific failures,
+typed SDK error handling) · `/api/campaigns/generate` · `CampaignCopyEditor` with live
+character budgets · `/api/integrations/emailoctopus/fields` (GET reports missing tags,
+POST creates them) · `docs/EMAILOCTOPUS_SETUP.md`.
+
+Model: `claude-opus-5`, adaptive thinking, structured output through a strict tool rather
+than prose parsing. `PATCH /api/campaigns/[id]` now accepts `mergeFields` and puts human
+edits through the *same* validator as generated copy — an operator can overrun the
+template exactly like the model can.
+
+**The merge-field ceiling question is answered.** It was the stated blocker, and it was
+answered by asking the live API rather than reasoning about it: 11 fields now exist on the
+"New Start" list with no limit error. Three findings worth keeping:
+
+1. `fallback: ""` is rejected `422 — This value should not be blank`. Omitting the key
+   stores null, which is what we want; a fallback would paper over a personalisation
+   failure with plausible text.
+2. `GET /automations` 404s — automations cannot be listed through the API at all, only
+   queued into. The automation id has to be copied from their dashboard by hand.
+3. `POST /lists/{id}/fields` takes `{tag, label, type}`; `DELETE .../fields/{tag}` → 204.
+
+**What was actually missing on the live account:** the list had three fields
+(EmailAddress, FirstName, LastName) and **no `BookingUrl`**. Every booking link in a real
+send would have merged to nothing. Created, along with the seven copy fields.
+
+`job_types` was empty and all 5,202 contacts had `job_type_id = null`, so the job-type
+filter was permanently inert. Seeded from the tags the client already uses on the
+EmailOctopus list (migration `20260820000000`). Assigning contacts to a type is still
+open — the import carried no column that maps to one, and guessing would put unchecked
+data in front of someone who would assume it was checked.
+
+**Two defects found while raising coverage, neither of which the build or the existing
+tests would ever have caught:**
+
+- **The services picker in `ContactDrawer` was unusable by keyboard.** A `div` with an
+  `onClick` wrapping a `readOnly` checkbox: not focusable, announced nothing, and every
+  service shared one element id. Phase 6 recorded ContactDrawer's labels as fixed; these
+  three controls were not. Rewritten as `<label>`-wrapped real checkboxes inside a named
+  fieldset, with a visible focus ring.
+- **`prefers-reduced-motion` was ignored by four of the five GSAP components.** Only
+  `Sidebar` checked. GSAP writes inline styles, so a CSS media query cannot override it —
+  the check has to happen before the timeline is built. `src/lib/motion.ts` is now that
+  check, and every timeline consults it. PRODUCT.md has committed to this since the start.
+
+**Two latent test races fixed**, both the same mistake: `findByTestId` on a pagination
+summary that renders from the first paint. It resolves immediately against
+"No contacts" and races the fetch, so the assertion passed or failed on timing.
+`ArchiveView` flaked visibly under load; `page.tsx` had the same bug and had not yet.
+
+Coverage: **91.66 statements / 82.75 branches / 81.03 functions / 91.66 lines** — the
+first time all four clear the 80% standard. Closing branches and functions did not need
+the deferred `page.tsx` decomposition; it needed testing what had never been tested at
+all: `/api/contacts` and `/api/import/parse` (both 0% function coverage, both on the main
+path), `FilterBar`, `Sidebar` and `DashboardStats` (no test file at all), and the
+address-autocomplete half of `ContactDrawer`.
+
+**The signed-in E2E specs run for the first time.** They had skipped since Phase 1 for
+want of a database; with the Supabase project live and an admin account present they now
+execute against real data. That took three fixes, none of them in application code:
+
+- Firefox and WebKit binaries were never installed, so 18 specs failed on
+  `Executable doesn't exist` rather than on anything real.
+- A wedged `next start` from an earlier session had been holding port 3000 for ten hours,
+  accepting connections and answering none. Every E2E attempt hung against it.
+- The suite was over-parallelised for one `next start` plus one remote Supabase project.
+  Different specs timed out on each run — the signature of contention, not a defect.
+  Workers capped at 3 locally, the per-test budget raised to 60s, and
+  `reducedMotion: 'reduce'` set: it makes Playwright's stability check deterministic
+  against the GSAP entrances, and it means the suite exercises the reduced-motion path
+  the app now actually has. Run time fell from 8.5 minutes to 2.3.
+
+E2E gate: **111 passed, 3 skipped, 0 failed** across chromium, firefox and webkit. The
+three remaining skips are correct — that spec asserts the "sign-in unavailable" screen,
+which only renders when Supabase is *not* configured.
+
+Full gate: 973 unit tests green, coverage 91.6 / 82.7 / 81.0 / 91.6, lint 0 errors,
+typecheck clean, build clean, 111 E2E green.
+
+**Still open after this phase:**
+- `ANTHROPIC_API_KEY` is not set, so generation has never run against the live API. The
+  code path is fully unit tested with the SDK mocked, but the first real call is
+  unverified — one manual smoke test needed.
+- The automation itself must be authored in EmailOctopus with the "Started via API"
+  trigger, its template pointed at `{{BookingUrl}}`, and its id pasted into the campaign.
+  Nothing can send until that exists.
+- 2.1 `page.tsx` decomposition. Server-side pagination, the archive screen and the
+  filter extraction all landed; what remains is real routes per view.
+- 1.2 deploy — still needs a Vercel account, the subdomain and DNS.
+- Visual-regression baselines at 320/768/1024/1440. Now genuinely possible — the
+  authenticated screens are reachable — but not captured.
+
+---
 
 **Gap closure (post-Phase 6):** `createBooking()` existed and was tested but had **zero
 production callers** — the campaign send never minted booking tokens, so requirement 3.3
@@ -138,13 +237,16 @@ dedicated endpoints so approval stays attributed and the irreversible step stays
 guarded; allowing them through a generic edit would let an ordinary field update smuggle
 a campaign past the human gate.
 
-**AI generation is on hold, correctly.** It is coupled to the provider answer, not
-independent of it: with `canSupplyBody: false` the only content route is contact custom
-fields merged into a UI-authored template, so there is no HTML body for a model to
-generate. Before shaping it, confirm on a free account (30–60 min):
-1. the merge-field ceiling — how many custom fields, and their length limits;
-2. whether automation sends surface in **any** report (currently recorded as
-   `perSendReporting: 'unknown'`, deliberately not guessed).
+**AI generation was held pending this answer, and holding was right.** It is coupled to
+the provider answer, not independent of it: with `canSupplyBody: false` there is no HTML
+body for a model to generate, so the shape had to wait until the merge-field ceiling was
+known. It now is (see Phase 4.6 above) — 11 fields, no limit error — and generation was
+built to fill named slots rather than write a body.
+
+Question 2 remains open and probably unanswerable from the outside: whether automation
+sends surface in **any** report. Still recorded as `perSendReporting: 'unknown'` rather
+than guessed. Bookings are the honest success metric for a campaign, and those come back
+through Stripe and Calendly, which we control.
 
 If full API-driven campaign creation is a hard requirement, this becomes a provider
 selection decision — the adapter boundary is what keeps that swap contained.
@@ -198,12 +300,16 @@ open-redirect sanitiser, credential validation) · login page + Server Action ·
 logout + sidebar control · security headers · robots exclusion.
 Gate: 149 unit tests green, typecheck clean, production build clean, 8 E2E green.
 
-### Blocked: there is no Supabase project
+### Resolved: the Supabase project exists (2026-08-20)
 
-Every value in `.env.local` is empty except `GEOAPIFY_API_KEY`. The CRM has never
+Superseded. The project is live with 5,202 contacts imported, every migration applied,
+and a confirmed admin account. The authenticated half of Phase 1 is verified and the
+signed-in E2E specs run. The steps below are kept as the setup record.
+
+~~Every value in `.env.local` is empty except `GEOAPIFY_API_KEY`. The CRM has never
 connected to a database, so there is no account to sign in with and the authenticated
 half of Phase 1 cannot be verified. **9 E2E specs skip** with an explicit reason rather
-than passing vacuously.
+than passing vacuously.~~
 
 To unblock, in order:
 
