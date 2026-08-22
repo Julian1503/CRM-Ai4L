@@ -12,7 +12,7 @@ spreadsheet import, status filter tabs, contact CRUD, dashboard) are not repeate
 |---|---|
 | 0 — Foundations | **Complete** — schema verified against the live database |
 | 1.1 — Auth | **Complete** — Supabase project live, 5,202 contacts loaded |
-| 1.2 — Deploy | **Blocked** — needs your Vercel account and DNS |
+| 1.2 — Deploy | **Prepared** — blocked only on your Vercel account + DNS |
 | 2.2 — Filters | **Complete** (job type, state, status, search) |
 | 2.3 — CSV export | **Complete** (two formats, filter-aware, injection-safe) |
 | 2.4 — Soft delete | **Complete** (archive API + UI; no hard-delete path remains) |
@@ -29,6 +29,41 @@ spreadsheet import, status filter tabs, contact CRUD, dashboard) are not repeate
 | 5.3 — Calendly | **Complete** (needs a paid Calendly plan to function) |
 | 6 — Hardening | **Complete** — coverage now clears 80% on all four metrics |
 | Gap closure | **Complete** — booking links wired; archive screen shipped |
+
+**Stage 1 prepared (2026-08-22): everything deployable that does not need the account.**
+
+`docs/DEPLOYMENT.md` is the runbook. `npm run verify:deployment <url>` is 17 checks that
+gate a release, covering what E2E cannot because E2E runs on localhost: headers surviving
+the platform, anonymous requests refused with 401 rather than 200, unsigned webhook POSTs
+refused with 401 rather than a retryable 5xx, and no server secret readable in anything
+the host serves.
+
+**The region is wrong for this client.** Supabase is in `ap-northeast-1` (Tokyo) and
+Vercel functions default to `iad1` (Washington DC). `vercel.json` pins functions to `hnd1`
+so they sit with the database — but the underlying question is for the client: an
+Australian business's contact database, 5,202 people with names, emails, phone numbers and
+employers, is stored in Japan. APP 8 governs cross-border disclosure of personal
+information. Supabase cannot change a project's region in place, so moving to
+`ap-southeast-2` means a new project and a migration. Cost and downtime, not a technical
+call.
+
+**Two documentation defects, both of the kind that only bite at deploy time:**
+
+- `.env.local.example` presented the EmailOctopus API key and list id as application
+  config. The application reads them from the `credentials` table instead. A deployer
+  would set them on Vercel and be told "not connected" with nothing to explain why.
+- `NEXT_PUBLIC_APP_URL` is read server-side when a send mints booking links, but the
+  `NEXT_PUBLIC_` prefix inlines it at build time — confirmed by finding the literal value
+  in `.next/server/chunks`. Changing it in a hosting dashboard does nothing until a
+  redeploy, and it must be right *before* the first campaign send: booking links go out
+  inside emails and cannot be recalled. Server-only secrets are *not* inlined, so those
+  rotate without a rebuild.
+
+Still blocked, and only on the client: the Vercel account, the exact subdomain, and DNS.
+Until a public HTTPS host exists none of the three webhooks can be exercised, so phases 3,
+5.2 and 5.3 stay unverifiable however complete their code is.
+
+---
 
 **Stage 0 closed (2026-08-22): the data layer is verified and the job-type filter works.**
 
