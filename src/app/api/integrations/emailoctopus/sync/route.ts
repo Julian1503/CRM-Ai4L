@@ -2,6 +2,8 @@ import { NextResponse, type NextRequest } from 'next/server'
 
 import { getSession } from '@/lib/auth/dal'
 import { syncContactToEmailOctopus, type SubscriptionStatus } from '@/lib/emailOctopus'
+import { MAX_PAGE_SIZE } from '@/lib/pagination'
+import { createSupabaseServerClient } from '@/lib/supabase/server'
 
 export const runtime = 'nodejs'
 
@@ -35,6 +37,53 @@ function getErrorMessage(error: unknown): string {
 }
 
 /**
+ * Reads every active contact, a page at a time.
+ *
+ * A full sync covers the whole book, but the browser only ever holds one page of it —
+ * so the list is gathered here rather than posted up from the client. Each read is
+ * bounded, since an unbounded one would stop at PostgREST's 1000-row cap without
+ * saying so and quietly sync a prefix of the contacts.
+ */
+async function fetchAllSyncContacts(): Promise<SyncContact[]> {
+  const db = await createSupabaseServerClient()
+  const collected: SyncContact[] = []
+
+  for (let page = 0; ; page += 1) {
+    const from = page * MAX_PAGE_SIZE
+
+    const { data, error } = await db
+      .from('active_contacts')
+      .select('email, first_name, last_name, subscribed_to_newsletter')
+      .order('created_at', { ascending: true })
+      .range(from, from + MAX_PAGE_SIZE - 1)
+
+    if (error) {
+      throw new Error(`Could not read contacts to sync: ${error.message}`)
+    }
+
+    const rows = data ?? []
+
+    for (const row of rows) {
+      if (typeof row.email === 'string' && row.email.trim() !== '') {
+        collected.push({
+          email: row.email,
+          firstName: row.first_name ?? '',
+          lastName: row.last_name ?? '',
+          subscribedToNewsletter: Boolean(row.subscribed_to_newsletter),
+        })
+      }
+    }
+
+    // A short page is the last page. Ordering by created_at ascending keeps the window
+    // stable: a contact added mid-sync lands at the end rather than shifting rows
+    // between pages.
+    if (rows.length < MAX_PAGE_SIZE) {
+      return collected
+    }
+  }
+}
+
+/**
  * Pushes contacts to an EmailOctopus list.
  *
  * Acts on behalf of a signed-in user, so unlike the webhook it is *not* exempt from the
@@ -56,14 +105,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const apiKey = typeof payload?.apiKey === 'string' ? payload.apiKey.trim() : ''
     const listId = typeof payload?.listId === 'string' ? payload.listId.trim() : ''
 
-    if (!apiKey || !listId || !Array.isArray(payload.contacts)) {
+    // `contacts` is optional: omitting it means "sync everything", which the server
+    // reads itself. The client cannot supply the full list any more — it only holds the
+    // page of contacts currently on screen.
+    const syncAll = payload.contacts === undefined
+    const requested = Array.isArray(payload.contacts) ? payload.contacts : []
+
+    if (!apiKey || !listId || (!syncAll && !Array.isArray(payload.contacts))) {
       return NextResponse.json(
         { error: 'Missing required sync parameters' },
         { status: 400, headers: NO_STORE }
       )
     }
 
-    const contacts = payload.contacts.filter(isSyncContact)
+    const contacts = syncAll ? await fetchAllSyncContacts() : requested.filter(isSyncContact)
     const errors: Array<{ email: string; error: string }> = []
     let syncedCount = 0
 
@@ -92,7 +147,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({
       success: true,
       syncedCount,
-      skippedCount: payload.contacts.length - contacts.length,
+      skippedCount: syncAll ? 0 : requested.length - contacts.length,
       errorsCount: errors.length,
       errors: errors.length > 0 ? errors : undefined,
     }, { headers: NO_STORE })

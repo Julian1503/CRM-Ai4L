@@ -5,11 +5,48 @@ import { NextRequest } from 'next/server'
 
 const mockGetSession = jest.fn()
 const mockSync = jest.fn()
+const mockCreateServerClient = jest.fn()
 
 jest.mock('@/lib/auth/dal', () => ({ getSession: () => mockGetSession() }))
 jest.mock('@/lib/emailOctopus', () => ({
   syncContactToEmailOctopus: (...args: unknown[]) => mockSync(...args),
 }))
+jest.mock('@/lib/supabase/server', () => ({
+  createSupabaseServerClient: () => mockCreateServerClient(),
+}))
+
+/**
+ * A contacts table of `count` rows, served through the chained query builder in
+ * whatever `.range()` windows the route asks for.
+ */
+function stubContactsTable(count: number) {
+  const ranges: Array<[number, number]> = []
+
+  const rows = Array.from({ length: count }, (unused, index) => ({
+    email: `contact-${index}@example.com`,
+    first_name: `First${index}`,
+    last_name: `Last${index}`,
+    subscribed_to_newsletter: index % 2 === 0,
+  }))
+
+  const builder: Record<string, unknown> = {}
+  const chain = () => builder
+
+  builder.select = chain
+  builder.order = chain
+  builder.range = (from: number, to: number) => {
+    ranges.push([from, to])
+    return builder
+  }
+  builder.then = (resolve: (value: unknown) => unknown) => {
+    const [from, to] = ranges[ranges.length - 1]
+    return Promise.resolve({ data: rows.slice(from, to + 1), error: null }).then(resolve)
+  }
+
+  mockCreateServerClient.mockResolvedValue({ from: jest.fn(() => builder) })
+
+  return { ranges }
+}
 
 import { POST } from './route'
 
@@ -37,6 +74,46 @@ describe('POST /api/integrations/emailoctopus/sync', () => {
     jest.clearAllMocks()
     mockGetSession.mockResolvedValue({ userId: 'u1', email: 'admin@example.com' })
     mockSync.mockResolvedValue(undefined)
+  })
+
+  it('syncs every contact when the caller omits the list', async () => {
+    // The browser only holds the page of contacts on screen, so a full sync has to be
+    // gathered server-side rather than posted up.
+    const { ranges } = stubContactsTable(3)
+
+    const response = await post({ apiKey: 'eo-key', listId: 'list-1' })
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({ syncedCount: 3, skippedCount: 0 })
+    expect(mockSync).toHaveBeenCalledTimes(3)
+    expect(ranges[0]).toEqual([0, 199])
+  })
+
+  it('reads past the first page rather than syncing a prefix', async () => {
+    // An unbounded read stops at PostgREST's 1000-row cap without reporting it; paging
+    // to a short page is what proves the whole table was covered.
+    const { ranges } = stubContactsTable(450)
+
+    const response = await post({ apiKey: 'eo-key', listId: 'list-1' })
+
+    await expect(response.json()).resolves.toMatchObject({ syncedCount: 450 })
+    expect(ranges).toEqual([
+      [0, 199],
+      [200, 399],
+      [400, 599],
+    ])
+  })
+
+  it('still accepts an explicit contact list for a single-contact sync', async () => {
+    const response = await post({
+      apiKey: 'eo-key',
+      listId: 'list-1',
+      contacts: [{ email: 'one@example.com', subscribedToNewsletter: true }],
+    })
+
+    expect(response.status).toBe(200)
+    expect(mockCreateServerClient).not.toHaveBeenCalled()
+    expect(mockSync).toHaveBeenCalledTimes(1)
   })
 
   it('refuses an unauthenticated caller', async () => {

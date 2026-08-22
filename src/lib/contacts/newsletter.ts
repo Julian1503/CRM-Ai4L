@@ -5,79 +5,184 @@ import type { Database } from '@/lib/db/types'
 /**
  * Automated newsletter intake (scope 3.2).
  *
- * The previous handler ran a bare `UPDATE ... WHERE email = ?`. For a brand-new website
- * subscriber that matched zero rows, and the endpoint still answered `200 {success:true}`
- * — so every new signup was silently discarded and the requirement was quietly unmet.
+ * The shapes here follow the documented EmailOctopus webhook contract
+ * (https://help.emailoctopus.com/article/314-webhooks): a request body is an **array**
+ * of flat event objects, buffered for about a minute and capped at 1000 events per
+ * delivery.
+ *
+ * An earlier version parsed a single `{ event, contact: { email_address } }` object and
+ * mapped the types `contact.subscribed` / `contact.unsubscribed`. Neither that envelope
+ * nor `contact.subscribed` exists, so every real delivery was rejected with a 400 and
+ * retried for ten days. The fixtures that made those tests pass were hand-written.
  */
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 export type NewsletterEvent = {
+  /** Provider event id — the idempotency key. Null when the payload omits it. */
+  id: string | null
+  /** The provider's own event name, recorded in the ledger to make deliveries traceable. */
+  providerType: string
   type: 'subscribed' | 'unsubscribed'
   email: string
   firstName: string
   lastName: string
   externalId: string | null
+  /** ISO 8601 instant the event occurred. Orders a batch; null when absent. */
+  occurredAt: string | null
 }
 
 export type ParseResult =
   | { ok: true; event: NewsletterEvent }
   | { ok: false; reason: 'invalid' | 'ignored' }
 
-const EVENT_TYPES: Record<string, NewsletterEvent['type']> = {
-  'contact.subscribed': 'subscribed',
-  'contact.unsubscribed': 'unsubscribed',
-}
+/**
+ * The event types this CRM acts on.
+ *
+ * `contact.clicked`, `contact.opened`, `contact.bounced` and `contact.complained` are
+ * engagement signals with nowhere to go in the schema yet, so they are acknowledged and
+ * dropped rather than rejected.
+ */
+const HANDLED_TYPES = new Set([
+  'contact.created',
+  'contact.updated',
+  'contact.unsubscribed',
+  'contact.deleted',
+])
 
 function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-/** Validates and normalises an inbound EmailOctopus webhook payload. */
+function readRecord(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {}
+}
+
+/**
+ * Works out what an event means for `subscribed_to_newsletter`.
+ *
+ * @returns null when the event carries no usable subscription state.
+ */
+function deriveType(providerType: string, status: string): NewsletterEvent['type'] | null {
+  // Removal from the list is not a CRM deletion — it only ends the subscription.
+  if (providerType === 'contact.unsubscribed' || providerType === 'contact.deleted') {
+    return 'unsubscribed'
+  }
+
+  if (status === 'subscribed') return 'subscribed'
+  if (status === 'unsubscribed') return 'unsubscribed'
+
+  // A pending double opt-in has not been confirmed. Recording it as a subscriber would
+  // claim consent the contact has not actually given.
+  if (status === 'pending') return null
+
+  // `contact_status` is documented as optional. A creation with no status is a new list
+  // member; an update with no status says nothing about subscription state.
+  return providerType === 'contact.created' ? 'subscribed' : null
+}
+
+/** Validates and normalises one event from an EmailOctopus delivery. */
 export function parseNewsletterEvent(payload: unknown): ParseResult {
-  if (typeof payload !== 'object' || payload === null) {
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
     return { ok: false, reason: 'invalid' }
   }
 
   const body = payload as Record<string, unknown>
-  const eventName = readString(body.event)
-  const contact = body.contact
+  const providerType = readString(body.type)
 
-  if (typeof contact !== 'object' || contact === null) {
+  if (!providerType) {
     return { ok: false, reason: 'invalid' }
   }
 
-  const contactRecord = contact as Record<string, unknown>
-  const email = readString(contactRecord.email_address).toLowerCase()
+  // Unknown-but-well-formed events are acknowledged, not rejected — a 4xx would make
+  // the provider retry something we will never handle.
+  if (!HANDLED_TYPES.has(providerType)) {
+    return { ok: false, reason: 'ignored' }
+  }
+
+  const email = readString(body.contact_email_address).toLowerCase()
 
   if (!email || !EMAIL_REGEX.test(email)) {
     return { ok: false, reason: 'invalid' }
   }
 
-  if (!eventName) {
-    return { ok: false, reason: 'invalid' }
-  }
+  const type = deriveType(providerType, readString(body.contact_status).toLowerCase())
 
-  const type = EVENT_TYPES[eventName]
-
-  // Unknown-but-well-formed events are acknowledged, not rejected — a 4xx would make
-  // the provider retry something we will never handle.
   if (!type) {
     return { ok: false, reason: 'ignored' }
   }
 
-  const fields = (contactRecord.fields ?? {}) as Record<string, unknown>
+  const fields = readRecord(body.contact_fields)
 
   return {
     ok: true,
     event: {
+      id: readString(body.id) || null,
+      providerType,
       type,
       email,
       firstName: readString(fields.FirstName),
       lastName: readString(fields.LastName),
-      externalId: readString(contactRecord.id) || null,
+      externalId: readString(body.contact_id) || null,
+      occurredAt: readString(body.occurred_at) || null,
     },
   }
+}
+
+export type NewsletterBatch = {
+  /** Actionable events, oldest first. */
+  events: NewsletterEvent[]
+  ignored: number
+  invalid: number
+}
+
+function occurredAtMs(event: NewsletterEvent): number {
+  const parsed = Date.parse(event.occurredAt ?? '')
+
+  // Undated events sort first and, since sort is stable, keep their delivered order.
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+/**
+ * Parses a whole delivery.
+ *
+ * Individual bad events are counted rather than fatal: rejecting a 1000-event batch
+ * because one row is malformed would make EmailOctopus redeliver the other 999 for ten
+ * days and never get past the same poison event.
+ *
+ * @returns null when the envelope itself is unusable — the only case worth a 400.
+ */
+export function parseNewsletterBatch(payload: unknown): NewsletterBatch | null {
+  // Deliveries are arrays. A bare object is tolerated so a hand-made test POST works.
+  const raw = Array.isArray(payload) ? payload : [payload]
+
+  if (!Array.isArray(payload) && (typeof payload !== 'object' || payload === null)) {
+    return null
+  }
+
+  const events: NewsletterEvent[] = []
+  let ignored = 0
+  let invalid = 0
+
+  for (const entry of raw) {
+    const parsed = parseNewsletterEvent(entry)
+
+    if (parsed.ok) {
+      events.push(parsed.event)
+    } else if (parsed.reason === 'ignored') {
+      ignored += 1
+    } else {
+      invalid += 1
+    }
+  }
+
+  // A batch can hold a subscribe and a later unsubscribe for the same address. Applying
+  // them in delivered order is not guaranteed to leave the newer state in place.
+  events.sort((a, b) => occurredAtMs(a) - occurredAtMs(b))
+
+  return { events, ignored, invalid }
 }
 
 export type ApplyResult = {

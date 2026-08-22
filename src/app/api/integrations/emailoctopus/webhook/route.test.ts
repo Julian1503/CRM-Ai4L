@@ -33,40 +33,49 @@ function request(
     ...options.headers,
   }
 
-  const signature =
-    options.signature === undefined ? `sha256=${sign(body)}` : options.signature
+  const signature = options.signature === undefined ? `sha256=${sign(body)}` : options.signature
 
   if (signature !== null) {
-    headers['x-emailoctopus-signature'] = signature
+    // The provider sends `EmailOctopus-Signature`; header lookup is case-insensitive.
+    headers['EmailOctopus-Signature'] = signature
   }
 
   return new NextRequest(URL_PATH, { method: 'POST', headers, body })
 }
 
-const subscribePayload = {
-  event: 'contact.subscribed',
-  contact: {
-    id: 'eo-1',
-    email_address: 'grace@example.com',
-    fields: { FirstName: 'Grace', LastName: 'Hopper' },
+/** A delivery is an array of flat events — see help.emailoctopus.com/article/314-webhooks. */
+const subscribePayload = [
+  {
+    id: 'evt-1',
+    type: 'contact.created',
+    list_id: 'list-1',
+    contact_id: 'eo-1',
+    contact_email_address: 'grace@example.com',
+    contact_status: 'subscribed',
+    contact_fields: { FirstName: 'Grace', LastName: 'Hopper' },
+    occurred_at: '2026-08-09T10:15:00Z',
   },
-}
+]
 
 /**
  * @param options.claimed  false simulates a duplicate delivery.
  * @param options.existing an active contact matching the email, or null.
  */
-function setupDb(options: { claimed?: boolean; existing?: { id: string } | null } = {}) {
+function setupDb(
+  options: { claimed?: boolean; existing?: { id: string } | null; contacts?: unknown[] } = {}
+) {
   const { claimed = true, existing = null } = options
 
   const webhookEvents = createQueryBuilderMock(
     claimed ? { data: null, error: null } : { data: null, error: { code: '23505', message: 'dup' } }
   )
-  const contacts = createQueryBuilderMock([
-    { data: existing, error: null },
-    { data: null, error: null },
-    { data: { id: 'c-new' }, error: null },
-  ])
+  const contacts = createQueryBuilderMock(
+    options.contacts ?? [
+      { data: existing, error: null },
+      { data: null, error: null },
+      { data: { id: 'c-new' }, error: null },
+    ]
+  )
   const syncLogs = createQueryBuilderMock({ data: null, error: null })
 
   const db = createDbMock((table: string) => {
@@ -92,6 +101,14 @@ describe('POST emailoctopus webhook', () => {
   })
 
   describe('authentication', () => {
+    it('accepts the documented EmailOctopus-Signature header', async () => {
+      // The handler previously looked for `x-emailoctopus-signature`, which the provider
+      // never sends, so every real delivery was answered with a 401.
+      const response = await POST(request(subscribePayload))
+
+      expect(response.status).toBe(200)
+    })
+
     it('rejects an unsigned request', async () => {
       const response = await POST(request(subscribePayload, { signature: null }))
 
@@ -111,15 +128,14 @@ describe('POST emailoctopus webhook', () => {
 
     it('rejects a body tampered with after signing', async () => {
       const original = JSON.stringify(subscribePayload)
-      const tampered = JSON.stringify({
-        ...subscribePayload,
-        contact: { ...subscribePayload.contact, email_address: 'attacker@evil.com' },
-      })
+      const tampered = JSON.stringify([
+        { ...subscribePayload[0], contact_email_address: 'attacker@evil.com' },
+      ])
 
       const response = await POST(
         new NextRequest(URL_PATH, {
           method: 'POST',
-          headers: { 'x-emailoctopus-signature': `sha256=${sign(original)}` },
+          headers: { 'EmailOctopus-Signature': `sha256=${sign(original)}` },
           body: tampered,
         })
       )
@@ -153,8 +169,8 @@ describe('POST emailoctopus webhook', () => {
       expect(response.status).toBe(400)
     })
 
-    it('rejects a payload with no email', async () => {
-      const response = await POST(request({ event: 'contact.subscribed', contact: {} }))
+    it('rejects an envelope that is neither an array nor an object', async () => {
+      const response = await POST(request(7))
 
       expect(response.status).toBe(400)
     })
@@ -162,11 +178,23 @@ describe('POST emailoctopus webhook', () => {
     it('acknowledges an event type it does not handle', async () => {
       // A 4xx would make EmailOctopus retry something we will never process.
       const response = await POST(
-        request({ event: 'contact.bounced', contact: { email_address: 'a@example.com' } })
+        request([{ type: 'contact.opened', contact_email_address: 'a@example.com' }])
       )
 
       expect(response.status).toBe(200)
-      await expect(response.json()).resolves.toMatchObject({ status: 'ignored' })
+      await expect(response.json()).resolves.toMatchObject({ status: 'ok', ignored: 1 })
+      expect(mockGetAdminClient).not.toHaveBeenCalled()
+    })
+
+    it('skips a malformed event without failing the rest of the delivery', async () => {
+      // One poison row must not send a 1000-event batch into a ten-day retry loop.
+      const { contacts } = setupDb({ existing: null })
+
+      const response = await POST(request([...subscribePayload, { type: 'contact.created' }]))
+
+      expect(response.status).toBe(200)
+      await expect(response.json()).resolves.toMatchObject({ invalid: 1, created: 1 })
+      expect(contacts.allFor('insert')).toHaveLength(1)
     })
   })
 
@@ -179,7 +207,7 @@ describe('POST emailoctopus webhook', () => {
       const response = await POST(request(subscribePayload))
 
       expect(response.status).toBe(200)
-      await expect(response.json()).resolves.toMatchObject({ action: 'created' })
+      await expect(response.json()).resolves.toMatchObject({ created: 1 })
 
       const insert = contacts.argsFor('insert') as [Record<string, unknown>]
       expect(insert[0]).toMatchObject({
@@ -194,8 +222,22 @@ describe('POST emailoctopus webhook', () => {
 
       const response = await POST(request(subscribePayload))
 
-      await expect(response.json()).resolves.toMatchObject({ action: 'updated' })
+      await expect(response.json()).resolves.toMatchObject({ updated: 1 })
       expect(contacts.allFor('insert')).toHaveLength(0)
+    })
+
+    it('unsubscribes on contact.deleted without removing the CRM record', async () => {
+      const { contacts } = setupDb({ existing: { id: 'c1' } })
+
+      await POST(
+        request([
+          { id: 'evt-del', type: 'contact.deleted', contact_email_address: 'grace@example.com' },
+        ])
+      )
+
+      const update = contacts.argsFor('update') as [Record<string, unknown>]
+      expect(update[0].subscribed_to_newsletter).toBe(false)
+      expect(contacts.allFor('delete')).toHaveLength(0)
     })
 
     it('writes an entry to the sync log', async () => {
@@ -203,8 +245,8 @@ describe('POST emailoctopus webhook', () => {
 
       await POST(request(subscribePayload))
 
-      const insert = syncLogs.argsFor('insert') as [Record<string, unknown>]
-      expect(String(insert[0].event_text)).toContain('grace@example.com')
+      const insert = syncLogs.argsFor('insert') as [Array<Record<string, unknown>>]
+      expect(String(insert[0][0].event_text)).toContain('grace@example.com')
     })
 
     it('uses the service-role client, since a webhook has no session', async () => {
@@ -214,7 +256,83 @@ describe('POST emailoctopus webhook', () => {
     })
   })
 
+  describe('batched deliveries', () => {
+    it('applies every event in a delivery', async () => {
+      // EmailOctopus buffers events for about a minute and sends up to 1000 at once.
+      const { contacts } = setupDb({
+        contacts: [
+          { data: { id: 'c1', deleted_at: null }, error: null },
+          { data: null, error: null },
+          { data: { id: 'c2', deleted_at: null }, error: null },
+          { data: null, error: null },
+        ],
+      })
+
+      const response = await POST(
+        request([
+          ...subscribePayload,
+          {
+            id: 'evt-2',
+            type: 'contact.unsubscribed',
+            contact_email_address: 'ada@example.com',
+            occurred_at: '2026-08-09T10:20:00Z',
+          },
+        ])
+      )
+
+      await expect(response.json()).resolves.toMatchObject({ updated: 2, received: 2 })
+      expect(contacts.allFor('update')).toHaveLength(2)
+    })
+
+    it('logs a batch with a single insert rather than one per event', async () => {
+      const { syncLogs } = setupDb({
+        contacts: [
+          { data: { id: 'c1', deleted_at: null }, error: null },
+          { data: null, error: null },
+          { data: { id: 'c2', deleted_at: null }, error: null },
+          { data: null, error: null },
+        ],
+      })
+
+      await POST(
+        request([
+          ...subscribePayload,
+          {
+            id: 'evt-2',
+            type: 'contact.unsubscribed',
+            contact_email_address: 'ada@example.com',
+          },
+        ])
+      )
+
+      expect(syncLogs.allFor('insert')).toHaveLength(1)
+      const insert = syncLogs.argsFor('insert') as [Array<Record<string, unknown>>]
+      expect(insert[0]).toHaveLength(2)
+    })
+  })
+
   describe('idempotency', () => {
+    it('claims each event on its own id, not the delivery', async () => {
+      // Keying on the request would let 999 events ride in on the first one's claim.
+      const { webhookEvents } = setupDb()
+
+      await POST(request(subscribePayload))
+
+      const insert = webhookEvents.argsFor('insert') as [Record<string, unknown>]
+      expect(insert[0]).toMatchObject({ event_id: 'evt-1', event_type: 'contact.created' })
+    })
+
+    it('falls back to a content hash when an event carries no id', async () => {
+      const { webhookEvents } = setupDb()
+
+      await POST(
+        request([{ type: 'contact.created', contact_email_address: 'grace@example.com' }])
+      )
+
+      const insert = webhookEvents.argsFor('insert') as [Record<string, unknown>]
+      expect(String(insert[0].event_id)).toMatch(/^sha256:[0-9a-f]{64}$/)
+    })
+
     it('processes a first delivery', async () => {
       const { contacts } = setupDb({ claimed: true, existing: null })
 
@@ -231,40 +349,42 @@ describe('POST emailoctopus webhook', () => {
       const response = await POST(request(subscribePayload))
 
       expect(response.status).toBe(200)
-      await expect(response.json()).resolves.toMatchObject({ status: 'duplicate' })
+      await expect(response.json()).resolves.toMatchObject({ duplicate: 1 })
       expect(contacts.allFor('insert')).toHaveLength(0)
       expect(contacts.allFor('update')).toHaveLength(0)
     })
+  })
 
-    it('prefers a provider-supplied delivery id', async () => {
-      const { webhookEvents } = setupDb()
+  describe('failure handling', () => {
+    function setupFailingDb() {
+      const webhookEvents = createQueryBuilderMock({ data: null, error: null })
+      const failing = createQueryBuilderMock({ data: null, error: { message: 'db down' } })
 
-      await POST(request(subscribePayload, { headers: { 'x-emailoctopus-delivery': 'delivery-9' } }))
+      mockGetAdminClient.mockReturnValue(
+        createDbMock((table: string) => (table === 'webhook_events' ? webhookEvents : failing))
+      )
 
-      const insert = webhookEvents.argsFor('insert') as [Record<string, unknown>]
-      expect(insert[0].event_id).toBe('delivery-9')
+      return { webhookEvents }
+    }
+
+    it('returns 500 so the provider retries when processing fails', async () => {
+      setupFailingDb()
+
+      const response = await POST(request(subscribePayload))
+
+      expect(response.status).toBe(500)
     })
 
-    it('falls back to a body hash when no delivery id is sent', async () => {
-      const { webhookEvents } = setupDb()
+    it('releases the claim so the retry is not dismissed as a duplicate', async () => {
+      // Without this the ledger turns a transient database blip into permanent loss:
+      // the event stays claimed, and every retry is skipped.
+      const { webhookEvents } = setupFailingDb()
 
       await POST(request(subscribePayload))
 
-      const insert = webhookEvents.argsFor('insert') as [Record<string, unknown>]
-      expect(String(insert[0].event_id)).toMatch(/^sha256:[0-9a-f]{64}$/)
+      expect(webhookEvents.allFor('delete')).toHaveLength(1)
+      const eqCalls = webhookEvents.allFor('eq').map((call) => call.args)
+      expect(eqCalls).toContainEqual(['event_id', 'evt-1'])
     })
-  })
-
-  it('returns 500 so the provider retries when processing fails', async () => {
-    const failing = createQueryBuilderMock({ data: null, error: { message: 'db down' } })
-    mockGetAdminClient.mockReturnValue(
-      createDbMock((table: string) =>
-        table === 'webhook_events' ? createQueryBuilderMock({ data: null, error: null }) : failing
-      )
-    )
-
-    const response = await POST(request(subscribePayload))
-
-    expect(response.status).toBe(500)
   })
 })

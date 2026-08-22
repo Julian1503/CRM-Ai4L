@@ -1,44 +1,71 @@
 {
-  "_comment": "EmailOctopus webhook payload shapes, matching what src/app/api/integrations/emailoctopus/webhook/route.ts reads today. Stripe and Calendly fixtures are recorded from real test-mode events in Phases 5.2 and 5.3 rather than guessed here.",
-  "subscribed": {
-    "event": "contact.subscribed",
-    "contact": {
-      "id": "00000000-1111-2222-3333-444444444444",
-      "email_address": "newsletter.signup@example.com",
-      "fields": {
+  "_comment": "EmailOctopus webhook payloads, following the documented contract at https://help.emailoctopus.com/article/314-webhooks. A delivery is an ARRAY of flat event objects (up to 1000, buffered ~1 minute). The previous version of this file described a single {event, contact:{...}} object with a 'contact.subscribed' type — neither exists, and the handler built against it rejected every real delivery.",
+  "created": [
+    {
+      "id": "9a1f0c3e-0000-4000-8000-000000000001",
+      "type": "contact.created",
+      "list_id": "11111111-2222-3333-4444-555555555555",
+      "contact_id": "00000000-1111-2222-3333-444444444444",
+      "contact_email_address": "newsletter.signup@example.com",
+      "contact_status": "subscribed",
+      "contact_fields": {
         "FirstName": "Grace",
         "LastName": "Hopper"
       },
-      "status": "SUBSCRIBED"
+      "contact_tags": [],
+      "occurred_at": "2026-08-09T10:15:00Z"
     }
-  },
-  "unsubscribed": {
-    "event": "contact.unsubscribed",
-    "contact": {
-      "id": "00000000-1111-2222-3333-444444444444",
-      "email_address": "newsletter.signup@example.com",
-      "fields": {
-        "FirstName": "Grace",
-        "LastName": "Hopper"
-      },
-      "status": "UNSUBSCRIBED"
+  ],
+  "unsubscribed": [
+    {
+      "id": "9a1f0c3e-0000-4000-8000-000000000002",
+      "type": "contact.unsubscribed",
+      "list_id": "11111111-2222-3333-4444-555555555555",
+      "contact_id": "00000000-1111-2222-3333-444444444444",
+      "contact_email_address": "newsletter.signup@example.com",
+      "contact_status": "unsubscribed",
+      "occurred_at": "2026-08-09T10:16:00Z"
     }
-  },
-  "unknownEvent": {
-    "event": "contact.bounced",
-    "contact": {
-      "email_address": "bounced@example.com"
+  ],
+  "batchOutOfOrder": [
+    {
+      "id": "9a1f0c3e-0000-4000-8000-000000000004",
+      "type": "contact.unsubscribed",
+      "contact_email_address": "batched@example.com",
+      "occurred_at": "2026-08-09T11:05:00Z"
+    },
+    {
+      "id": "9a1f0c3e-0000-4000-8000-000000000003",
+      "type": "contact.created",
+      "contact_email_address": "batched@example.com",
+      "contact_status": "subscribed",
+      "occurred_at": "2026-08-09T11:00:00Z"
     }
-  },
-  "malformedMissingContact": {
-    "event": "contact.subscribed"
-  },
-  "malformedMissingEmail": {
-    "event": "contact.subscribed",
-    "contact": {
-      "fields": {
-        "FirstName": "No"
-      }
+  ],
+  "pendingDoubleOptIn": [
+    {
+      "id": "9a1f0c3e-0000-4000-8000-000000000005",
+      "type": "contact.created",
+      "contact_email_address": "unconfirmed@example.com",
+      "contact_status": "pending",
+      "occurred_at": "2026-08-09T12:00:00Z"
     }
-  }
+  ],
+  "engagementOnly": [
+    {
+      "id": "9a1f0c3e-0000-4000-8000-000000000006",
+      "type": "contact.opened",
+      "campaign_id": "77777777-8888-9999-aaaa-bbbbbbbbbbbb",
+      "contact_email_address": "reader@example.com",
+      "occurred_at": "2026-08-09T13:00:00Z"
+    }
+  ],
+  "malformedMissingEmail": [
+    {
+      "id": "9a1f0c3e-0000-4000-8000-000000000007",
+      "type": "contact.created",
+      "contact_fields": { "FirstName": "No" },
+      "occurred_at": "2026-08-09T14:00:00Z"
+    }
+  ]
 }

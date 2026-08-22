@@ -9,17 +9,15 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
  * contacts straight past Row Level Security, because the handler writes with the
  * service-role key.
  *
- * ---------------------------------------------------------------------------
- * IMPORTANT — the exact header name and encoding must be confirmed against the
- * EmailOctopus documentation before go-live. Two common schemes are supported here:
+ * Two schemes are supported:
  *
  *   t=<unix_seconds>,v1=<hex hmac of "timestamp.body">   (replay-resistant)
  *   sha256=<hex hmac of body>                            (no replay defence)
  *
- * If EmailOctopus uses base64, a different digest, or a different signed payload, the
- * change is confined to `parseSignatureHeader` and `computeDigest` below. This could
- * not be verified here — no webhook secret or live endpoint was available.
- * ---------------------------------------------------------------------------
+ * EmailOctopus uses the second, in an `EmailOctopus-Signature` header
+ * (https://help.emailoctopus.com/article/314-webhooks). It offers no timestamp, so
+ * replay protection for that provider rests on the idempotency ledger instead. Stripe
+ * and Calendly supply the first form.
  */
 
 /** How far a signed timestamp may drift before the request is treated as a replay. */
