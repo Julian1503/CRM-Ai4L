@@ -84,6 +84,11 @@ setting. In the Supabase dashboard:
 Every secret fails **closed**: a missing webhook secret rejects all deliveries rather than
 accepting them, and a missing Supabase config denies access rather than granting it.
 
+**Deploying? Read [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) first.** It carries the full
+manifest of which variables go where, which two are *not* environment variables at all,
+and why `NEXT_PUBLIC_APP_URL` has to be right before the first campaign send rather than
+after it.
+
 ### EmailOctopus webhook
 
 Register one endpoint under **Settings → Webhooks**, pointing at
@@ -147,6 +152,7 @@ search.
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run lint` | ESLint |
 | `npm run db:verify` | Schema assertions against the live database (four suites) |
+| `npm run verify:deployment <url>` | Post-deploy checks: headers, auth, webhook signatures, secret leaks |
 | `npm run db:sync-job-types` | Assign job types from EmailOctopus tags (`-- --dry-run` to preview) |
 | `npm run db:create-admin` | Seed the first dashboard login from `ADMIN_EMAIL` / `ADMIN_PASSWORD` |
 
