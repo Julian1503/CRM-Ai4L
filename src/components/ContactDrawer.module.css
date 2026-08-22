@@ -382,3 +382,24 @@
   0%, 100% { opacity: 0.6; }
   50% { opacity: 1; }
 }
+
+/* The services group is a fieldset now, so the browser's default border, padding and
+   margin have to go -- it should look identical to the .field blocks around it. */
+fieldset.field {
+  min-inline-size: 0;
+  padding: 0;
+  margin-inline: 0;
+  border: 0;
+}
+
+fieldset.field > legend {
+  padding: 0;
+}
+
+/* Both toggles are keyboard-reachable now, so the focus ring has to be visible.
+   Drawn on the wrapping label, since the native checkbox indicator is small. */
+.checkboxContainer:focus-within,
+.serviceItem:focus-within {
+  outline: 2px solid var(--border-focus, currentColor);
+  outline-offset: 2px;
+}

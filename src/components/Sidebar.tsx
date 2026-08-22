@@ -5,6 +5,8 @@ import styles from './Sidebar.module.css';
 import { gsap } from 'gsap';
 import { useGSAP } from '@gsap/react';
 
+import { prefersReducedMotion } from '@/lib/motion';
+
 export type ActiveView = 'contacts' | 'archive' | 'campaigns' | 'imports' | 'integrations' | 'settings';
 
 interface SidebarProps {
@@ -93,15 +95,12 @@ export default function Sidebar({ currentView, onViewChange }: SidebarProps) {
     const tl = gsap.timeline({ paused: true });
     tlRef.current = tl;
 
-    // Detect prefers-reduced-motion settings safely
-    const prefersReducedMotion = typeof window !== 'undefined' && 
-      window.matchMedia && 
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    
-    // Smooth, confident transition values
-    const totalDuration = prefersReducedMotion ? 0.05 : 0.65;
-    const coreEase = prefersReducedMotion ? 'none' : 'expo.inOut';
-    const staggerTime = prefersReducedMotion ? 0 : 0.035;
+    // The collapse is not decorative -- the sidebar has to end up at the collapsed
+    // width either way -- so this shortens the timeline rather than skipping it.
+    const reduced = prefersReducedMotion();
+    const totalDuration = reduced ? 0.05 : 0.65;
+    const coreEase = reduced ? 'none' : 'expo.inOut';
+    const staggerTime = reduced ? 0 : 0.035;
 
     // Construct the timeline tweens to transition from Expanded to Collapsed state
     tl.to(containerRef.current, {
@@ -127,7 +126,7 @@ export default function Sidebar({ currentView, onViewChange }: SidebarProps) {
     .to('.toggleIcon', {
       rotate: 180,
       duration: totalDuration,
-      ease: prefersReducedMotion ? 'none' : 'power3.out',
+      ease: reduced ? 'none' : 'power3.out',
     }, 0)
     .to(logoSuffixRef.current, {
       width: 0,

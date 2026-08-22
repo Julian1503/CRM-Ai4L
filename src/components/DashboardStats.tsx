@@ -5,6 +5,8 @@ import styles from './DashboardStats.module.css';
 import { gsap } from 'gsap';
 import { useGSAP } from '@gsap/react';
 
+import { prefersReducedMotion } from '@/lib/motion';
+
 interface DashboardStatsProps {
   totalContacts: number;
   customers: number;
@@ -32,6 +34,19 @@ export default function DashboardStats({
   });
 
   useGSAP(() => {
+    // Reduced motion skips both the stagger and the count-up. The counts stay correct:
+    // the spans render {totalContacts} etc. from JSX, and the tween below only
+    // overwrites that text while animating towards the same number.
+    if (prefersReducedMotion()) {
+      prevValues.current = {
+        total: totalContacts,
+        customers,
+        prospects,
+        newsletter: newsletterSubscribers,
+      };
+      return;
+    }
+
     // 1. Stagger animate the card wrappers entering on mount
     gsap.fromTo(
       `.${styles.cardShell}`,

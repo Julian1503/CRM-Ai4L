@@ -7,6 +7,8 @@ import { validateContact } from '@/lib/contacts';
 import { gsap } from 'gsap';
 import { useGSAP } from '@gsap/react';
 
+import { prefersReducedMotion } from '@/lib/motion';
+
 interface ContactDrawerProps {
   contact: TableContact | null;
   onClose: () => void;
@@ -139,6 +141,7 @@ export default function ContactDrawer({
   };
 
   useGSAP(() => {
+    if (prefersReducedMotion()) return;
     if (!contact) return;
 
     // Stagger reveal of form sections and input fields when contact details load
@@ -470,54 +473,50 @@ export default function ContactDrawer({
           <div className={styles.section}>
             <h3 className={styles.sectionTitle}>Status & Sync</h3>
             
-            <div 
-              className={styles.checkboxContainer}
-              onClick={() => handleInputChange('isCustomer', !formData.isCustomer)}
-            >
+            {/* A <label> wrapping a real checkbox, not a div with onClick around a
+                readOnly one. The previous shape was unreachable by keyboard (a div is
+                not focusable), announced nothing to a screen reader, and gave every
+                service the same element id. */}
+            <label className={styles.checkboxContainer}>
               <input
                 type="checkbox"
                 className={styles.checkbox}
                 checked={formData.isCustomer || false}
-                readOnly
+                onChange={(e) => handleInputChange('isCustomer', e.target.checked)}
               />
               <span className={styles.label}>Is Customer (Prospect if unchecked)</span>
-            </div>
+            </label>
 
             {formData.isCustomer && (
-              <div className={styles.field} style={{ marginTop: '14px' }}>
-                <label className={styles.label} htmlFor="contact-services-bought">Services Bought</label>
+              <fieldset className={styles.field} style={{ marginTop: '14px' }}>
+                <legend className={styles.label}>Services Bought</legend>
                 <div className={styles.servicesGrid}>
                   {availableServices.map((service) => (
-                    <div 
-                      key={service.id}
-                      className={styles.serviceItem}
-                      onClick={() => handleServiceToggle(service.id)}
-                    >
-                      <input id="contact-services-bought"
+                    <label key={service.id} className={styles.serviceItem}>
+                      <input
                         type="checkbox"
                         className={styles.checkbox}
                         checked={(formData.servicesBought || []).includes(service.id)}
-                        readOnly
+                        onChange={() => handleServiceToggle(service.id)}
                       />
                       <span>{service.name}</span>
-                    </div>
+                    </label>
                   ))}
                 </div>
-              </div>
+              </fieldset>
             )}
 
-            <div 
-              className={styles.checkboxContainer}
-              onClick={() => handleInputChange('subscribedToNewsletter', !formData.subscribedToNewsletter)}
-            >
+            <label className={styles.checkboxContainer}>
               <input
                 type="checkbox"
                 className={styles.checkbox}
                 checked={formData.subscribedToNewsletter || false}
-                readOnly
+                onChange={(e) =>
+                  handleInputChange('subscribedToNewsletter', e.target.checked)
+                }
               />
               <span className={styles.label}>Subscribed to Newsletter (Sync to EmailOctopus)</span>
-            </div>
+            </label>
           </div>
 
           {/* Section 5: Notes */}
