@@ -12,8 +12,12 @@
     "test:coverage": "jest --coverage",
     "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit",
-    "db:types": "supabase gen types typescript --linked --schema public > src/lib/db/types.ts",
-    "db:verify": "supabase db query --linked --file supabase/tests/verify_20260807000000.sql",
+    "db:types": "npx supabase gen types typescript --linked --schema public > src/lib/db/types.ts",
+    "db:verify": "npm run db:verify:contacts && npm run db:verify:webhooks && npm run db:verify:campaigns && npm run db:verify:bookings",
+    "db:verify:contacts": "npx supabase db query --linked --file supabase/tests/verify_20260807000000.sql",
+    "db:verify:webhooks": "npx supabase db query --linked --file supabase/tests/verify_20260807010000.sql",
+    "db:verify:campaigns": "npx supabase db query --linked --file supabase/tests/verify_20260808000000.sql",
+    "db:verify:bookings": "npx supabase db query --linked --file supabase/tests/verify_20260808010000.sql",
     "db:create-admin": "node --env-file=.env.local supabase/create-admin.js"
   },
   "dependencies": {

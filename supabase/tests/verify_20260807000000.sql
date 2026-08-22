@@ -12,8 +12,13 @@
 
 begin;
 
--- Isolate from real data: every fixture uses this suffix.
-\set tag '__p0verify'
+-- Isolate from real data: every fixture uses the suffix `__p0verify`, and the whole
+-- script rolls back regardless.
+--
+-- Deliberately no `\set`: this runs through `supabase db query --linked`, which posts
+-- SQL to the Management API rather than piping it through psql, so psql meta-commands
+-- are a syntax error there. Keeping the suffix inline costs nothing and lets the same
+-- file run over either transport.
 
 do $$
 declare
