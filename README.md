@@ -27,11 +27,24 @@ cp .env.local.example .env.local   # then fill it in — see the table below
 npm run dev
 ```
 
-Apply the database migrations to your Supabase project (they are in `supabase/migrations/`,
-applied in filename order), then verify the Phase 0 schema:
+Apply the database migrations to your Supabase project (`npx supabase db push`, or run the
+files in `supabase/migrations/` in filename order), then verify the schema:
 
 ```bash
-npm run db:verify   # non-destructive; rolls back at the end
+npm run db:verify   # all four suites; non-destructive, each rolls back at the end
+```
+
+Each suite can be run alone: `db:verify:contacts`, `db:verify:webhooks`,
+`db:verify:campaigns`, `db:verify:bookings`. They assert what a mocked unit test cannot —
+that the database itself refuses a replayed webhook, an unapproved send, and a booking
+token reused for a second free consultation.
+
+Contacts get their job type from their EmailOctopus tags, which is where the client's own
+classification lives. Re-run after any import:
+
+```bash
+npm run db:sync-job-types -- --dry-run   # report only
+npm run db:sync-job-types                # apply
 ```
 
 Regenerate the TypeScript schema types after any migration:
@@ -133,7 +146,9 @@ search.
 | `npm run test:e2e` | Playwright, against a **production build** |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run lint` | ESLint |
-| `npm run db:verify` | Schema assertions against the live database |
+| `npm run db:verify` | Schema assertions against the live database (four suites) |
+| `npm run db:sync-job-types` | Assign job types from EmailOctopus tags (`-- --dry-run` to preview) |
+| `npm run db:create-admin` | Seed the first dashboard login from `ADMIN_EMAIL` / `ADMIN_PASSWORD` |
 
 E2E runs against `next build` + `next start` rather than the dev server — both because
 E2E should exercise the shipped artifact, and because `next dev` does not currently

@@ -10,7 +10,7 @@ spreadsheet import, status filter tabs, contact CRUD, dashboard) are not repeate
 
 | Phase | Status |
 |---|---|
-| 0 — Foundations | **Complete** (SQL unverified — see below) |
+| 0 — Foundations | **Complete** — schema verified against the live database |
 | 1.1 — Auth | **Complete** — Supabase project live, 5,202 contacts loaded |
 | 1.2 — Deploy | **Blocked** — needs your Vercel account and DNS |
 | 2.2 — Filters | **Complete** (job type, state, status, search) |
@@ -29,6 +29,57 @@ spreadsheet import, status filter tabs, contact CRUD, dashboard) are not repeate
 | 5.3 — Calendly | **Complete** (needs a paid Calendly plan to function) |
 | 6 — Hardening | **Complete** — coverage now clears 80% on all four metrics |
 | Gap closure | **Complete** — booking links wired; archive screen shipped |
+
+**Stage 0 closed (2026-08-22): the data layer is verified and the job-type filter works.**
+
+`supabase/tests/` covered one migration of six, and the three carrying the irreversible
+behaviour had none. There are now four verifiers — webhook ledger, campaign approval
+trigger, booking uniqueness — each one transaction, rolled back, fixtures suffixed. They
+assert what a mocked Jest test structurally cannot: that the *database* refuses the
+duplicate, not that the handler asked it to.
+
+Running them turned up two defects:
+
+- **`db:verify` had never run.** It called a `supabase` binary that is not on PATH, and
+  the script carried a `\set` — a psql meta-command, which is a syntax error over
+  `db query --linked` because that posts SQL to the Management API rather than piping it
+  through psql. Both fixed; every `db:` script now goes through npx.
+- **`import_contacts()` could not be called twice in one transaction.** Its scratch table
+  is `on commit drop`, which releases at COMMIT rather than at RETURN, so a second call
+  failed with `42P07 relation "_import_rows" already exists`. Production never hit it —
+  each PostgREST RPC is its own transaction — but any batched caller would. Migration
+  `20260822000000` drops the table before creating it; the function is otherwise
+  byte-identical.
+
+**Open question 1 is answered, and it was answered by looking in the right place.** This
+plan recorded job types as blocked because "the import carried no column that maps to
+one", and guessing from an email domain was correctly refused. But the client has been
+classifying this database all along — in EmailOctopus, as per-contact tags. Every one of
+the 5,202 contacts carries one:
+
+| Tag | Contacts | Job type |
+|---|---|---|
+| RTOs | 3,222 | Registered Training Organisation |
+| Learning and Development | 1,978 | Learning and Development |
+| both | 1 | *left unassigned — a business judgement* |
+| none | 1 | the admin account, not a prospect |
+
+5,200 contacts assigned. **The job-type filter and every segment built on it were inert
+until this point** — the dropdown had values, but no contact matched any of them.
+
+Kept as `npm run db:sync-job-types` (with `--dry-run`) rather than run once and
+forgotten, because the problem recurs: every contact added by a later import or by the
+newsletter form arrives with no job type. The script refuses to invent a job type from an
+unrecognised tag, refuses to pick a winner for a multi-tagged contact, and never clears
+one that is already set.
+
+Two notes for the client, neither blocking:
+- **`yolanda@accend.edu.au` carries both tags.** Which one wins is their call.
+- The default EmailOctopus listing returns subscribed contacts only. Reading unsubscribed
+  separately is what took the tag map from 5,082 to the full 5,202 — worth remembering
+  for any future sync, because the 120 missing rows would have looked like a clean match.
+
+---
 
 **Phase 4.6 delivered (2026-08-20):** the last open piece of the marketing agent.
 
@@ -915,8 +966,10 @@ in CI with recorded fixtures; one manual live smoke per integration per release.
 
 ## 6. Open questions for the client
 
-1. **Job type values** — what's the actual list? (trades, industries, service categories?) It drives
-   the `job_types` seed data and every segment.
+1. ~~**Job type values** — what's the actual list?~~ **Answered 2026-08-22** from the client's own
+   EmailOctopus tags: Registered Training Organisation (3,222) and Learning and Development (1,978).
+   All 5,202 contacts classified. Still worth confirming they want only these two, and how
+   `yolanda@accend.edu.au` — tagged as both — should be classified.
 2. **Client status values** — is `lead / prospect / customer / archived` right, or do they use
    different language?
 3. **Calendly plan** — do they have Standard or above (needed for webhooks)?

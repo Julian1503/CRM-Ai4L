@@ -18,7 +18,8 @@
     "db:verify:webhooks": "npx supabase db query --linked --file supabase/tests/verify_20260807010000.sql",
     "db:verify:campaigns": "npx supabase db query --linked --file supabase/tests/verify_20260808000000.sql",
     "db:verify:bookings": "npx supabase db query --linked --file supabase/tests/verify_20260808010000.sql",
-    "db:create-admin": "node --env-file=.env.local supabase/create-admin.js"
+    "db:create-admin": "node --env-file=.env.local supabase/create-admin.js",
+    "db:sync-job-types": "node --env-file=.env.local supabase/sync-job-types.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.120.0",
