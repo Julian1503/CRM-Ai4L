@@ -13,6 +13,14 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
   ]),
+  {
+    // Standalone Node scripts, run directly with `node`, never bundled. They are
+    // CommonJS on purpose -- `require()` is correct here, not debt.
+    files: ["generate-proposal.js", "supabase/*.js", "scripts/**/*.js"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+    },
+  },
 ]);
 
 export default eslintConfig;

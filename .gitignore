@@ -16,6 +16,14 @@
 /playwright-report/
 /blob-report/
 __pycache__/
+# Playwright MCP session artefacts: page snapshots and console logs from ad-hoc
+# browser driving, not part of the suite.
+/.playwright-mcp/
+
+# scratch
+# Local throwaways -- one-off scripts, captured logs. Named so they are obviously
+# disposable and cannot be mistaken for something the app needs.
+.tmp-*
 
 # next.js
 /.next/
@@ -42,6 +50,9 @@ yarn-error.log*
 
 # vercel
 .vercel
+
+# supabase cli local state (project ref, temp files) -- machine-specific
+/supabase/.temp/
 
 # typescript
 *.tsbuildinfo
