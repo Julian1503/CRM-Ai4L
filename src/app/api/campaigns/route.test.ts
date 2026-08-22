@@ -15,6 +15,10 @@ jest.mock('@/lib/supabase/server', () => ({
 
 import { GET, POST } from './route'
 
+function get(query = '') {
+  return GET(new NextRequest(`https://crm.example.com/api/campaigns${query}`))
+}
+
 function post(body: unknown) {
   return POST(
     new NextRequest('https://crm.example.com/api/campaigns', {
@@ -41,7 +45,7 @@ describe('/api/campaigns', () => {
   it('refuses an unauthenticated read', async () => {
     mockGetSession.mockResolvedValue(null)
 
-    expect((await GET()).status).toBe(401)
+    expect((await get()).status).toBe(401)
   })
 
   it('refuses an unauthenticated write', async () => {
@@ -51,18 +55,51 @@ describe('/api/campaigns', () => {
   })
 
   it('lists campaigns with their segment', async () => {
-    setup({ data: [{ id: 'camp-1' }], error: null })
+    setup({ data: [{ id: 'camp-1' }], error: null, count: 1 })
 
-    const response = await GET()
+    const response = await get()
 
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toMatchObject({ campaigns: [{ id: 'camp-1' }] })
   })
 
+  it('bounds the listing to one page and reports the total', async () => {
+    const { campaigns } = setup({ data: [{ id: 'camp-1' }], error: null, count: 312 })
+
+    const response = await get()
+
+    // Unbounded, this read would silently stop at PostgREST's 1000-row cap.
+    expect(campaigns.argsFor('range')).toEqual([0, 49])
+    expect(campaigns.argsFor('select')?.[1]).toEqual({ count: 'exact' })
+    await expect(response.json()).resolves.toMatchObject({
+      page: 1,
+      pageSize: 50,
+      total: 312,
+      pageCount: 7,
+      hasMore: true,
+    })
+  })
+
+  it('honours an explicit page and size', async () => {
+    const { campaigns } = setup({ data: [], error: null, count: 312 })
+
+    await get('?page=3&pageSize=25')
+
+    expect(campaigns.argsFor('range')).toEqual([50, 74])
+  })
+
+  it('caps a page size a crafted URL asks for', async () => {
+    const { campaigns } = setup({ data: [], error: null, count: 5000 })
+
+    await get('?pageSize=99999')
+
+    expect(campaigns.argsFor('range')).toEqual([0, 199])
+  })
+
   it('surfaces a listing failure', async () => {
     setup({ data: null, error: { message: 'boom' } })
 
-    expect((await GET()).status).toBe(500)
+    expect((await get()).status).toBe(500)
   })
 
   it('requires a name', async () => {

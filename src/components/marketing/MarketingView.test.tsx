@@ -260,4 +260,153 @@ describe('MarketingView', () => {
 
     expect(await screen.findByText(/credentials are not configured/i)).toBeInTheDocument()
   })
+
+  describe('campaign creation', () => {
+    it('will not save a campaign without a name', async () => {
+      render(<MarketingView jobTypes={jobTypes} />)
+
+      expect(await screen.findByTestId('create-campaign')).toBeDisabled()
+    })
+
+    it('posts the name, segment and automation id', async () => {
+      render(<MarketingView jobTypes={jobTypes} />)
+
+      fireEvent.change(await screen.findByTestId('campaign-name'), {
+        target: { value: 'August offer' },
+      })
+      fireEvent.change(screen.getByTestId('campaign-segment'), {
+        target: { value: 'seg-1' },
+      })
+      fireEvent.change(screen.getByTestId('campaign-automation'), {
+        target: { value: 'auto-9' },
+      })
+      fireEvent.click(screen.getByTestId('create-campaign'))
+
+      await waitFor(() => {
+        const call = mockFetch.mock.calls.find(
+          (entry) => entry[0] === '/api/campaigns' && entry[1]?.method === 'POST'
+        )
+        expect(call).toBeDefined()
+        expect(JSON.parse(call![1].body)).toEqual({
+          name: 'August offer',
+          segmentId: 'seg-1',
+          providerAutomationId: 'auto-9',
+        })
+      })
+    })
+
+    it('surfaces a refused creation', async () => {
+      routeFetch({
+        ...defaultHandlers,
+        'POST /api/campaigns': jsonResponse({ error: 'That name is taken.' }, false, 409),
+      })
+
+      render(<MarketingView jobTypes={jobTypes} />)
+      fireEvent.change(await screen.findByTestId('campaign-name'), {
+        target: { value: 'August offer' },
+      })
+      fireEvent.click(screen.getByTestId('create-campaign'))
+
+      expect(await screen.findByText('That name is taken.')).toBeInTheDocument()
+    })
+  })
+
+  describe('review flow', () => {
+    it('moves a draft into review through PATCH, not the approve endpoint', async () => {
+      routeFetch({
+        ...defaultHandlers,
+        'GET /api/campaigns': jsonResponse({
+          campaigns: [
+            {
+              id: 'camp-1',
+              name: 'August offer',
+              status: 'draft',
+              segment_id: 'seg-1',
+              provider_automation_id: 'auto-1',
+              merge_fields: {},
+              segment: { name: 'NSW leads' },
+            },
+          ],
+        }),
+      })
+
+      render(<MarketingView jobTypes={jobTypes} />)
+      fireEvent.click(await screen.findByText('Send for review'))
+
+      await waitFor(() => {
+        const call = mockFetch.mock.calls.find(
+          (entry) => entry[0] === '/api/campaigns/camp-1' && entry[1]?.method === 'PATCH'
+        )
+        expect(JSON.parse(call![1].body)).toEqual({ status: 'in_review' })
+      })
+    })
+  })
+
+  describe('copy editor', () => {
+    it('stays closed until asked for', async () => {
+      render(<MarketingView jobTypes={jobTypes} />)
+
+      await screen.findByTestId('review-copy-camp-1')
+      expect(screen.queryByTestId('campaign-copy-editor')).toBeNull()
+    })
+
+    it('opens and closes on the same control', async () => {
+      render(<MarketingView jobTypes={jobTypes} />)
+
+      const toggle = await screen.findByTestId('review-copy-camp-1')
+      fireEvent.click(toggle)
+      expect(screen.getByTestId('campaign-copy-editor')).toBeInTheDocument()
+
+      fireEvent.click(screen.getByTestId('review-copy-camp-1'))
+      expect(screen.queryByTestId('campaign-copy-editor')).toBeNull()
+    })
+
+    it('reports its expanded state to assistive technology', async () => {
+      render(<MarketingView jobTypes={jobTypes} />)
+
+      const toggle = await screen.findByTestId('review-copy-camp-1')
+      expect(toggle).toHaveAttribute('aria-expanded', 'false')
+
+      fireEvent.click(toggle)
+      expect(screen.getByTestId('review-copy-camp-1')).toHaveAttribute(
+        'aria-expanded',
+        'true'
+      )
+    })
+
+    it('locks the copy of a campaign already under review', async () => {
+      // The default fixture campaign is in_review, so its copy must not be editable --
+      // rewriting it would leave the approval attributed to text nobody read.
+      render(<MarketingView jobTypes={jobTypes} />)
+
+      fireEvent.click(await screen.findByTestId('review-copy-camp-1'))
+
+      expect(screen.getByTestId('copy-locked')).toBeInTheDocument()
+    })
+
+    it('leaves a draft campaign editable', async () => {
+      routeFetch({
+        ...defaultHandlers,
+        'GET /api/campaigns': jsonResponse({
+          campaigns: [
+            {
+              id: 'camp-1',
+              name: 'August offer',
+              status: 'draft',
+              segment_id: 'seg-1',
+              provider_automation_id: 'auto-1',
+              merge_fields: {},
+              segment: { name: 'NSW leads' },
+            },
+          ],
+        }),
+      })
+
+      render(<MarketingView jobTypes={jobTypes} />)
+      fireEvent.click(await screen.findByTestId('review-copy-camp-1'))
+
+      expect(screen.queryByTestId('copy-locked')).toBeNull()
+      expect(screen.getByTestId('generate-copy')).toBeEnabled()
+    })
+  })
 })

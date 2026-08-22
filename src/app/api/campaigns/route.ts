@@ -2,25 +2,35 @@ import type { NextRequest } from 'next/server'
 import type { NextResponse } from 'next/server'
 
 import { badRequest, ok, readJsonBody, requireSessionOr401, serverError } from '@/lib/api/responses'
+import { buildPageMeta, getPageRange, readPageParams } from '@/lib/pagination'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 
 export const runtime = 'nodejs'
 
-/** Lists campaigns with their segment name. */
-export async function GET(): Promise<NextResponse> {
+/**
+ * Lists campaigns with their segment name, newest first.
+ *
+ * Bounded: campaigns accumulate and are never deleted, so an unbounded read would
+ * eventually hit PostgREST's silent 1000-row cap.
+ */
+export async function GET(request: NextRequest): Promise<NextResponse> {
   const guard = await requireSessionOr401()
   if ('response' in guard) return guard.response
 
   try {
     const db = await createSupabaseServerClient()
-    const { data, error } = await db
+    const pageParams = readPageParams(request.nextUrl.searchParams)
+    const { from, to } = getPageRange(pageParams)
+
+    const { data, error, count } = await db
       .from('campaigns')
-      .select('*, segment:segments(name)')
+      .select('*, segment:segments(name)', { count: 'exact' })
       .order('created_at', { ascending: false })
+      .range(from, to)
 
     if (error) throw new Error(error.message)
 
-    return ok({ campaigns: data ?? [] })
+    return ok({ campaigns: data ?? [], ...buildPageMeta(pageParams, count ?? 0) })
   } catch (error) {
     return serverError(error, 'Could not load campaigns.')
   }

@@ -11,6 +11,7 @@ import {
   serverError,
 } from '@/lib/api/responses'
 import { canTransition } from '@/lib/marketing/campaignStatus'
+import { validateCampaignCopy } from '@/lib/marketing/mergeFields'
 import type { CampaignRow, CampaignStatus } from '@/lib/db/types'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 
@@ -88,6 +89,20 @@ export async function PATCH(
     if (typeof body.notes === 'string') updates.notes = body.notes.trim() || null
     if (typeof body.providerAutomationId === 'string') {
       updates.provider_automation_id = body.providerAutomationId.trim() || null
+    }
+
+    // Human edits go through the same gate as generated copy. An operator retyping a
+    // headline can overrun the template exactly like the model can, and the failure
+    // looks identical at send time — so the length caps and the reserved-field rule
+    // are enforced here, not only on the generation path.
+    if (body.mergeFields !== undefined) {
+      const validation = validateCampaignCopy(body.mergeFields)
+
+      if (!validation.ok) {
+        return badRequest(validation.errors.join(' '))
+      }
+
+      updates.merge_fields = validation.value
     }
 
     if (typeof body.status === 'string') {

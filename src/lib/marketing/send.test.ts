@@ -6,7 +6,8 @@ import { createDbMock, createQueryBuilderMock } from '@/test/supabaseMock'
 import type { CampaignProvider } from './providers/types'
 import { EMAILOCTOPUS_CAPABILITIES } from './providers/emailOctopus'
 import { TokenBucket } from './rateLimiter'
-import { BOOKING_URL_MERGE_FIELD, executeCampaignSends, prepareCampaignSends } from './send'
+import { BOOKING_URL_MERGE_FIELD } from './mergeFields'
+import { executeCampaignSends, prepareCampaignSends } from './send'
 
 function contactRow(id: string, email = `${id}@example.com`) {
   return { id, contact_id: id, contact: { email, first_name: 'A', last_name: 'B' } }

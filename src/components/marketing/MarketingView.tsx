@@ -4,6 +4,9 @@ import React, { useCallback, useEffect, useState } from 'react'
 
 import { AU_STATES } from '@/lib/contacts/states'
 
+import Pagination from '@/components/ui/Pagination'
+
+import CampaignCopyEditor from './CampaignCopyEditor'
 import styles from './marketing.module.css'
 
 type Segment = {
@@ -19,6 +22,7 @@ type Campaign = {
   status: 'draft' | 'in_review' | 'approved' | 'sending' | 'sent' | 'failed'
   segment_id: string | null
   provider_automation_id: string | null
+  merge_fields: Record<string, string>
   segment?: { name: string } | null
 }
 
@@ -37,6 +41,14 @@ function formatDuration(ms: number): string {
   return `${minutes} minute${minutes === 1 ? '' : 's'}`
 }
 
+/**
+ * Segments offered in the campaign form's dropdown.
+ *
+ * The API's own ceiling, so the picker holds every segment in all but pathological
+ * cases — and `pickableTruncated` says so out loud when it does not.
+ */
+const SEGMENT_PICKER_LIMIT = 200
+
 async function readError(response: Response): Promise<string> {
   const body = await response.json().catch(() => ({}))
   return body.error || `Request failed (HTTP ${response.status})`
@@ -44,7 +56,21 @@ async function readError(response: Response): Promise<string> {
 
 export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] }) {
   const [segments, setSegments] = useState<Segment[]>([])
+  const [segmentsPage, setSegmentsPage] = useState(1)
+  const [segmentsPageSize, setSegmentsPageSize] = useState(25)
+  const [segmentsTotal, setSegmentsTotal] = useState(0)
+
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
+  const [campaignsPage, setCampaignsPage] = useState(1)
+  const [campaignsPageSize, setCampaignsPageSize] = useState(25)
+  const [campaignsTotal, setCampaignsTotal] = useState(0)
+
+  // Every segment the campaign form can point at, fetched separately from the paged
+  // list above: which segments you can *pick* must not depend on which page of the
+  // segment list happens to be on screen.
+  const [pickableSegments, setPickableSegments] = useState<Segment[]>([])
+  const [pickableTruncated, setPickableTruncated] = useState(false)
+
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
 
@@ -55,6 +81,10 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
   const [segmentStatus, setSegmentStatus] = useState('')
   const [preview, setPreview] = useState<Preview | null>(null)
 
+  // Which campaign's copy is open for review. One at a time: reviewing is a focused
+  // act, and two expanded editors invite editing the wrong one.
+  const [reviewingId, setReviewingId] = useState<string | null>(null)
+
   // Campaign draft
   const [campaignName, setCampaignName] = useState('')
   const [campaignSegment, setCampaignSegment] = useState('')
@@ -62,21 +92,31 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
 
   const load = useCallback(async () => {
     try {
-      const [segmentsResponse, campaignsResponse] = await Promise.all([
-        fetch('/api/segments'),
-        fetch('/api/campaigns'),
+      const [segmentsResponse, campaignsResponse, pickerResponse] = await Promise.all([
+        fetch(`/api/segments?page=${segmentsPage}&pageSize=${segmentsPageSize}`),
+        fetch(`/api/campaigns?page=${campaignsPage}&pageSize=${campaignsPageSize}`),
+        fetch(`/api/segments?pageSize=${SEGMENT_PICKER_LIMIT}`),
       ])
 
       if (segmentsResponse.ok) {
-        setSegments((await segmentsResponse.json()).segments ?? [])
+        const body = await segmentsResponse.json()
+        setSegments(body.segments ?? [])
+        setSegmentsTotal(body.total ?? 0)
       }
       if (campaignsResponse.ok) {
-        setCampaigns((await campaignsResponse.json()).campaigns ?? [])
+        const body = await campaignsResponse.json()
+        setCampaigns(body.campaigns ?? [])
+        setCampaignsTotal(body.total ?? 0)
+      }
+      if (pickerResponse.ok) {
+        const body = await pickerResponse.json()
+        setPickableSegments(body.segments ?? [])
+        setPickableTruncated((body.total ?? 0) > SEGMENT_PICKER_LIMIT)
       }
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Could not load marketing data.')
     }
-  }, [])
+  }, [segmentsPage, segmentsPageSize, campaignsPage, campaignsPageSize])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -126,6 +166,9 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
       if (!response.ok) throw new Error(await readError(response))
 
       setSegmentName('')
+      // Listings are newest-first, so the new record is on page 1 — not wherever the
+      // user happened to be paged to.
+      setSegmentsPage(1)
       await load()
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : 'Could not create segment.')
@@ -153,6 +196,7 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
 
       setCampaignName('')
       setAutomationId('')
+      setCampaignsPage(1)
       await load()
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : 'Could not create campaign.')
@@ -345,6 +389,19 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
             </li>
           ))}
         </ul>
+
+        <Pagination
+          page={segmentsPage}
+          pageSize={segmentsPageSize}
+          total={segmentsTotal}
+          onPageChange={setSegmentsPage}
+          onPageSizeChange={(size) => {
+            setSegmentsPageSize(size)
+            setSegmentsPage(1)
+          }}
+          label="segments"
+          testId="segments-pagination"
+        />
       </section>
 
       <section className={styles.panel} aria-labelledby="campaigns-heading">
@@ -373,12 +430,17 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
               data-testid="campaign-segment"
             >
               <option value="">Choose a segment</option>
-              {segments.map((segment) => (
+              {pickableSegments.map((segment) => (
                 <option key={segment.id} value={segment.id}>
                   {segment.name}
                 </option>
               ))}
             </select>
+            {pickableTruncated && (
+              <span className={styles.label} data-testid="segment-picker-truncated">
+                Showing the first {SEGMENT_PICKER_LIMIT} segments only.
+              </span>
+            )}
           </label>
 
           <label className={styles.field}>
@@ -420,6 +482,17 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
               </span>
 
               <div className={styles.actions}>
+                <button
+                  type="button"
+                  className={styles.secondaryBtn}
+                  onClick={() =>
+                    setReviewingId((current) => (current === campaign.id ? null : campaign.id))
+                  }
+                  aria-expanded={reviewingId === campaign.id}
+                  data-testid={`review-copy-${campaign.id}`}
+                >
+                  {reviewingId === campaign.id ? 'Hide copy' : 'Copy'}
+                </button>
                 {campaign.status === 'draft' && (
                   <button
                     type="button"
@@ -453,9 +526,48 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
                   </button>
                 )}
               </div>
+
+              {reviewingId === campaign.id && (
+                <CampaignCopyEditor
+                  campaignId={campaign.id}
+                  campaignName={campaign.name}
+                  editable={campaign.status === 'draft' || campaign.status === 'failed'}
+                  mergeFields={campaign.merge_fields ?? {}}
+                  onSaved={(mergeFields, status) => {
+                    // Take the status from the server rather than assuming. Generating
+                    // copy moves a campaign back to draft; plainly saving an edit does
+                    // not, and a failed campaign stays failed either way.
+                    setCampaigns((current) =>
+                      current.map((item) =>
+                        item.id === campaign.id
+                          ? {
+                              ...item,
+                              merge_fields: mergeFields,
+                              status: (status as Campaign['status']) ?? item.status,
+                            }
+                          : item
+                      )
+                    )
+                  }}
+                  onError={(message) => setError(message || null)}
+                />
+              )}
             </li>
           ))}
         </ul>
+
+        <Pagination
+          page={campaignsPage}
+          pageSize={campaignsPageSize}
+          total={campaignsTotal}
+          onPageChange={setCampaignsPage}
+          onPageSizeChange={(size) => {
+            setCampaignsPageSize(size)
+            setCampaignsPage(1)
+          }}
+          label="campaigns"
+          testId="campaigns-pagination"
+        />
       </section>
     </div>
   )

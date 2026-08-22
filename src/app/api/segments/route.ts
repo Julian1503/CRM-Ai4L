@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 
 import { badRequest, ok, readJsonBody, requireSessionOr401, serverError } from '@/lib/api/responses'
+import { buildPageMeta, getPageRange, readPageParams } from '@/lib/pagination'
 import {
   filtersToSegmentDefinition,
   resolveSegmentMembers,
@@ -11,21 +12,25 @@ import { createSupabaseServerClient } from '@/lib/supabase/server'
 
 export const runtime = 'nodejs'
 
-/** Lists segments, newest first. */
-export async function GET(): Promise<NextResponse> {
+/** Lists segments, newest first, bounded to one page. */
+export async function GET(request: NextRequest): Promise<NextResponse> {
   const guard = await requireSessionOr401()
   if ('response' in guard) return guard.response
 
   try {
     const db = await createSupabaseServerClient()
-    const { data, error } = await db
+    const pageParams = readPageParams(request.nextUrl.searchParams)
+    const { from, to } = getPageRange(pageParams)
+
+    const { data, error, count } = await db
       .from('segments')
-      .select('*')
+      .select('*', { count: 'exact' })
       .order('created_at', { ascending: false })
+      .range(from, to)
 
     if (error) throw new Error(error.message)
 
-    return ok({ segments: data ?? [] })
+    return ok({ segments: data ?? [], ...buildPageMeta(pageParams, count ?? 0) })
   } catch (error) {
     return serverError(error, 'Could not load segments.')
   }

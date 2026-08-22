@@ -3,18 +3,11 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { createBooking } from '@/lib/booking/repository'
 import type { CampaignRow, Database } from '@/lib/db/types'
 
+import { BOOKING_URL_MERGE_FIELD } from './mergeFields'
 import type { CampaignProvider } from './providers/types'
 import { TokenBucket } from './rateLimiter'
 import type { SegmentMembers } from './segments'
 
-/**
- * Merge field carrying each recipient's personal booking link.
- *
- * The EmailOctopus list must have a custom field with this tag, and the automation
- * template must reference it (`{{BookingUrl}}`). Without both, the email sends with an
- * empty link and the whole booking funnel silently does nothing.
- */
-export const BOOKING_URL_MERGE_FIELD = 'BookingUrl'
 
 /**
  * Campaign send fan-out.

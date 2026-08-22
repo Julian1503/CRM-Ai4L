@@ -3,6 +3,10 @@
  */
 import { NextRequest } from 'next/server'
 
+import {
+  BOOKING_URL_MERGE_FIELD,
+  CAMPAIGN_COPY_FIELDS,
+} from '@/lib/marketing/mergeFields'
 import { createDbMock, createQueryBuilderMock } from '@/test/supabaseMock'
 
 const mockGetSession = jest.fn()
@@ -115,6 +119,65 @@ describe('/api/campaigns/[id]', () => {
     )
 
     expect(response.status).toBe(400)
+  })
+
+  describe('merge fields', () => {
+    function fullCopy(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+      const copy: Record<string, unknown> = {}
+      for (const field of CAMPAIGN_COPY_FIELDS) copy[field.tag] = 'Sound copy'
+      return { ...copy, ...overrides }
+    }
+
+    it('stores a complete, trimmed set of merge fields', async () => {
+      const { campaigns } = setup()
+
+      const response = await patch({ mergeFields: fullCopy({ Headline: '  Trimmed  ' }) })
+
+      expect(response.status).toBe(200)
+      const update = campaigns.argsFor('update') as [Record<string, unknown>]
+      expect((update[0].merge_fields as Record<string, string>).Headline).toBe('Trimmed')
+    })
+
+    it('rejects copy that overruns the template', async () => {
+      const headline = CAMPAIGN_COPY_FIELDS.find((field) => field.tag === 'Headline')!
+
+      const response = await patch({
+        mergeFields: fullCopy({ Headline: 'x'.repeat(headline.maxLength + 1) }),
+      })
+
+      expect(response.status).toBe(400)
+      expect((await response.json()).error).toContain('Headline is')
+    })
+
+    it('rejects an incomplete set rather than merging a partial update', async () => {
+      const copy = fullCopy()
+      delete copy.Headline
+
+      const response = await patch({ mergeFields: copy })
+
+      expect(response.status).toBe(400)
+      expect((await response.json()).error).toContain('Headline is missing.')
+    })
+
+    it('refuses a hand-set booking link, which is minted per recipient', async () => {
+      // The same gate the generation path applies. An operator pasting a URL here would
+      // give every recipient the same single-use link.
+      const response = await patch({
+        mergeFields: fullCopy({ [BOOKING_URL_MERGE_FIELD]: 'https://crm.example.com/book/x' }),
+      })
+
+      expect(response.status).toBe(400)
+      expect((await response.json()).error).toContain(BOOKING_URL_MERGE_FIELD)
+    })
+
+    it('does not write merge_fields when the body omits them', async () => {
+      const { campaigns } = setup()
+
+      await patch({ name: 'Renamed' })
+
+      const update = campaigns.argsFor('update') as [Record<string, unknown>]
+      expect(update[0]).not.toHaveProperty('merge_fields')
+    })
   })
 
   it('returns 404 for an unknown campaign', async () => {

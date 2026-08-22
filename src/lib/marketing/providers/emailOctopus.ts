@@ -150,3 +150,76 @@ export function createEmailOctopusProvider(config: {
     },
   }
 }
+
+/**
+ * The merge tags the list actually carries.
+ *
+ * Separate from `CampaignProvider` because it is a setup diagnostic rather than part of
+ * sending — but it guards the failure mode that motivated the whole merge-field
+ * contract: a tag the template references and the list does not have merges to the
+ * field's fallback, so the campaign sends with a hole in it and nothing errors.
+ *
+ * Verified against the live v2 API on 2026-08-20. Two details worth keeping:
+ * - the list object exposes `fields[]`, each with `tag`, `label`, `type`, `fallback`;
+ * - creating a field with `fallback: ""` is rejected 422 ("should not be blank"),
+ *   while omitting the key entirely is accepted and stores null.
+ */
+export async function listMergeTags(config: {
+  apiKey: string
+  listId: string
+  fetchImpl?: Fetcher
+}): Promise<{ ok: true; tags: string[] } | { ok: false; error: string }> {
+  const doFetch = config.fetchImpl ?? fetch
+
+  const response = await doFetch(
+    `${API_BASE}/lists/${encodeURIComponent(config.listId)}`,
+    { headers: { Authorization: `Bearer ${config.apiKey}` } }
+  )
+
+  if (!response.ok) {
+    return { ok: false, error: await readError(response) }
+  }
+
+  try {
+    const body = (await response.json()) as { fields?: { tag?: unknown }[] }
+    const tags = (body.fields ?? [])
+      .map((field) => field.tag)
+      .filter((tag): tag is string => typeof tag === 'string')
+
+    return { ok: true, tags }
+  } catch {
+    return { ok: false, error: 'EmailOctopus returned an unreadable list payload.' }
+  }
+}
+
+/**
+ * Creates one merge field on the list.
+ *
+ * `fallback` is deliberately never sent. EmailOctopus rejects an empty string with a
+ * 422 ("This value should not be blank"), while omitting the key stores null — and null
+ * is what we want: a fallback would paper over a personalisation failure with plausible
+ * text, which is exactly the silent-hole failure this whole contract exists to prevent.
+ */
+export async function createMergeField(config: {
+  apiKey: string
+  listId: string
+  tag: string
+  label: string
+  fetchImpl?: Fetcher
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const doFetch = config.fetchImpl ?? fetch
+
+  const response = await doFetch(
+    `${API_BASE}/lists/${encodeURIComponent(config.listId)}/fields`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ tag: config.tag, label: config.label, type: 'text' }),
+    }
+  )
+
+  return response.ok ? { ok: true } : { ok: false, error: await readError(response) }
+}

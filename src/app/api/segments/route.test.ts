@@ -17,6 +17,10 @@ import { GET, POST } from './route'
 
 const URL_PATH = 'https://crm.example.com/api/segments'
 
+function get(query = '') {
+  return GET(new NextRequest(`${URL_PATH}${query}`))
+}
+
 function post(body: unknown) {
   return POST(
     new NextRequest(URL_PATH, {
@@ -47,8 +51,29 @@ describe('/api/segments', () => {
   it('refuses an unauthenticated read', async () => {
     mockGetSession.mockResolvedValue(null)
 
-    expect((await GET()).status).toBe(401)
+    expect((await get()).status).toBe(401)
     expect(mockCreateServerClient).not.toHaveBeenCalled()
+  })
+
+  it('bounds the listing to one page and reports the total', async () => {
+    const { segments } = setup()
+    segments.calls.length = 0
+
+    const response = await get()
+
+    // Unbounded, this read would silently stop at PostgREST's 1000-row cap.
+    expect(segments.argsFor('range')).toEqual([0, 49])
+    expect(segments.argsFor('select')?.[1]).toEqual({ count: 'exact' })
+    await expect(response.json()).resolves.toMatchObject({ page: 1, pageSize: 50 })
+  })
+
+  it('honours an explicit page and size', async () => {
+    const { segments } = setup()
+    segments.calls.length = 0
+
+    await get('?page=2&pageSize=10')
+
+    expect(segments.argsFor('range')).toEqual([10, 19])
   })
 
   it('refuses an unauthenticated write', async () => {
