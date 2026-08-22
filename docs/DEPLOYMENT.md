@@ -59,9 +59,10 @@ npm run vercel:env -- production
 
 It skips any value that is still identical to the one in `.env.local.example` — comparing
 against the example rather than pattern-matching on `your-`, so it stays correct as the
-example changes — and refuses to push the four that must never be set on Vercel. The
-dashboard works too; the script exists because fifteen variables done by hand is how a
-deployment ends up with a placeholder Stripe secret and a green checkmark.
+example changes — and refuses to push the ones that must never be set on Vercel at all,
+naming each and why. The dashboard works too; the script exists because fifteen variables
+done by hand is how a deployment ends up with a placeholder Stripe secret and a green
+checkmark.
 
 ### Required — the app will not function without them
 
