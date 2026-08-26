@@ -26,6 +26,7 @@ declare
   v_contact_id  uuid;
   v_campaign_id uuid;
   v_booking_id  uuid;
+  v_rpc_booking_id uuid;
 begin
   ----------------------------------------------------------------------------
   raise notice '1. schema objects exist';
@@ -51,6 +52,11 @@ begin
   assert (select count(*) from pg_indexes
           where schemaname='public' and indexname='bookings_calendly_invitee_idx') = 1,
          'bookings_calendly_invitee_idx missing';
+
+  assert (select count(*) from pg_proc p
+          join pg_namespace n on n.oid = p.pronamespace
+          where n.nspname = 'public' and p.proname = 'create_campaign_booking') = 1,
+         'controlled campaign booking RPC missing';
 
   ----------------------------------------------------------------------------
   raise notice '2. expires_at is mandatory';
@@ -87,6 +93,32 @@ begin
          'a freshly minted booking must not be marked consumed';
 
   ----------------------------------------------------------------------------
+  raise notice '3b. authenticated send pipeline can mint only through the controlled RPC';
+  ----------------------------------------------------------------------------
+  insert into public.campaign_sends (campaign_id, contact_id, status)
+  values (v_campaign_id, v_contact_id, 'pending');
+
+  update public.campaigns set status = 'in_review' where id = v_campaign_id;
+  update public.campaigns
+     set status = 'approved',
+         approved_by = gen_random_uuid(),
+         provider_automation_id = 'automation__p5verify'
+   where id = v_campaign_id;
+  update public.campaigns set status = 'sending' where id = v_campaign_id;
+
+  perform set_config('request.jwt.claim.role', 'authenticated', true);
+  select public.create_campaign_booking(
+    repeat('a', 64),
+    v_contact_id,
+    v_campaign_id,
+    now() + interval '30 days'
+  ) into v_rpc_booking_id;
+
+  assert (select status = 'pending' and token_hash = repeat('a', 64)
+          from public.bookings where id = v_rpc_booking_id),
+         'controlled RPC did not mint the pending campaign booking';
+
+  ----------------------------------------------------------------------------
   raise notice '4. one token maps to one booking';
   ----------------------------------------------------------------------------
   v_failed := false;
@@ -107,7 +139,8 @@ begin
   values ('hash-b__p5verify', v_contact_id, now() + interval '30 days');
 
   select count(*) into v_count from public.bookings
-  where contact_id = v_contact_id and stripe_session_id is null;
+  where token_hash in ('hash-a__p5verify', 'hash-b__p5verify')
+    and stripe_session_id is null;
   assert v_count = 2,
     format('expected two bookings with no Stripe session, found %s - the index is not partial', v_count);
 
@@ -204,8 +237,8 @@ begin
           where schemaname='public' and tablename='bookings' and cmd='UPDATE') = 1,
          'bookings should be updatable by authenticated users';
 
-  -- Bookings are minted by the send pipeline through the service-role client. An
-  -- insert policy would let a signed-in user mint a free consultation for anyone.
+  -- Bookings are minted by the send pipeline through create_campaign_booking. An
+  -- insert policy would let a signed-in user bypass that RPC's campaign/ledger checks.
   select count(*) into v_count from pg_policies
   where schemaname='public' and tablename='bookings' and cmd in ('INSERT','DELETE');
   assert v_count = 0,

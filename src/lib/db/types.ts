@@ -272,6 +272,15 @@ export interface Database {
       active_contacts: { Row: ContactRow; Relationships: [] }
     }
     Functions: {
+      create_campaign_booking: {
+        Args: {
+          p_token_hash: string
+          p_contact_id: string
+          p_campaign_id: string
+          p_expires_at: string
+        }
+        Returns: string
+      }
       import_contacts: {
         Args: { payload: ImportContactPayloadRow[] }
         Returns: ImportContactsResult

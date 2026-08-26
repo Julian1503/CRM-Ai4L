@@ -40,28 +40,23 @@ export type BookingWithContact = BookingRow & {
 /** Mints a booking link for one campaign recipient. Returns the raw token for the URL. */
 export async function createBooking(
   db: SupabaseClient<Database>,
-  params: { contactId: string; campaignId?: string | null; nowMs?: number }
+  params: { contactId: string; campaignId: string; nowMs?: number }
 ): Promise<{ token: string; bookingId: string }> {
   const nowMs = params.nowMs ?? Date.now()
   const { token, hash } = generateBookingToken()
 
-  const { data, error } = await db
-    .from('bookings')
-    .insert({
-      token_hash: hash,
-      contact_id: params.contactId,
-      campaign_id: params.campaignId ?? null,
-      status: 'pending',
-      expires_at: bookingExpiryFrom(nowMs),
-    })
-    .select('id')
-    .single()
+  const { data, error } = await db.rpc('create_campaign_booking', {
+    p_token_hash: hash,
+    p_contact_id: params.contactId,
+    p_campaign_id: params.campaignId,
+    p_expires_at: bookingExpiryFrom(nowMs),
+  })
 
-  if (error) {
-    throw new Error(`Could not create booking: ${error.message}`)
+  if (error || !data) {
+    throw new Error(`Could not create booking: ${error?.message ?? 'no booking id returned'}`)
   }
 
-  return { token, bookingId: data!.id }
+  return { token, bookingId: data }
 }
 
 /** Looks a booking up by the raw token from the URL. */

@@ -174,15 +174,14 @@ describe('executeCampaignSends', () => {
   })
 
   describe('booking links', () => {
-    /** campaign_sends reads first, then bookings insert returns an id. */
+    /** campaign_sends reads first; controlled booking RPC returns one id per recipient. */
     function setupWithBookings(pending: unknown[]) {
-      const builder = createQueryBuilderMock([
-        { data: pending, error: null },
-        { data: { id: 'bk-1' }, error: null },
-        { data: { id: 'bk-2' }, error: null },
-        { data: { id: 'bk-3' }, error: null },
-      ])
-      return { db: createDbMock(builder), builder }
+      const builder = createQueryBuilderMock({ data: pending, error: null })
+      const db = createDbMock(builder)
+      pending.forEach((_, index) => {
+        db.rpc.mockResolvedValueOnce({ data: `bk-${index + 1}`, error: null })
+      })
+      return { db, builder }
     }
 
     it('gives each recipient a booking link', async () => {
@@ -248,27 +247,30 @@ describe('executeCampaignSends', () => {
     })
 
     it('records the booking against the campaign and contact', async () => {
-      const { db, builder } = setupWithBookings([contactRow('c1')])
+      const { db } = setupWithBookings([contactRow('c1')])
 
       await executeCampaignSends(db as never, fakeProvider(), campaign, {
         bucket: fastBucket(),
         baseUrl: 'https://crm.example.com',
       })
 
-      const insert = builder.argsFor('insert') as [Record<string, unknown>]
-      expect(insert[0]).toMatchObject({ contact_id: 'c1', campaign_id: 'camp-1' })
+      expect(db.rpc).toHaveBeenCalledWith(
+        'create_campaign_booking',
+        expect.objectContaining({ p_contact_id: 'c1', p_campaign_id: 'camp-1' })
+      )
     })
 
     it('fails the recipient rather than sending a dead link', async () => {
       // An email whose call to action goes nowhere is worse than no email.
       const builder = createQueryBuilderMock([
         { data: [contactRow('c1')], error: null },
-        { data: null, error: { message: 'insert denied' } },
       ])
+      const db = createDbMock(builder)
+      db.rpc.mockResolvedValue({ data: null, error: { message: 'insert denied' } })
       const provider = fakeProvider()
 
       const progress = await executeCampaignSends(
-        createDbMock(builder) as never,
+        db as never,
         provider,
         campaign,
         { bucket: fastBucket(), baseUrl: 'https://crm.example.com' }

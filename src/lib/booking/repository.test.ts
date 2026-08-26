@@ -17,14 +17,25 @@ import { hashBookingToken } from './token'
 
 describe('createBooking', () => {
   it('stores only the hash, never the token that goes in the email', async () => {
-    const builder = createQueryBuilderMock({ data: { id: 'b1' }, error: null })
+    const builder = createQueryBuilderMock()
     const db = createDbMock(builder)
+    db.rpc.mockResolvedValue({ data: 'b1', error: null })
 
-    const { token } = await createBooking(db as never, { contactId: 'c1' })
+    const { token, bookingId } = await createBooking(db as never, {
+      contactId: 'c1',
+      campaignId: 'campaign-1',
+    })
 
-    const insert = builder.argsFor('insert') as [Record<string, unknown>]
-    expect(insert[0].token_hash).toBe(hashBookingToken(token))
-    expect(JSON.stringify(insert[0])).not.toContain(token)
+    expect(bookingId).toBe('b1')
+    expect(db.rpc).toHaveBeenCalledWith(
+      'create_campaign_booking',
+      expect.objectContaining({
+        p_token_hash: hashBookingToken(token),
+        p_contact_id: 'c1',
+        p_campaign_id: 'campaign-1',
+      })
+    )
+    expect(JSON.stringify(db.rpc.mock.calls)).not.toContain(token)
   })
 
   it('never puts the contact id in the link', async () => {
@@ -33,7 +44,12 @@ describe('createBooking', () => {
     // two-character id collides with it by chance roughly once in a hundred runs.
     const contactId = '3f2a9c74-5b1e-4d8a-9f60-7c21ab4e0d53'
 
-    const { token } = await createBooking(createDbMock(builder) as never, { contactId })
+    const db = createDbMock(builder)
+    db.rpc.mockResolvedValue({ data: 'b1', error: null })
+    const { token } = await createBooking(db as never, {
+      contactId,
+      campaignId: 'campaign-1',
+    })
 
     // Email links leak — forwarded, logged by gateways, captured by link scanners.
     expect(token).not.toContain(contactId)
@@ -41,18 +57,26 @@ describe('createBooking', () => {
 
   it('sets an expiry', async () => {
     const builder = createQueryBuilderMock({ data: { id: 'b1' }, error: null })
+    const db = createDbMock(builder)
+    db.rpc.mockResolvedValue({ data: 'b1', error: null })
 
-    await createBooking(createDbMock(builder) as never, { contactId: 'c1', nowMs: 0 })
+    await createBooking(db as never, {
+      contactId: 'c1',
+      campaignId: 'campaign-1',
+      nowMs: 0,
+    })
 
-    const insert = builder.argsFor('insert') as [Record<string, unknown>]
-    expect(Date.parse(String(insert[0].expires_at))).toBeGreaterThan(0)
+    const args = db.rpc.mock.calls[0][1] as Record<string, unknown>
+    expect(Date.parse(String(args.p_expires_at))).toBeGreaterThan(0)
   })
 
   it('surfaces a failure', async () => {
-    const builder = createQueryBuilderMock({ data: null, error: { message: 'denied' } })
+    const builder = createQueryBuilderMock()
+    const db = createDbMock(builder)
+    db.rpc.mockResolvedValue({ data: null, error: { message: 'denied' } })
 
     await expect(
-      createBooking(createDbMock(builder) as never, { contactId: 'c1' })
+      createBooking(db as never, { contactId: 'c1', campaignId: 'campaign-1' })
     ).rejects.toThrow(/denied/)
   })
 })
