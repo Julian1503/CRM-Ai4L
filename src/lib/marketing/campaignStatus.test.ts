@@ -1,13 +1,39 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 import {
   CAMPAIGN_TRANSITIONS,
+  canReopen,
   canTransition,
   checkApprovable,
   isSendable,
   isTerminal,
 } from './campaignStatus'
+
+const MIGRATIONS_DIR = join(process.cwd(), 'supabase/migrations')
+
+/**
+ * The migration that currently defines the status trigger.
+ *
+ * Migrations accumulate and `create or replace` means the *last* definition wins, so
+ * reading a fixed filename would compare the UI against a superseded trigger — which is
+ * exactly the drift this test exists to catch.
+ */
+function latestTriggerDefinition(): string {
+  const files = readdirSync(MIGRATIONS_DIR)
+    .filter((file) => file.endsWith('.sql'))
+    .sort()
+
+  const defining = files.filter((file) =>
+    readFileSync(join(MIGRATIONS_DIR, file), 'utf8').includes(
+      'function public.enforce_campaign_status_transition()'
+    )
+  )
+
+  expect(defining.length).toBeGreaterThan(0)
+
+  return readFileSync(join(MIGRATIONS_DIR, defining.at(-1)!), 'utf8')
+}
 
 describe('CAMPAIGN_TRANSITIONS', () => {
   it('only reaches sending from approved', () => {
@@ -19,9 +45,20 @@ describe('CAMPAIGN_TRANSITIONS', () => {
     expect(sources).toEqual(['approved'])
   })
 
-  it('treats sent as terminal', () => {
-    expect(isTerminal('sent')).toBe(true)
-    expect(CAMPAIGN_TRANSITIONS.sent).toEqual([])
+  it('lets a sent campaign be re-opened, but only as a draft', () => {
+    // Sending the same campaign again is a real need; skipping the approval gate to do
+    // it is not. Draft is the only way back in.
+    expect(CAMPAIGN_TRANSITIONS.sent).toEqual(['draft'])
+    expect(isTerminal('sent')).toBe(false)
+    expect(canReopen('sent')).toBe(true)
+  })
+
+  it('offers re-opening only for a campaign that finished', () => {
+    // A failed campaign has "Retry failed", which requeues the recipients that failed
+    // instead of emailing the whole segment twice.
+    expect(canReopen('failed')).toBe(false)
+    expect(canReopen('draft')).toBe(false)
+    expect(canReopen('sending')).toBe(false)
   })
 
   it('allows a failed campaign to be retried or reworked', () => {
@@ -34,7 +71,7 @@ describe('CAMPAIGN_TRANSITIONS', () => {
     ['draft', 'sending'],
     ['in_review', 'sending'],
     ['sent', 'sending'],
-    ['sent', 'draft'],
+    ['sent', 'approved'],
     ['sending', 'approved'],
   ] as const)('refuses %s -> %s', (from, to) => {
     expect(canTransition(from, to)).toBe(false)
@@ -43,10 +80,7 @@ describe('CAMPAIGN_TRANSITIONS', () => {
   it('stays in step with the database trigger', () => {
     // The trigger is the real enforcement; this table only drives the UI. If they
     // drift, the UI offers actions the database rejects.
-    const sql = readFileSync(
-      join(process.cwd(), 'supabase/migrations/20260808000000_segments_and_campaigns.sql'),
-      'utf8'
-    )
+    const sql = latestTriggerDefinition()
 
     for (const [from, targets] of Object.entries(CAMPAIGN_TRANSITIONS)) {
       if (targets.length === 0) continue

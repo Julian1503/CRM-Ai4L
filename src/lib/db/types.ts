@@ -92,6 +92,11 @@ export type CampaignRow = {
   approved_by: string | null
   started_at: string | null
   completed_at: string | null
+  /**
+   * Which fan-out this campaign is on. Incremented when a sent campaign is re-opened,
+   * so a second send builds its own ledger instead of overwriting the first one's.
+   */
+  send_run: number
   created_at: string
   updated_at: string
 }
@@ -100,6 +105,8 @@ export type CampaignSendRow = {
   id: string
   campaign_id: string
   contact_id: string
+  /** The campaign fan-out this row belongs to. See `CampaignRow.send_run`. */
+  run: number
   status: 'pending' | 'sent' | 'failed' | 'skipped'
   provider_reference: string | null
   error: string | null

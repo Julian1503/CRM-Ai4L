@@ -118,6 +118,16 @@ export async function PATCH(
         return conflict(`A campaign in "${existing.status}" cannot move to "${next}".`)
       }
 
+      // `sent -> draft` is a legal transition, but only the reopen endpoint may perform
+      // it: that is where the send run advances. Doing it here would leave the campaign
+      // pointing at a ledger that is already complete, and the next send would find
+      // nothing pending and declare itself finished without emailing anybody.
+      if (existing.status === 'sent') {
+        return conflict(
+          'Use the re-send endpoint to re-open a campaign that has already been sent.'
+        )
+      }
+
       updates.status = next
     }
 

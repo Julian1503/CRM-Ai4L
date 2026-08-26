@@ -1,9 +1,12 @@
+import { randomBytes } from 'node:crypto'
+
 import { NextResponse, type NextRequest } from 'next/server'
 
 import { findBookingByToken, markCheckoutStarted } from '@/lib/booking/repository'
 import { isBookingUsable } from '@/lib/booking/token'
 import { createConsultationCheckout } from '@/lib/stripe/checkout'
 import { getStripeClient, getStripeConfig } from '@/lib/stripe/client'
+import { describeStripeError } from '@/lib/stripe/health'
 import { getAdminClient } from '@/lib/supabase/admin'
 
 export const runtime = 'nodejs'
@@ -43,6 +46,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     )
   }
 
+  // Held outside the try so a failure can be traced to a booking without the token,
+  // which is a credential and must never reach a log.
+  let bookingId: string | null = null
+
   try {
     const db = getAdminClient()
     const booking = await findBookingByToken(db, token)
@@ -55,6 +62,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         { status: 404, headers: NO_STORE }
       )
     }
+
+    bookingId = booking.id
 
     const usability = isBookingUsable(booking, Date.now())
 
@@ -110,10 +119,25 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     return NextResponse.json({ url }, { headers: NO_STORE })
   } catch (error) {
-    console.error('Booking checkout failed:', error)
+    // The visitor is a lead, not an operator: they get the same vague message either
+    // way, because a public endpoint must not describe our configuration. The reference
+    // is what connects their screenshot to the log line that says what actually broke —
+    // without it, "Could not start booking" was the only evidence anyone ever had.
+    const reference = randomBytes(4).toString('hex')
+    const detail = describeStripeError(error)
+
+    console.error('Booking checkout failed', {
+      reference,
+      bookingId,
+      type: detail.type,
+      code: detail.code,
+      param: detail.param,
+      requestId: detail.requestId,
+      message: detail.message,
+    })
 
     return NextResponse.json(
-      { error: 'Could not start booking. Please try again.' },
+      { error: 'Could not start booking. Please try again.', reference },
       { status: 500, headers: NO_STORE }
     )
   }

@@ -271,6 +271,300 @@ describe('MarketingView', () => {
     await waitFor(() => expect(sendCalls).toBe(3))
   })
 
+  describe('the recipient list', () => {
+    it('opens a dialog naming who the campaign goes to', async () => {
+      // Before this the audience was a number: nothing in the app could name one of
+      // the people a campaign was about to email.
+      routeFetch({
+        'GET /api/campaigns/camp-1/audience': jsonResponse({
+          source: 'segment',
+          run: 1,
+          segmentName: 'NSW leads',
+          truncated: false,
+          page: 1,
+          pageSize: 25,
+          total: 1,
+          recipients: [
+            {
+              contactId: 'c1',
+              firstName: 'Ada',
+              lastName: 'Lovelace',
+              email: 'ada@example.com',
+              status: 'planned',
+              error: null,
+            },
+          ],
+        }),
+        ...defaultHandlers,
+      })
+
+      render(<MarketingView jobTypes={jobTypes} />)
+      fireEvent.click(await screen.findByTestId('audience-camp-1'))
+
+      expect(await screen.findByText('ada@example.com')).toBeInTheDocument()
+      expect(screen.getByRole('dialog')).toHaveAccessibleName('August offer')
+    })
+
+    it('closes without leaving the list behind', async () => {
+      render(<MarketingView jobTypes={jobTypes} />)
+
+      fireEvent.click(await screen.findByTestId('audience-camp-1'))
+      fireEvent.click(await screen.findByTestId('close-audience'))
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+
+    it('reports a failed read inside the dialog', async () => {
+      routeFetch({
+        'GET /api/campaigns/camp-1/audience': jsonResponse(
+          { error: 'Could not load the campaign audience.' },
+          false,
+          500
+        ),
+        ...defaultHandlers,
+      })
+
+      render(<MarketingView jobTypes={jobTypes} />)
+      fireEvent.click(await screen.findByTestId('audience-camp-1'))
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        'Could not load the campaign audience.'
+      )
+    })
+  })
+
+  describe('sending a campaign again', () => {
+    const sentCampaign = {
+      campaigns: [
+        {
+          id: 'camp-1',
+          name: 'August offer',
+          status: 'sent',
+          segment_id: 'seg-1',
+          provider_automation_id: 'auto-1',
+          segment: { name: 'NSW leads' },
+        },
+      ],
+    }
+
+    afterEach(() => {
+      jest.restoreAllMocks()
+    })
+
+    it('re-opens the campaign after the operator confirms', async () => {
+      const confirm = jest.spyOn(window, 'confirm').mockReturnValue(true)
+      routeFetch({ ...defaultHandlers, 'GET /api/campaigns': jsonResponse(sentCampaign) })
+
+      render(<MarketingView jobTypes={jobTypes} />)
+      fireEvent.click(await screen.findByTestId('reopen-camp-1'))
+
+      await waitFor(() =>
+        expect(mockFetch).toHaveBeenCalledWith(
+          '/api/campaigns/camp-1/reopen',
+          expect.objectContaining({ method: 'POST' })
+        )
+      )
+
+      // Naming the provider-side setting matters: without "Allow contacts to repeat"
+      // the second send is rejected per recipient and nothing arrives.
+      expect(confirm.mock.calls[0][0]).toMatch(/Allow contacts to repeat/)
+      expect(confirm.mock.calls[0][0]).toMatch(/back to draft/)
+    })
+
+    it('does nothing when the operator backs out', async () => {
+      // The confirmation is the last gate before real mail goes to people who already
+      // received this campaign once.
+      jest.spyOn(window, 'confirm').mockReturnValue(false)
+      routeFetch({ ...defaultHandlers, 'GET /api/campaigns': jsonResponse(sentCampaign) })
+
+      render(<MarketingView jobTypes={jobTypes} />)
+      fireEvent.click(await screen.findByTestId('reopen-camp-1'))
+
+      await waitFor(() => expect(screen.getByTestId('reopen-camp-1')).not.toBeDisabled())
+      expect(
+        mockFetch.mock.calls.filter(([url]) => String(url).includes('/reopen'))
+      ).toHaveLength(0)
+    })
+
+    it('surfaces a refusal from the server', async () => {
+      jest.spyOn(window, 'confirm').mockReturnValue(true)
+      routeFetch({
+        'POST /api/campaigns/camp-1/reopen': jsonResponse(
+          { error: 'This campaign was already re-opened.' },
+          false,
+          409
+        ),
+        ...defaultHandlers,
+        'GET /api/campaigns': jsonResponse(sentCampaign),
+      })
+
+      render(<MarketingView jobTypes={jobTypes} />)
+      fireEvent.click(await screen.findByTestId('reopen-camp-1'))
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('already re-opened')
+    })
+
+    it('offers no re-send for a campaign that never finished', async () => {
+      routeFetch(defaultHandlers)
+
+      render(<MarketingView jobTypes={jobTypes} />)
+
+      await screen.findByText('August offer')
+      expect(screen.queryByTestId('reopen-camp-1')).not.toBeInTheDocument()
+    })
+  })
+
+  it('says so when a send finishes with every recipient failed', async () => {
+    // The endpoint answers 200 for a send in which nothing was delivered, so an
+    // HTTP-level check alone let a wholly failed campaign look like a successful click.
+    routeFetch({
+      'POST /api/campaigns/camp-1/send': jsonResponse({
+        status: 'failed',
+        hasMore: false,
+        sent: 0,
+        failed: 40,
+        pending: 0,
+        chunk: { processed: 40, sent: 0, failed: 40, deferred: 0, reason: null },
+        failureReason: 'contact_id: This value should not be blank.',
+      }),
+      ...defaultHandlers,
+      'GET /api/campaigns': jsonResponse({
+        campaigns: [
+          {
+            id: 'camp-1',
+            name: 'August offer',
+            status: 'approved',
+            segment_id: 'seg-1',
+            provider_automation_id: 'auto-1',
+            segment: { name: 'NSW leads' },
+          },
+        ],
+      }),
+    })
+
+    render(<MarketingView jobTypes={jobTypes} />)
+    fireEvent.click(await screen.findByTestId('send-camp-1'))
+
+    const banner = await screen.findByRole('alert')
+    expect(banner).toHaveTextContent(/none of the 40 recipients were emailed/i)
+    expect(banner).toHaveTextContent(/contact_id: This value should not be blank/)
+  })
+
+  it('reports a partial send with the count that got through', async () => {
+    routeFetch({
+      'POST /api/campaigns/camp-1/send': jsonResponse({
+        status: 'failed',
+        hasMore: false,
+        sent: 12,
+        failed: 3,
+        pending: 0,
+        chunk: { processed: 15, sent: 12, failed: 3, deferred: 0, reason: null },
+        failureReason: 'Contact has no email address.',
+      }),
+      ...defaultHandlers,
+      'GET /api/campaigns': jsonResponse({
+        campaigns: [
+          {
+            id: 'camp-1',
+            name: 'August offer',
+            status: 'approved',
+            segment_id: 'seg-1',
+            provider_automation_id: 'auto-1',
+            segment: { name: 'NSW leads' },
+          },
+        ],
+      }),
+    })
+
+    render(<MarketingView jobTypes={jobTypes} />)
+    fireEvent.click(await screen.findByTestId('send-camp-1'))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      /sent to 12 of 15 recipients\. 3 failed/i
+    )
+  })
+
+  it('stops and explains when the provider defers every request', async () => {
+    // Every attempt came back retryable, so the rows stay pending and calling again
+    // would spin until the guard tripped with a message about nothing in particular.
+    let sendCalls = 0
+    mockFetch.mockImplementation(async (url: string, init?: { method?: string }) => {
+      const key = `${init?.method ?? 'GET'} ${url}`
+
+      if (key === 'POST /api/campaigns/camp-1/send') {
+        sendCalls += 1
+        return jsonResponse({
+          status: 'sending',
+          hasMore: true,
+          sent: 0,
+          failed: 0,
+          pending: 200,
+          chunk: { processed: 200, sent: 0, failed: 0, deferred: 200, reason: 'Too many requests' },
+          failureReason: null,
+        })
+      }
+      if (key.startsWith('GET /api/segments')) return defaultHandlers['GET /api/segments']
+      if (key.startsWith('GET /api/campaigns')) {
+        return jsonResponse({
+          campaigns: [
+            {
+              id: 'camp-1',
+              name: 'August offer',
+              status: 'approved',
+              segment_id: 'seg-1',
+              provider_automation_id: 'auto-1',
+              segment: { name: 'NSW leads' },
+            },
+          ],
+        })
+      }
+      return jsonResponse({})
+    })
+
+    render(<MarketingView jobTypes={jobTypes} />)
+    fireEvent.click(await screen.findByTestId('send-camp-1'))
+
+    const banner = await screen.findByRole('alert')
+    expect(banner).toHaveTextContent(/Too many requests/)
+    expect(banner).toHaveTextContent(/200 recipients still to go/i)
+    // Stopped at the first stalled chunk instead of hammering the endpoint.
+    expect(sendCalls).toBe(1)
+  })
+
+  it('keeps saying why a campaign failed after a reload', async () => {
+    // A failure the operator can only see in the response to their own click is gone
+    // the moment they refresh, leaving "failed" and nothing else.
+    routeFetch({
+      'GET /api/campaigns/camp-1/send': jsonResponse({
+        total: 40,
+        sent: 0,
+        failed: 40,
+        pending: 0,
+        failureReason: 'Automation not found.',
+        stallReason: null,
+      }),
+      ...defaultHandlers,
+      'GET /api/campaigns': jsonResponse({
+        campaigns: [
+          {
+            id: 'camp-1',
+            name: 'August offer',
+            status: 'failed',
+            segment_id: 'seg-1',
+            provider_automation_id: 'auto-1',
+            segment: { name: 'NSW leads' },
+          },
+        ],
+      }),
+    })
+
+    render(<MarketingView jobTypes={jobTypes} />)
+
+    expect(await screen.findByTestId('send-report-camp-1')).toHaveTextContent(
+      '40 of 40 recipients failed — Automation not found.'
+    )
+  })
+
   it('reports a send failure rather than appearing to succeed', async () => {
     routeFetch({
       ...defaultHandlers,

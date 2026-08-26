@@ -13,7 +13,10 @@ The EmailOctopus API cannot create or send a campaign. Verified against v1 and v
   There is no POST, PUT or DELETE anywhere under it.
 - `GET /automations` returns 404 — automations cannot even be listed through the API.
 - The only programmatic send trigger is `POST /automations/{id}/queue`, which starts an
-  automation for **one contact**.
+  automation for **one contact**, identified by `contact_id` — the contact's id, or an
+  MD5 hash of the lowercased email address. It does **not** accept `email_address`; a
+  request that sends one is rejected 422, which the adapter treats as a permanent
+  failure for that recipient (verified against the v2 reference, 2026-08-26).
 
 So the message itself lives in an EmailOctopus template, and the only route content takes
 into it is **contact custom fields merged into that template**. That is why the CRM's
@@ -83,9 +86,15 @@ Off by default, which means a contact can trigger an automation **once, ever**. 
 if the same person should be able to receive more than one campaign.
 
 Turning it on moves deduplication entirely onto us. That is already handled — the
-`campaign_sends` table has a unique index on `(campaign_id, contact_id)` and only
+`campaign_sends` table has a unique index on `(campaign_id, contact_id, run)` and only
 `pending` rows are processed, so a retried or resumed send cannot double-send. But it is
 worth knowing that the safety net is ours, not theirs.
+
+**Required for "Send again".** A sent campaign can be re-opened from the Campaigns
+screen, which starts a second numbered run against whoever the segment matches then.
+Contacts who received the first run are in that audience. Without this setting the
+provider refuses each of them, and the campaign ends `failed` with the refusal shown
+per recipient in the Recipients dialog.
 
 ---
 

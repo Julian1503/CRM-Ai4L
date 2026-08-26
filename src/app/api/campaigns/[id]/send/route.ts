@@ -59,6 +59,9 @@ export async function POST(
 
     const alreadySending = campaign.status === 'sending'
     const retryingFailed = campaign.status === 'failed'
+    // Every ledger read and write below is scoped to this run. A re-opened campaign
+    // starts a new one, so its history is added to rather than written over.
+    const run = campaign.send_run ?? 1
 
     if (!alreadySending && !retryingFailed && !isSendable(campaign.status)) {
       return conflict(
@@ -100,6 +103,7 @@ export async function POST(
         .from('campaign_sends')
         .update({ status: 'pending', error: null, provider_reference: null })
         .eq('campaign_id', campaign.id)
+        .eq('run', run)
         .eq('status', 'failed')
 
       if (resetError) throw new Error(resetError.message)
@@ -134,7 +138,7 @@ export async function POST(
           return conflict('This segment currently matches no subscribed contacts.')
         }
 
-        await prepareCampaignSends(db, campaign.id, members.members)
+        await prepareCampaignSends(db, campaign.id, members.members, run)
       }
 
       const { data: sendClaim, error: claimError } = await db
@@ -165,7 +169,7 @@ export async function POST(
 
     // Read cumulative ledger totals. Chunk-local numbers are not enough to decide
     // whether the campaign as a whole succeeded.
-    const summary = await readCampaignSendSummary(db, campaign.id)
+    const summary = await readCampaignSendSummary(db, campaign.id, run)
     const { pending, failed, sent } = summary
     let finalStatus: 'sending' | 'sent' | 'failed' = 'sending'
 
@@ -188,6 +192,8 @@ export async function POST(
       pending,
       /** True while the caller should keep invoking this endpoint. */
       hasMore: pending > 0,
+      /** Which fan-out these figures belong to. 1 unless the campaign was re-sent. */
+      run,
       /**
        * What this invocation actually achieved.
        *
@@ -235,7 +241,16 @@ export async function GET(
   try {
     const db = await createSupabaseServerClient()
 
-    return ok(await readCampaignSendSummary(db, id))
+    const { data: campaign, error: loadError } = await db
+      .from('campaigns')
+      .select('send_run')
+      .eq('id', id)
+      .maybeSingle()
+
+    if (loadError) throw new Error(loadError.message)
+    if (!campaign) return notFound('Campaign not found.')
+
+    return ok(await readCampaignSendSummary(db, id, campaign.send_run ?? 1))
   } catch (error) {
     return serverError(error, 'Could not read the send report.')
   }

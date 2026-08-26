@@ -16,7 +16,10 @@ export const CAMPAIGN_TRANSITIONS: Record<CampaignStatus, CampaignStatus[]> = {
   approved: ['draft', 'sending'],
   sending: ['sent', 'failed'],
   failed: ['draft', 'approved'],
-  sent: [],
+  // Re-opening a sent campaign returns it to draft rather than straight to approved:
+  // the audience may have changed since it went out, so the human gate is crossed
+  // again. `sent` used to be terminal, which froze a campaign forever.
+  sent: ['draft'],
 }
 
 export function canTransition(from: CampaignStatus, to: CampaignStatus): boolean {
@@ -67,6 +70,16 @@ export function checkApprovable(campaign: ApprovalCandidate): ApprovalCheck {
 /** Only an approved campaign may begin sending. */
 export function isSendable(status: CampaignStatus): boolean {
   return canTransition(status, 'sending')
+}
+
+/**
+ * Whether a campaign can be re-opened for another send.
+ *
+ * Only a completed one. A failed campaign has "Retry failed" instead, which requeues
+ * the recipients that failed rather than emailing everybody a second time.
+ */
+export function canReopen(status: CampaignStatus): boolean {
+  return status === 'sent'
 }
 
 /** Terminal states no longer change. */

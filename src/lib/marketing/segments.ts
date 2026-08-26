@@ -84,6 +84,58 @@ export type SegmentMembers = {
   truncated: boolean
 }
 
+export type SegmentPage = SegmentMembers & { page: number; pageSize: number }
+
+/**
+ * Resolves one page of a segment's current members.
+ *
+ * Separate from `resolveSegmentMembers` only in how much it reads: a send needs the
+ * whole audience at once, while a screen showing who a campaign is going to needs
+ * twenty-five rows and a total. Both go through the same filters, so what the operator
+ * reads is what the send will do.
+ */
+export async function resolveSegmentPage(
+  db: SupabaseClient<Database>,
+  definition: unknown,
+  params: { page: number; pageSize: number }
+): Promise<SegmentPage> {
+  const filters = {
+    ...segmentDefinitionToFilters(definition),
+    page: Math.max(1, params.page),
+    pageSize: Math.max(1, Math.min(params.pageSize, SEGMENT_MEMBER_CAP)),
+  }
+
+  const organisationIds = filters.q ? await findOrganisationIdsMatching(db, filters.q) : []
+
+  const query = db
+    .from('active_contacts')
+    .select('id, email, first_name, last_name', { count: 'exact' })
+
+  const { data, error, count } = await (applyContactFilters(
+    query as never,
+    filters,
+    { organisationIds }
+  ) as unknown as PromiseLike<{
+    data: SegmentMembers['members'] | null
+    error: { message: string } | null
+    count: number | null
+  }>)
+
+  if (error) {
+    throw new Error(`Could not resolve segment members: ${error.message}`)
+  }
+
+  const total = count ?? data?.length ?? 0
+
+  return {
+    members: data ?? [],
+    total,
+    truncated: total > SEGMENT_MEMBER_CAP,
+    page: filters.page,
+    pageSize: filters.pageSize,
+  }
+}
+
 /**
  * Resolves a segment definition to its current members.
  *

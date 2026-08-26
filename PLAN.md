@@ -129,6 +129,69 @@ of them retired a note that had stood since Phase 2:
 Gate: **1,044 unit tests green** (was 973), coverage 92.1 / 82.7 / 81.6 / 92.1, lint 0
 errors, typecheck clean, build clean.
 
+---
+
+**Send now / Retry failed, fixed and made legible (2026-08-26).** Two defects, one
+behind the other.
+
+1. `triggerSend` posted `{ email_address }` to `POST /automations/{id}/queue`. The v2
+   endpoint takes `{ contact_id }` — the contact's id, or an MD5 of the lowercased
+   address — so **every recipient was rejected 422**. A 4xx is non-retryable by design
+   (retrying a bad request only burns quota), so each row was written `failed` and the
+   campaign ended in `failed` without a single email going out.
+2. Nothing said so. The endpoint answers **200** for a send in which every recipient
+   failed: the reasons went into `campaign_sends.error` and the UI showed a status
+   change and no message. A retryable failure was worse — it left no trace at all, so a
+   send stalled behind a rate limit was indistinguishable from one still working, and
+   the client looped 200 times before reporting that it was "taking longer than
+   expected".
+
+Now: the ledger records the reason for a deferral as well as a failure; the send route
+reports cumulative totals *and* what the chunk itself achieved, plus the provider's own
+words (`readCampaignSendSummary`); a chunk that moves nothing stops the loop and names
+the reason; and `GET /api/campaigns/[id]/send` reads the report back, so a failed
+campaign still says why after a reload rather than showing a bare "failed".
+
+---
+
+**The booking button, re-sends and the recipient list (2026-08-26).**
+
+**1. Booking checkout failed in production and nowhere else.** Verified: the booking row
+was valid, all four `STRIPE_*` variables *are* set on Vercel (an invalid token answers
+404, not the 503 that a missing config produces), and the identical call succeeds
+locally — price, coupon and a $0 session created. No session was ever created in that
+Stripe account from production, so `checkout.sessions.create` was being rejected: the
+deployed key belongs to a different account or mode from the price and coupon ids, which
+Stripe reports as "No such price". The route turned all of that into *"Could not start
+booking. Please try again."* and a `console.error` nobody was reading.
+
+Fixed on both sides. The visitor still gets the vague message — it is a public endpoint —
+but now with a **reference** that appears in the structured log line beside the Stripe
+`type`, `code` and `param` (never the token, never the key). And `checkStripeReadiness`
+(`src/lib/stripe/health.ts`) checks the price and coupon *from inside the deployment*,
+including a livemode-vs-key-prefix comparison, surfaced on the Operations screen. A
+local `preflight` validates the machine it runs on; this validates the environment that
+actually serves the booking link, which is the gap that let this reach a lead.
+
+**2. A sent campaign was frozen forever.** `sent` was terminal in the status trigger. It
+now allows `sent -> draft`, through `POST /api/campaigns/[id]/reopen` only — the PATCH
+route refuses it, because re-opening has to advance the run counter.
+
+Re-sending could have been "clear the ledger and go again". It is not: `campaigns
+.send_run` and `campaign_sends.run` number each fan-out, the unique index widens to
+`(campaign_id, contact_id, run)`, and every ledger read is scoped to the current run.
+So a second send is possible *and* the first one's record of who was emailed survives —
+which is both the audit trail and the Spam Act evidence that a send went only to
+subscribed contacts. Re-opening returns to `draft`, so the human approval gate is
+crossed again: the segment resolves live, so a second send's audience is whoever matches
+then, not who was approved last time.
+
+**3. The audience was a number.** `GET /api/campaigns/[id]/audience` answers from the
+ledger once a run exists — who was actually written to and what happened to each of them
+— and resolves the segment live before that. `AudienceModal` renders it paged, which is
+also where a per-recipient failure is finally readable: the send report says "3 failed",
+this says which three and what the provider said about each.
+
 **Still open, and all of it needs accounts rather than code:** the deployment and
 subdomain, real Stripe and Calendly credentials, the EmailOctopus automation, and the
 webhook registrations. Two data gaps also remain and no code can close them —

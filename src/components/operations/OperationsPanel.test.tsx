@@ -54,14 +54,42 @@ const SUMMARY = {
   sync: { events24h: 4, failures24h: 0, latestAt: '2026-08-25T00:50:00.000Z' },
 } as const
 
+const STRIPE_READY = {
+  ok: true,
+  configured: true,
+  mode: 'test',
+  price: { id: 'price_1', amount: 50_000, currency: 'aud', active: true },
+  coupon: { id: 'coupon_1', percentOff: 100, valid: true },
+  problems: [],
+}
+
 function jsonResponse(body: unknown, ok = true) {
   return Promise.resolve({ ok, json: () => Promise.resolve(body) }) as Promise<Response>
+}
+
+/**
+ * Routes by URL rather than by call order: the panel reads the summary and the Stripe
+ * check independently, and a queue of responses would silently pair the wrong body with
+ * the wrong request the moment either one is retried.
+ */
+function routeFetch(
+  handlers: { summary?: () => Promise<Response>; stripe?: () => Promise<Response> } = {}
+) {
+  const mock = jest.fn((url: string) =>
+    String(url).includes('/stripe')
+      ? (handlers.stripe ?? (() => jsonResponse(STRIPE_READY)))()
+      : (handlers.summary ?? (() => jsonResponse({ summary: SUMMARY })))()
+  )
+
+  global.fetch = mock as unknown as typeof fetch
+
+  return mock
 }
 
 describe('OperationsPanel', () => {
   beforeEach(() => {
     jest.clearAllMocks()
-    global.fetch = jest.fn(() => jsonResponse({ summary: SUMMARY }))
+    routeFetch()
   })
 
   it('shows provider health and the conversion queues', async () => {
@@ -86,11 +114,15 @@ describe('OperationsPanel', () => {
   })
 
   it('lets the operator retry a failed read', async () => {
-    const fetchMock = jest
-      .fn()
-      .mockImplementationOnce(() => jsonResponse({ error: 'Unavailable' }, false))
-      .mockImplementationOnce(() => jsonResponse({ summary: SUMMARY }))
-    global.fetch = fetchMock
+    let attempts = 0
+    const fetchMock = routeFetch({
+      summary: () => {
+        attempts += 1
+        return attempts === 1
+          ? jsonResponse({ error: 'Unavailable' }, false)
+          : jsonResponse({ summary: SUMMARY })
+      },
+    })
 
     render(<OperationsPanel />)
 
@@ -98,6 +130,50 @@ describe('OperationsPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
 
     await waitFor(() => expect(screen.getByText('EmailOctopus')).toBeInTheDocument())
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('summary'))).toHaveLength(2)
+  })
+
+  describe('Stripe readiness', () => {
+    it('says booking links cannot start a checkout, and why', async () => {
+      // A price id from the wrong Stripe mode produces no failed deliveries at all —
+      // every booking link just dies at the button, on the lead's screen, silently.
+      routeFetch({
+        stripe: () =>
+          jsonResponse({
+            ok: false,
+            configured: true,
+            mode: 'live',
+            price: null,
+            coupon: null,
+            problems: ['STRIPE_CONSULTATION_PRICE_ID (price_1) could not be read: No such price.'],
+          }),
+      })
+
+      render(<OperationsPanel />)
+
+      const card = await screen.findByTestId('stripe-health')
+      expect(card).toHaveTextContent('Booking links cannot start a checkout.')
+      expect(card).toHaveTextContent('No such price.')
+      expect(card).toHaveTextContent('Stripe key mode: live')
+    })
+
+    it('confirms a healthy configuration without shouting about it', async () => {
+      render(<OperationsPanel />)
+
+      expect(await screen.findByTestId('stripe-health')).toHaveTextContent(
+        'Stripe ready in test mode · consultation $500 AUD discounted 100%'
+      )
+    })
+
+    it('stays quiet when the check itself cannot be read', async () => {
+      // Claiming a problem it did not observe would send someone chasing Stripe over a
+      // network blip.
+      routeFetch({ stripe: () => Promise.reject(new Error('offline')) })
+
+      render(<OperationsPanel />)
+
+      await screen.findByText('EmailOctopus')
+      expect(screen.queryByTestId('stripe-health')).not.toBeInTheDocument()
+    })
   })
 })

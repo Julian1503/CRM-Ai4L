@@ -342,13 +342,19 @@ describe('POST /api/campaigns/[id]/send', () => {
         { data: null, error: null, count: 8 }, // sent
         { data: { error: 'This value should not be blank.' }, error: null },
       ])
+      // The report is scoped to the run the campaign is on, so the row is read first.
+      const campaigns = createQueryBuilderMock({ data: { send_run: 2 }, error: null })
 
-      mockCreateServerClient.mockResolvedValue(createDbMock(() => sends))
+      mockCreateServerClient.mockResolvedValue(
+        createDbMock((table: string) => (table === 'campaigns' ? campaigns : sends))
+      )
 
       const response = await report()
 
       expect(response.status).toBe(200)
+      expect(sends.allFor('eq')).toContainEqual({ method: 'eq', args: ['run', 2] })
       await expect(response.json()).resolves.toEqual({
+        run: 2,
         total: 10,
         sent: 8,
         failed: 2,

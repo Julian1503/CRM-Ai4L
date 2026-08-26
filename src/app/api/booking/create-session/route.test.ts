@@ -179,4 +179,51 @@ describe('POST /api/booking/create-session', () => {
     expect(response.status).toBe(500)
     expect(body.error).not.toMatch(/coupon/i)
   })
+
+  describe('when a failure has to be traced', () => {
+    let logged: unknown[][]
+
+    beforeEach(() => {
+      logged = []
+      jest.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+        logged.push(args)
+      })
+    })
+
+    afterEach(() => {
+      jest.restoreAllMocks()
+    })
+
+    it('hands the visitor a reference that appears in the log', async () => {
+      // Without it, "Could not start booking" was the entire evidence trail: the
+      // visitor could not report anything the logs could be searched for.
+      mockSessionCreate.mockRejectedValue(
+        Object.assign(new Error('No such price: price_1'), {
+          type: 'StripeInvalidRequestError',
+          code: 'resource_missing',
+          param: 'line_items[0][price]',
+        })
+      )
+
+      const body = await (await POST(request())).json()
+
+      expect(body.reference).toMatch(/^[0-9a-f]{8}$/)
+      expect(logged[0][1]).toMatchObject({
+        reference: body.reference,
+        bookingId: 'b1',
+        code: 'resource_missing',
+        param: 'line_items[0][price]',
+        message: 'No such price: price_1',
+      })
+    })
+
+    it('never writes the booking token to the log', async () => {
+      // The token is the credential for this booking; a log line is not a place for it.
+      mockSessionCreate.mockRejectedValue(new Error('nope'))
+
+      await POST(request({ token: 'super-secret-token' }))
+
+      expect(JSON.stringify(logged)).not.toContain('super-secret-token')
+    })
+  })
 })

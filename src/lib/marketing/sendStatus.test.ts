@@ -72,6 +72,24 @@ describe('readCampaignSendSummary', () => {
     expect((await readCampaignSendSummary(db as never, 'camp-1')).failureReason).toBeNull()
   })
 
+  it('counts only the run it was asked about', async () => {
+    // A re-sent campaign accumulates rows; summing every run would report "18 of 9
+    // sent" the moment a campaign went out twice.
+    const { db, sends } = setup([count(0), count(0), count(4)])
+
+    const summary = await readCampaignSendSummary(db as never, 'camp-1', 2)
+
+    expect(summary).toMatchObject({ run: 2, sent: 4, total: 4 })
+    expect(sends.allFor('eq')).toContainEqual({ method: 'eq', args: ['run', 2] })
+    expect(sends.allFor('eq')).not.toContainEqual({ method: 'eq', args: ['run', 1] })
+  })
+
+  it('reports the first run when no run is given', async () => {
+    const { db } = setup([count(0), count(0), count(1)])
+
+    expect((await readCampaignSendSummary(db as never, 'camp-1')).run).toBe(1)
+  })
+
   it('surfaces a read failure rather than reporting zeroes', async () => {
     const { db } = setup([{ data: null, error: { message: 'permission denied' }, count: null }])
 

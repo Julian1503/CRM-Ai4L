@@ -30,7 +30,14 @@ export default function BookingStarter({ token }: { token: string }) {
       const body = await response.json().catch(() => ({}))
 
       if (!response.ok || !body.url) {
-        throw new Error(body.error || 'Could not start your booking.')
+        const message = body.error || 'Could not start your booking.'
+
+        // The reference is the only thing that ties this screen to the server log that
+        // says what broke. Shown so a visitor who reports the problem carries it with
+        // them, rather than "the button did not work".
+        throw new Error(
+          typeof body.reference === 'string' ? `${message} (ref: ${body.reference})` : message
+        )
       }
 
       navigateTo(body.url)

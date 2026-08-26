@@ -28,6 +28,23 @@ function stateLabel(state: HealthState): string {
   return 'No deliveries'
 }
 
+/**
+ * Whether booking links can reach Stripe Checkout, read from the deployed environment.
+ *
+ * Separate from the delivery figures above because it is a *configuration* check rather
+ * than a traffic one: a price id from the wrong Stripe mode produces no failed
+ * deliveries at all — every booking link simply dies at the button, silently, on the
+ * lead's screen.
+ */
+type StripeHealth = {
+  ok: boolean
+  configured: boolean
+  mode: 'test' | 'live' | 'unknown'
+  price: { id: string; amount: number | null; currency: string; active: boolean } | null
+  coupon: { id: string; percentOff: number | null; valid: boolean } | null
+  problems: string[]
+}
+
 function formatTimestamp(value: string | null): string {
   if (!value) return 'Never'
 
@@ -39,6 +56,7 @@ function formatTimestamp(value: string | null): string {
 
 export default function OperationsPanel() {
   const [summary, setSummary] = useState<OperationsSummary | null>(null)
+  const [stripe, setStripe] = useState<StripeHealth | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -63,18 +81,35 @@ export default function OperationsPanel() {
     }
   }, [])
 
+  /**
+   * Read separately from the summary: it calls Stripe rather than the database, and a
+   * Stripe outage must not blank the delivery figures.
+   */
+  const loadStripe = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const response = await fetch('/api/operations/stripe', { cache: 'no-store', signal })
+      const body = await response.json()
+
+      if (response.ok && typeof body?.ok === 'boolean') setStripe(body as StripeHealth)
+    } catch {
+      // Leaves the card absent rather than claiming a problem it did not observe.
+    }
+  }, [])
+
   useEffect(() => {
     const controller = new AbortController()
     // The state writes happen after the network promise settles; this call only starts it.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load(controller.signal)
+    void loadStripe(controller.signal)
     return () => controller.abort()
-  }, [load])
+  }, [load, loadStripe])
 
   const refresh = () => {
     setLoading(true)
     setError(null)
     void load()
+    void loadStripe()
   }
 
   return (
@@ -164,6 +199,28 @@ export default function OperationsPanel() {
                 <span>{summary.sync.failures24h} failed in 24h</span>
               </div>
             </div>
+
+            {stripe && !stripe.ok && (
+              <div
+                className={`${styles.inlineError} ${styles.error}`}
+                role="alert"
+                data-testid="stripe-health"
+              >
+                <strong>Booking links cannot start a checkout.</strong>{' '}
+                {stripe.configured ? `Stripe key mode: ${stripe.mode}. ` : ''}
+                {stripe.problems.join(' ')}
+              </div>
+            )}
+
+            {stripe?.ok && (
+              <p className={styles.updated} data-testid="stripe-health">
+                Stripe ready in {stripe.mode} mode · consultation{' '}
+                {stripe.price?.amount != null
+                  ? `$${(stripe.price.amount / 100).toFixed(0)} ${stripe.price.currency.toUpperCase()}`
+                  : 'price'}{' '}
+                discounted {stripe.coupon?.percentOff ?? 0}%
+              </p>
+            )}
 
             <p className={styles.updated}>Updated {formatTimestamp(summary.generatedAt)}</p>
           </>

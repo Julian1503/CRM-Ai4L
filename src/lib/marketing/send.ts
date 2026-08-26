@@ -52,15 +52,19 @@ type PendingSend = {
 }
 
 /**
- * Creates one pending ledger row per segment member.
+ * Creates one pending ledger row per segment member, for one run.
  *
  * Conflicts are ignored rather than erroring: re-preparing a campaign after adding
- * contacts to its segment should top up the ledger, not fail.
+ * contacts to its segment should top up the ledger, not fail. The conflict target
+ * includes `run`, so a second send to the same contact is a new row rather than a
+ * silently ignored duplicate — that is what makes re-sending possible without losing
+ * the first run's history.
  */
 export async function prepareCampaignSends(
   db: SupabaseClient<Database>,
   campaignId: string,
-  members: SegmentMembers['members']
+  members: SegmentMembers['members'],
+  run = 1
 ): Promise<number> {
   if (members.length === 0) {
     return 0
@@ -69,12 +73,13 @@ export async function prepareCampaignSends(
   const rows = members.map((member) => ({
     campaign_id: campaignId,
     contact_id: member.id,
+    run,
     status: 'pending' as const,
   }))
 
   const { error } = await db
     .from('campaign_sends')
-    .upsert(rows, { onConflict: 'campaign_id,contact_id', ignoreDuplicates: true })
+    .upsert(rows, { onConflict: 'campaign_id,contact_id,run', ignoreDuplicates: true })
 
   if (error) {
     throw new Error(`Could not prepare campaign sends: ${error.message}`)
@@ -94,7 +99,7 @@ export async function prepareCampaignSends(
 export async function executeCampaignSends(
   db: SupabaseClient<Database>,
   provider: CampaignProvider,
-  campaign: Pick<CampaignRow, 'id' | 'provider_automation_id' | 'merge_fields'>,
+  campaign: Pick<CampaignRow, 'id' | 'provider_automation_id' | 'merge_fields' | 'send_run'>,
   options: {
     maxToProcess?: number
     bucket?: TokenBucket
@@ -118,6 +123,9 @@ export async function executeCampaignSends(
     .from('campaign_sends')
     .select('id, contact_id, contact:contacts(email, first_name, last_name)')
     .eq('campaign_id', campaign.id)
+    // Scoped to the current run so a re-send cannot pick up a stray row from an
+    // earlier one and email somebody a second time out of order.
+    .eq('run', campaign.send_run ?? 1)
     .eq('status', 'pending')
     .limit(maxToProcess)
 

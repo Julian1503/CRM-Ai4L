@@ -40,6 +40,7 @@ const campaign = {
   id: 'camp-1',
   provider_automation_id: 'auto-1',
   merge_fields: {} as Record<string, string>,
+  send_run: 1,
 }
 
 describe('prepareCampaignSends', () => {
@@ -68,7 +69,7 @@ describe('prepareCampaignSends', () => {
 
     const [, options] = builder.argsFor('upsert') as [unknown, Record<string, unknown>]
     expect(options).toMatchObject({
-      onConflict: 'campaign_id,contact_id',
+      onConflict: 'campaign_id,contact_id,run',
       ignoreDuplicates: true,
     })
   })
@@ -79,6 +80,33 @@ describe('prepareCampaignSends', () => {
 
     expect(await prepareCampaignSends(db as never, 'camp-1', [])).toBe(0)
     expect(db.from).not.toHaveBeenCalled()
+  })
+})
+
+describe('prepareCampaignSends across runs', () => {
+  it('tags the ledger rows with the run they belong to', async () => {
+    // Without the run, the second send's rows collide with the first's and are dropped
+    // as duplicates -- the campaign would report itself sent without emailing anybody.
+    const sends = createQueryBuilderMock({ data: null, error: null })
+    const db = createDbMock(() => sends)
+
+    await prepareCampaignSends(
+      db as never,
+      'camp-1',
+      [
+        { id: 'c1', email: 'a@example.com', first_name: 'A', last_name: 'B' },
+        { id: 'c2', email: 'b@example.com', first_name: 'C', last_name: 'D' },
+      ],
+      3
+    )
+
+    const [rows, options] = sends.argsFor('upsert') as [
+      Record<string, unknown>[],
+      Record<string, unknown>,
+    ]
+
+    expect(rows.every((row) => row.run === 3)).toBe(true)
+    expect(options.onConflict).toBe('campaign_id,contact_id,run')
   })
 })
 
@@ -323,10 +351,11 @@ describe('executeCampaignSends', () => {
 
     // The row stays pending, but the reason is written down: a retryable failure used
     // to leave no trace anywhere, so a stalled send looked like a working one.
-    const updates = sends.allFor('update') as { args: [Record<string, unknown>] }[]
+    const updates = sends.allFor('update')
     expect(updates).toHaveLength(1)
-    expect(updates[0].args[0]).toMatchObject({ error: '429' })
-    expect(updates[0].args[0].status).toBeUndefined()
+    const note = updates[0].args[0] as Record<string, unknown>
+    expect(note).toMatchObject({ error: '429' })
+    expect(note.status).toBeUndefined()
     expect(progress.deferredReason).toBe('429')
   })
 

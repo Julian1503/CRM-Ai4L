@@ -7,6 +7,7 @@ import type { FacetCounts, SegmentFacets } from '@/lib/marketing/facets'
 
 import Pagination from '@/components/ui/Pagination'
 
+import AudienceModal, { type Audience } from './AudienceModal'
 import CampaignCopyEditor from './CampaignCopyEditor'
 import styles from './marketing.module.css'
 
@@ -220,6 +221,14 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
   // Per-campaign send reports, so a failure outlives the click that caused it.
   const [sendReports, setSendReports] = useState<Record<string, SendReport>>({})
 
+  // The campaign whose recipient list is open, and that list.
+  const [audienceFor, setAudienceFor] = useState<Campaign | null>(null)
+  const [audience, setAudience] = useState<Audience | null>(null)
+  const [audienceLoading, setAudienceLoading] = useState(false)
+  const [audienceError, setAudienceError] = useState<string | null>(null)
+  const [audiencePage, setAudiencePage] = useState(1)
+  const [audiencePageSize, setAudiencePageSize] = useState(25)
+
   // Segment draft
   const [segmentName, setSegmentName] = useState('')
   const [segmentState, setSegmentState] = useState('')
@@ -318,6 +327,58 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load()
   }, [load])
+
+  // Reads the recipient list for whichever campaign is open, re-running when the pager
+  // moves. Kept out of `load()` on purpose: the workspace refreshes for reasons that
+  // have nothing to do with the dialog, and re-fetching ten thousand names each time
+  // would be a lot of work to show nobody.
+  useEffect(() => {
+    if (!audienceFor) return
+
+    let cancelled = false
+
+    void (async () => {
+      // Inside the async body rather than the effect's: a synchronous setState here
+      // would make every open of the dialog cost an extra render pass.
+      setAudienceLoading(true)
+      setAudienceError(null)
+
+      try {
+        const response = await fetch(
+          `/api/campaigns/${audienceFor.id}/audience?page=${audiencePage}&pageSize=${audiencePageSize}`
+        )
+
+        if (!response.ok) throw new Error(await readError(response))
+
+        const body = await response.json()
+
+        if (!cancelled) setAudience(body as Audience)
+      } catch (audienceLoadError) {
+        if (cancelled) return
+
+        setAudienceError(
+          audienceLoadError instanceof Error
+            ? audienceLoadError.message
+            : 'Could not load the recipients.'
+        )
+      } finally {
+        if (!cancelled) setAudienceLoading(false)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [audienceFor, audiencePage, audiencePageSize])
+
+  const openAudience = (campaign: Campaign) => {
+    // Cleared rather than kept: showing the previous campaign's recipients under this
+    // campaign's name, even for a moment, is worse than showing nothing.
+    setAudience(null)
+    setAudienceError(null)
+    setAudiencePage(1)
+    setAudienceFor(campaign)
+  }
 
   const definition = React.useMemo(
     () => ({
@@ -480,7 +541,7 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
 
   const act = async (
     campaign: Campaign,
-    action: 'draft' | 'review' | 'approve' | 'send'
+    action: 'draft' | 'review' | 'approve' | 'send' | 'reopen'
   ) => {
     setError(null)
     setBusy(campaign.id)
@@ -502,6 +563,32 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
       if (action === 'approve') {
         const response = await fetch(`/api/campaigns/${campaign.id}/approve`, { method: 'POST' })
         if (!response.ok) throw new Error(await readError(response))
+      }
+
+      if (action === 'reopen') {
+        // Confirmed rather than done on the click: this ends with real mail going to
+        // people who already received this campaign once, and the provider-side setting
+        // it depends on is not visible from here.
+        const confirmed = window.confirm(
+          `Send "${campaign.name}" again?
+
+It goes back to draft and starts a second send. Everyone the segment matches now will receive it, including the contacts who got it the first time. The previous send is kept as history.
+
+You will approve it again before anything leaves, and EmailOctopus only delivers a repeat if the automation has "Allow contacts to repeat" enabled.`
+        )
+
+        if (!confirmed) return
+
+        const response = await fetch(`/api/campaigns/${campaign.id}/reopen`, { method: 'POST' })
+        if (!response.ok) throw new Error(await readError(response))
+
+        // The previous run's figures describe a send that is over; keeping them would
+        // let run 1's numbers appear under run 2 until the next fetch lands.
+        setSendReports((current) => {
+          const next = { ...current }
+          delete next[campaign.id]
+          return next
+        })
       }
 
       if (action === 'send') {
@@ -818,6 +905,15 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
                 <button
                   type="button"
                   className={styles.secondaryBtn}
+                  onClick={() => openAudience(campaign)}
+                  disabled={busy !== null}
+                  data-testid={`audience-${campaign.id}`}
+                >
+                  Recipients
+                </button>
+                <button
+                  type="button"
+                  className={styles.secondaryBtn}
                   onClick={() =>
                     setReviewingId((current) => (current === campaign.id ? null : campaign.id))
                   }
@@ -878,6 +974,17 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
                     data-testid={`send-${campaign.id}`}
                   >
                     {campaign.status === 'sending' ? 'Resume send' : 'Send now'}
+                  </button>
+                )}
+                {campaign.status === 'sent' && (
+                  <button
+                    type="button"
+                    className={styles.secondaryBtn}
+                    onClick={() => act(campaign, 'reopen')}
+                    disabled={busy !== null}
+                    data-testid={`reopen-${campaign.id}`}
+                  >
+                    Send again
                   </button>
                 )}
                 {campaign.status === 'failed' && (
@@ -1000,6 +1107,23 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
           testId="campaigns-pagination"
         />
       </section>
+
+      {audienceFor && (
+        <AudienceModal
+          campaignName={audienceFor.name}
+          audience={audience}
+          loading={audienceLoading}
+          error={audienceError}
+          page={audiencePage}
+          pageSize={audiencePageSize}
+          onPageChange={setAudiencePage}
+          onPageSizeChange={(size) => {
+            setAudiencePageSize(size)
+            setAudiencePage(1)
+          }}
+          onClose={() => setAudienceFor(null)}
+        />
+      )}
     </div>
   )
 }

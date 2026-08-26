@@ -157,6 +157,31 @@ test.describe('unauthenticated access', () => {
     expect(response.status()).toBe(401)
   })
 
+  test('protects re-opening a campaign for a second send', async ({ request }) => {
+    // Re-opening is the first step of mailing people who already received a campaign.
+    const response = await request.post('/api/campaigns/some-id/reopen', {
+      data: {},
+      maxRedirects: 0,
+    })
+
+    expect(response.status()).toBe(401)
+  })
+
+  test('protects the recipient list', async ({ request }) => {
+    // It names contacts: first name, last name and email address.
+    expect(
+      (await request.get('/api/campaigns/some-id/audience', { maxRedirects: 0 })).status()
+    ).toBe(401)
+  })
+
+  test('protects the send report and the Stripe readiness check', async ({ request }) => {
+    // Both describe configuration and delivery outcomes, which are operator-only.
+    expect(
+      (await request.get('/api/campaigns/some-id/send', { maxRedirects: 0 })).status()
+    ).toBe(401)
+    expect((await request.get('/api/operations/stripe', { maxRedirects: 0 })).status()).toBe(401)
+  })
+
   test('protects the emailoctopus sync route, which acts on behalf of a user', async ({
     request,
   }) => {

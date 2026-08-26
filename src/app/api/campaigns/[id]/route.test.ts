@@ -111,9 +111,22 @@ describe('/api/campaigns/[id]', () => {
   )
 
   it('refuses an invalid transition even between patchable statuses', async () => {
-    setup({ id: 'camp-1', status: 'sent' })
+    setup({ id: 'camp-1', status: 'sending' })
 
     expect((await patch({ status: 'draft' })).status).toBe(409)
+  })
+
+  it('sends a re-open through the endpoint that advances the run', async () => {
+    // `sent -> draft` is legal, but doing it here would leave the campaign pointing at
+    // a finished ledger: the next send would find nothing pending and call itself done.
+    setup({ id: 'camp-1', status: 'sent' })
+
+    const response = await patch({ status: 'draft' })
+
+    expect(response.status).toBe(409)
+    await expect(response.json()).resolves.toMatchObject({
+      error: expect.stringMatching(/re-send endpoint/i),
+    })
   })
 
   it('rejects a body with nothing to update', async () => {
