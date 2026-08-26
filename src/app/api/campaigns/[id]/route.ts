@@ -121,6 +121,20 @@ export async function PATCH(
       updates.status = next
     }
 
+    const changesCampaignDetails = [
+      'name',
+      'segment_id',
+      'subject',
+      'notes',
+      'provider_automation_id',
+      'merge_fields',
+    ].some((key) => key in updates)
+    const resultingStatus = updates.status ?? existing.status
+
+    if (changesCampaignDetails && !['draft', 'failed'].includes(resultingStatus)) {
+      return conflict('Return this campaign to draft before changing its content or settings.')
+    }
+
     if (Object.keys(updates).length === 0) {
       return badRequest('No supported fields to update.')
     }

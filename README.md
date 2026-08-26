@@ -31,11 +31,11 @@ Apply the database migrations to your Supabase project (`npx supabase db push`, 
 files in `supabase/migrations/` in filename order), then verify the schema:
 
 ```bash
-npm run db:verify   # all four suites; non-destructive, each rolls back at the end
+npm run db:verify   # all five suites; non-destructive, each rolls back at the end
 ```
 
 Each suite can be run alone: `db:verify:contacts`, `db:verify:webhooks`,
-`db:verify:campaigns`, `db:verify:bookings`. They assert what a mocked unit test cannot —
+`db:verify:campaigns`, `db:verify:bookings`, `db:verify:operations`. They assert what a mocked unit test cannot —
 that the database itself refuses a replayed webhook, an unapproved send, and a booking
 token reused for a second free consultation.
 
@@ -151,8 +151,10 @@ search.
 | `npm run test:e2e` | Playwright, against a **production build** |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run lint` | ESLint |
-| `npm run db:verify` | Schema assertions against the live database (four suites) |
+| `npm run db:verify` | Schema assertions against the live database (five suites) |
 | `npm run verify:deployment <url>` | Post-deploy checks: headers, auth, webhook signatures, secret leaks |
+| `npm run verify:newsletter -- <url>` | Signed newsletter signup, replay, unsubscribe, and cleanup canary |
+| `npm run preflight -- [--online] [url]` | Release config, schema and provider readiness checks |
 | `npm run db:sync-job-types` | Assign job types from EmailOctopus tags (`-- --dry-run` to preview) |
 | `npm run db:create-admin` | Seed the first dashboard login from `ADMIN_EMAIL` / `ADMIN_PASSWORD` |
 
@@ -161,17 +163,21 @@ E2E should exercise the shipped artifact, and because `next dev` does not curren
 hydrate in this environment (see `PLAN.md`).
 
 Signed-in E2E specs **skip** unless `E2E_EMAIL` and `E2E_PASSWORD` are set and point at a
-real account. They skip loudly rather than passing vacuously. With credentials set the
-suite runs 111 specs across chromium, firefox and webkit; the 3 that still skip assert
-the "sign-in unavailable" screen, which only renders when Supabase is *not* configured.
+real account. They skip loudly rather than passing vacuously. A setup project signs in
+once and shares a temporary storage state with the three browser projects. The logout
+check runs only after those projects finish so its global session revocation cannot
+invalidate another test. The 3 remaining skips assert the "sign-in unavailable" screen,
+which only renders when Supabase is *not* configured.
 
 Three things to know before running it:
 
 - `npx playwright install` — firefox and webkit binaries are not installed by default,
   and their absence fails 18 specs on a missing executable rather than on anything real.
-- Port 3000 must be free. `reuseExistingServer` is on locally, so a stale `next start`
-  is silently adopted; a wedged one accepts connections, answers none, and hangs the
-  whole run with no output.
+- Port 3100 must be free by default. Existing servers are never reused unless
+  `E2E_REUSE_EXISTING_SERVER=true` is explicitly set. Use `E2E_BASE_URL` to select a
+  different origin, or set `E2E_EXTERNAL_SERVER=true` to test an already deployed host.
+- `E2E_BROWSERS=chromium` limits a smoke run to one installed browser. CI also sets
+  `E2E_SKIP_BUILD=true` because its production build step has already created `.next`.
 - Workers are capped at 3 and the per-test budget is 60s. The constraint is one
   `next start` and one remote Supabase project, not CPU — at Playwright's default width
   a different spec times out on each run.

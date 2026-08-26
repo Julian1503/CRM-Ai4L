@@ -1,6 +1,6 @@
 // Database types for the CRM schema.
 //
-// Hand-written to match supabase/migrations as of 20260807000000. Regenerate from the
+// Hand-written to match supabase/migrations as of 20260825030000. Regenerate from the
 // live schema once the migration is applied:
 //
 //   npm run db:types
@@ -26,6 +26,25 @@ export type BookingStatus =
   | 'booked'
   | 'cancelled'
   | 'expired'
+
+export type IntegrationDeliveryStatus =
+  | 'processing'
+  | 'succeeded'
+  | 'completed_with_errors'
+  | 'failed'
+
+export type IntegrationDeliveryRow = {
+  id: string
+  provider: 'emailoctopus' | 'stripe' | 'calendly'
+  event_type: string | null
+  status: IntegrationDeliveryStatus
+  event_count: number
+  processed_count: number
+  failed_count: number
+  error_code: string | null
+  started_at: string
+  completed_at: string | null
+}
 
 export type BookingRow = {
   id: string
@@ -242,6 +261,7 @@ export interface Database {
       credentials: TableDef<CredentialRow>
       sync_logs: TableDef<SyncLogRow>
       webhook_events: TableDef<WebhookEventRow>
+      integration_deliveries: TableDef<IntegrationDeliveryRow>
       segments: TableDef<SegmentRow>
       campaigns: TableDef<CampaignRow>
       campaign_sends: TableDef<CampaignSendRow>
@@ -256,11 +276,16 @@ export interface Database {
         Args: { payload: ImportContactPayloadRow[] }
         Returns: ImportContactsResult
       }
+      get_operations_summary: {
+        Args: Record<string, never>
+        Returns: import('@/lib/operations/types').OperationsSummary
+      }
     }
     Enums: {
       contact_status: ContactStatus
       campaign_status: CampaignStatus
       booking_status: BookingStatus
+      integration_delivery_status: IntegrationDeliveryStatus
     }
   }
 }

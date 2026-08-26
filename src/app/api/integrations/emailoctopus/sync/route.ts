@@ -2,10 +2,13 @@ import { NextResponse, type NextRequest } from 'next/server'
 
 import { getSession } from '@/lib/auth/dal'
 import { syncContactToEmailOctopus, type SubscriptionStatus } from '@/lib/emailOctopus'
-import { MAX_PAGE_SIZE } from '@/lib/pagination'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 
 export const runtime = 'nodejs'
+export const maxDuration = 60
+
+/** Keeps one request below typical serverless timeouts despite provider latency. */
+export const SYNC_CHUNK_SIZE = 50
 
 // The error list echoes contact email addresses, so responses must not be cached.
 const NO_STORE = { 'Cache-Control': 'private, no-store' }
@@ -21,6 +24,7 @@ type SyncPayload = {
   apiKey?: unknown
   listId?: unknown
   contacts?: unknown
+  offset?: unknown
 }
 
 function isSyncContact(value: unknown): value is SyncContact {
@@ -44,43 +48,35 @@ function getErrorMessage(error: unknown): string {
  * bounded, since an unbounded one would stop at PostgREST's 1000-row cap without
  * saying so and quietly sync a prefix of the contacts.
  */
-async function fetchAllSyncContacts(): Promise<SyncContact[]> {
+async function fetchSyncContactChunk(offset: number): Promise<{
+  contacts: SyncContact[]
+  hasMore: boolean
+}> {
   const db = await createSupabaseServerClient()
-  const collected: SyncContact[] = []
+  const { data, error } = await db
+    .from('active_contacts')
+    .select('email, first_name, last_name, subscribed_to_newsletter')
+    .order('created_at', { ascending: true })
+    // Fetch one sentinel row beyond the chunk to prove whether more work remains.
+    .range(offset, offset + SYNC_CHUNK_SIZE)
 
-  for (let page = 0; ; page += 1) {
-    const from = page * MAX_PAGE_SIZE
+  if (error) {
+    throw new Error(`Could not read contacts to sync: ${error.message}`)
+  }
 
-    const { data, error } = await db
-      .from('active_contacts')
-      .select('email, first_name, last_name, subscribed_to_newsletter')
-      .order('created_at', { ascending: true })
-      .range(from, from + MAX_PAGE_SIZE - 1)
-
-    if (error) {
-      throw new Error(`Could not read contacts to sync: ${error.message}`)
-    }
-
-    const rows = data ?? []
-
-    for (const row of rows) {
-      if (typeof row.email === 'string' && row.email.trim() !== '') {
-        collected.push({
+  const rows = data ?? []
+  const contacts = rows.slice(0, SYNC_CHUNK_SIZE).flatMap((row) =>
+    typeof row.email === 'string' && row.email.trim() !== ''
+      ? [{
           email: row.email,
           firstName: row.first_name ?? '',
           lastName: row.last_name ?? '',
           subscribedToNewsletter: Boolean(row.subscribed_to_newsletter),
-        })
-      }
-    }
+        }]
+      : []
+  )
 
-    // A short page is the last page. Ordering by created_at ascending keeps the window
-    // stable: a contact added mid-sync lands at the end rather than shifting rows
-    // between pages.
-    if (rows.length < MAX_PAGE_SIZE) {
-      return collected
-    }
-  }
+  return { contacts, hasMore: rows.length > SYNC_CHUNK_SIZE }
 }
 
 /**
@@ -110,6 +106,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // page of contacts currently on screen.
     const syncAll = payload.contacts === undefined
     const requested = Array.isArray(payload.contacts) ? payload.contacts : []
+    const offset =
+      typeof payload.offset === 'number' && Number.isInteger(payload.offset) && payload.offset >= 0
+        ? payload.offset
+        : 0
 
     if (!apiKey || !listId || (!syncAll && !Array.isArray(payload.contacts))) {
       return NextResponse.json(
@@ -118,7 +118,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       )
     }
 
-    const contacts = syncAll ? await fetchAllSyncContacts() : requested.filter(isSyncContact)
+    const chunk = syncAll
+      ? await fetchSyncContactChunk(offset)
+      : { contacts: requested.filter(isSyncContact), hasMore: false }
+    const contacts = chunk.contacts
     const errors: Array<{ email: string; error: string }> = []
     let syncedCount = 0
 
@@ -150,6 +153,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       skippedCount: syncAll ? 0 : requested.length - contacts.length,
       errorsCount: errors.length,
       errors: errors.length > 0 ? errors : undefined,
+      hasMore: chunk.hasMore,
+      nextOffset: chunk.hasMore ? offset + SYNC_CHUNK_SIZE : null,
     }, { headers: NO_STORE })
   } catch (error: unknown) {
     console.error('EmailOctopus Sync Error:', error)

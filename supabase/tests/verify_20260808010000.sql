@@ -150,14 +150,27 @@ begin
   ----------------------------------------------------------------------------
   raise notice '8. every documented status is reachable';
   ----------------------------------------------------------------------------
-  -- Unlike campaigns, bookings have no transition trigger: the two webhooks genuinely
-  -- can arrive in either order, so the states are set directly and the ordering
-  -- guarantee comes from the idempotency ledger instead.
+  -- The follow-up 20260825010000 migration adds a transition trigger. Exercise each
+  -- terminal state through a path the production handlers are allowed to take.
   update public.bookings set status = 'checkout_started' where token_hash = 'hash-b__p5verify';
   update public.bookings set status = 'cancelled', cancelled_at = now() where token_hash = 'hash-b__p5verify';
-  update public.bookings set status = 'expired' where token_hash = 'hash-b__p5verify';
-  assert (select status = 'expired' from public.bookings where token_hash = 'hash-b__p5verify'),
+
+  insert into public.bookings (token_hash, contact_id, expires_at)
+  values ('hash-expired__p5verify', v_contact_id, now() + interval '30 days');
+  update public.bookings set status = 'expired' where token_hash = 'hash-expired__p5verify';
+
+  assert (select status = 'cancelled' from public.bookings where token_hash = 'hash-b__p5verify'),
+         'checkout_started should be able to reach cancelled';
+  assert (select status = 'expired' from public.bookings where token_hash = 'hash-expired__p5verify'),
          'booking_status does not carry the documented values';
+
+  v_failed := false;
+  begin
+    update public.bookings set status = 'expired' where token_hash = 'hash-b__p5verify';
+  exception when others then
+    v_failed := true;
+  end;
+  assert v_failed, 'cancelled -> expired should be rejected by the status transition trigger';
 
   ----------------------------------------------------------------------------
   raise notice '9. a cancelled campaign does not delete its bookings';

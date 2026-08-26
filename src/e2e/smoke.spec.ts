@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 
-import { expect, type Page, test } from '@playwright/test'
+import { expect, test } from '@playwright/test'
 
 /**
  * Baseline behaviour of the CRM shell.
@@ -21,14 +21,6 @@ import { expect, type Page, test } from '@playwright/test'
 const EMAIL = process.env.E2E_EMAIL
 const PASSWORD = process.env.E2E_PASSWORD
 
-async function signIn(page: Page): Promise<void> {
-  await page.goto('/login')
-  await page.getByLabel('Email address').fill(EMAIL!)
-  await page.getByLabel('Password').fill(PASSWORD!)
-  await page.getByRole('button', { name: 'Sign in' }).click()
-  await page.waitForURL((url) => !url.pathname.startsWith('/login'))
-}
-
 test.describe('CRM shell', () => {
   test.skip(
     !EMAIL || !PASSWORD,
@@ -36,7 +28,10 @@ test.describe('CRM shell', () => {
   )
 
   test.beforeEach(async ({ page }) => {
-    await signIn(page)
+    await page.goto('/')
+    await expect(page.getByRole('heading', { name: 'Dashboard overview', level: 1 })).toBeVisible({
+      timeout: 120_000,
+    })
   })
 
   test('renders the contacts dashboard as the default view', async ({ page }) => {
@@ -47,7 +42,7 @@ test.describe('CRM shell', () => {
   test('navigates between the four workspace views', async ({ page }) => {
     await page.getByTestId('nav-item-imports').click()
     await expect(
-      page.getByRole('heading', { name: 'Excel spreadsheet importer', level: 1 })
+      page.getByRole('heading', { name: 'Spreadsheet importer', level: 1 })
     ).toBeVisible()
 
     await page.getByTestId('nav-item-integrations').click()
@@ -72,7 +67,7 @@ test.describe('CRM shell', () => {
     // Phase 0 added job_type_id to the schema, so the importer must be able to populate
     // it. This also covers the parse route end-to-end.
     await page.getByTestId('nav-item-imports').click()
-    await expect(page.getByText('Drag and drop XLS files here')).toBeVisible()
+    await expect(page.getByText('Drag and drop a spreadsheet here')).toBeVisible()
 
     await page
       .getByTestId('excel-file-input')

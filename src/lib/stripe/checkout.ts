@@ -16,7 +16,10 @@
 export type CheckoutCreator = {
   checkout: {
     sessions: {
-      create: (params: Record<string, unknown>) => Promise<{ id: string; url: string | null }>
+      create: (
+        params: Record<string, unknown>,
+        options?: { idempotencyKey?: string }
+      ) => Promise<{ id: string; url: string | null }>
     }
   }
 }
@@ -55,6 +58,9 @@ export async function createConsultationCheckout(
     // $0 total Stripe creates no PaymentIntent, and passing that field may be rejected.
     // Session metadata is always present, and the webhook also matches on session id.
     metadata: { booking_id: params.bookingId },
+  }, {
+    // Concurrent clicks return the same session instead of minting two live checkouts.
+    idempotencyKey: `consultation-booking-${params.bookingId}`,
   })
 
   return { sessionId: session.id, url: session.url }

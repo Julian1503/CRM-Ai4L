@@ -15,6 +15,15 @@ export interface PaginationProps {
   onPageSizeChange?: (pageSize: number) => void
   /** Plural noun for the summary line, e.g. "contacts". */
   label: string
+  /**
+   * Rows the caller actually rendered.
+   *
+   * Without it the window is pure arithmetic and can describe rows that are not on
+   * screen — while a filter is in flight the table shows skeletons under a line still
+   * claiming "Showing 1–25 of 5,222", which reads as a broken table rather than as a
+   * load in progress.
+   */
+  shown?: number
   isLoading?: boolean
   /** Distinguishes the controls when a screen renders more than one pager. */
   testId?: string
@@ -38,6 +47,7 @@ export default function Pagination({
   onPageChange,
   onPageSizeChange,
   label,
+  shown,
   isLoading = false,
   testId = 'pagination',
 }: PaginationProps) {
@@ -50,14 +60,24 @@ export default function Pagination({
   }
 
   const first = total === 0 ? 0 : (page - 1) * pageSize + 1
-  const last = Math.min(page * pageSize, total)
+  // Prefer what is on screen. The arithmetic is the fallback for callers that do not
+  // count their rows, and it assumes a full page came back.
+  const last =
+    shown === undefined ? Math.min(page * pageSize, total) : Math.max(first - 1, first + shown - 1)
+
+  const summary = isLoading
+    ? `Loading ${label}…`
+    : total === 0
+      ? `No ${label}`
+      : shown === 0
+        // A page past the end of a list that shrank under the user.
+        ? `No ${label} on this page`
+        : `Showing ${numberFormat.format(first)}–${numberFormat.format(last)} of ${numberFormat.format(total)} ${label}`
 
   return (
     <nav className={styles.bar} aria-label={`${label} pagination`} data-testid={testId}>
       <p className={styles.summary} aria-live="polite" data-testid={`${testId}-summary`}>
-        {total === 0
-          ? `No ${label}`
-          : `Showing ${numberFormat.format(first)}–${numberFormat.format(last)} of ${numberFormat.format(total)} ${label}`}
+        {summary}
       </p>
 
       <div className={styles.controls}>

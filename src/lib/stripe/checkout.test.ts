@@ -75,4 +75,14 @@ describe('createConsultationCheckout', () => {
       url: 'https://checkout.stripe.com/x',
     })
   })
+
+  it('uses a booking-scoped idempotency key for concurrent clicks', async () => {
+    const { stripe, create } = stripeDouble()
+
+    await createConsultationCheckout(stripe, params)
+
+    expect(create.mock.calls[0][1]).toEqual({
+      idempotencyKey: 'consultation-booking-b1',
+    })
+  })
 })

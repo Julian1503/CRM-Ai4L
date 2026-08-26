@@ -167,6 +167,7 @@ export default function ArchiveView() {
         page={page}
         pageSize={pageSize}
         total={total}
+        shown={contacts.length}
         onPageChange={setPage}
         onPageSizeChange={(size) => {
           setPageSize(size)

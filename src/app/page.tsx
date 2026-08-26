@@ -23,7 +23,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import styles from './page.module.css';
 import statsStyles from '@/components/DashboardStats.module.css';
 import { gsap } from 'gsap';
@@ -36,12 +36,20 @@ import ContactTable, { TableContact } from '@/components/ContactTable';
 import ContactDrawer from '@/components/ContactDrawer';
 import { getSupabaseClient, hasSupabaseConfig } from '@/lib/supabaseClient';
 import { mapAndValidateRows } from '@/lib/excelParser';
+import {
+  autoMapHeaders,
+  emptyColumnMapping,
+  type ColumnMapping,
+  type CrmFieldKey,
+} from '@/lib/contacts/columnMapping';
 import { importContacts } from '@/lib/contacts/import';
 import FilterBar, { type StatusFilter } from '@/components/contacts/FilterBar';
 import MarketingView from '@/components/marketing/MarketingView';
 import ArchiveView from '@/components/contacts/ArchiveView';
 import BookingsView from '@/components/bookings/BookingsView';
+import OperationsPanel from '@/components/operations/OperationsPanel';
 import Pagination from '@/components/ui/Pagination';
+import type { ContactStatus } from '@/lib/db/types';
 
 type ServiceOption = { id: string; name: string };
 type SyncLog = { id: string; event_text: string; status: string; created_at: string };
@@ -63,6 +71,7 @@ type DbContact = {
   department: string | null;
   position: string | null;
   notes: string | null;
+  status?: ContactStatus | null;
   is_customer: boolean | null;
   subscribed_to_newsletter: boolean | null;
   job_type_id: string | null;
@@ -71,6 +80,9 @@ type DbContact = {
 type ContactSavePayload = Partial<TableContact> & {
   organisationName?: string;
 };
+type EmailOctopusHealth =
+  | { status: 'unchecked' | 'checking' | 'not_configured' | 'error'; missing: string[] }
+  | { status: 'ready' | 'needs_fields'; missing: string[] };
 type ParsedSpreadsheetResponse = {
   headers: string[];
   rows: Record<string, string>[];
@@ -93,7 +105,13 @@ function formatContactFromDatabase(contact: DbContact, contactServices: string[]
     department: contact.department || '',
     position: contact.position || '',
     notes: contact.notes || '',
-    isCustomer: Boolean(contact.is_customer),
+    status:
+      contact.status && contact.status !== 'archived'
+        ? contact.status
+        : (contact.is_customer ? 'customer' : 'prospect'),
+    isCustomer: contact.status
+      ? contact.status === 'customer'
+      : Boolean(contact.is_customer),
     subscribedToNewsletter: Boolean(contact.subscribed_to_newsletter),
     jobTypeId: contact.job_type_id || null,
     organisation: contact.organisation || null,
@@ -149,7 +167,7 @@ function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Unknown error';
 }
 
-const CRM_FIELDS = [
+const CRM_FIELDS: { key: CrmFieldKey; label: string; description: string }[] = [
   { key: 'fullName', label: 'Full Name (Split)', description: 'Splits by space into First/Last name' },
   { key: 'firstName', label: 'First Name', description: 'Contact first name' },
   { key: 'lastName', label: 'Last Name', description: 'Contact last name' },
@@ -228,26 +246,7 @@ export default function App() {
   const [rawHeaders, setRawHeaders] = useState<string[]>([]);
   const [rawRows, setRawRows] = useState<Record<string, string>[]>([]);
   const [showPreview, setShowPreview] = useState(false);
-  const [columnMapping, setColumnMapping] = useState<Record<string, string>>({
-    firstName: '',
-    lastName: '',
-    fullName: '',
-    preferredName: '',
-    email: '',
-    mobileNumber: '',
-    workPhone: '',
-    address: '',
-    suburb: '',
-    state: '',
-    postcode: '',
-    country: '',
-    organisationName: '',
-    jobTypeName: '',
-    department: '',
-    position: '',
-    isCustomer: '',
-    subscribedToNewsletter: '',
-  });
+  const [columnMapping, setColumnMapping] = useState<ColumnMapping>(emptyColumnMapping());
 
   // EmailOctopus integrations state
   const [emailOctopusApiKey, setEmailOctopusApiKey] = useState('');
@@ -256,7 +255,15 @@ export default function App() {
   const [syncLogsPage, setSyncLogsPage] = useState(1);
   const [syncLogsTotal, setSyncLogsTotal] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
-  const isConnected = emailOctopusApiKey.trim() !== '' && emailOctopusListId.trim() !== '';
+  const [isPreparingEmailOctopus, setIsPreparingEmailOctopus] = useState(false);
+  const [emailOctopusHealth, setEmailOctopusHealth] = useState<EmailOctopusHealth>({
+    status: 'unchecked',
+    missing: [],
+  });
+  const isEmailOctopusConfigured =
+    emailOctopusApiKey.trim() !== '' && emailOctopusListId.trim() !== '';
+  const isEmailOctopusReachable =
+    emailOctopusHealth.status === 'ready' || emailOctopusHealth.status === 'needs_fields';
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -519,59 +526,8 @@ export default function App() {
       setRawHeaders(data.headers);
       setRawRows(data.rows);
 
-      // Auto-mapping heuristics based on column header keywords
-      const initialMapping: Record<string, string> = {
-        firstName: '',
-        lastName: '',
-        fullName: '',
-        preferredName: '',
-        email: '',
-        mobileNumber: '',
-        workPhone: '',
-        address: '',
-        suburb: '',
-        state: '',
-        postcode: '',
-        country: '',
-        organisationName: '',
-        jobTypeName: '',
-        department: '',
-        position: '',
-        isCustomer: '',
-        subscribedToNewsletter: '',
-      };
-
-      data.headers.forEach((header: string) => {
-        const lowerHeader = header.toLowerCase();
-
-        if (lowerHeader.includes('full name') || lowerHeader === 'name') {
-          initialMapping.fullName = header;
-        } else if (lowerHeader.includes('first name') || lowerHeader === 'fname') {
-          initialMapping.firstName = header;
-        } else if (lowerHeader.includes('last name') || lowerHeader === 'lname') {
-          initialMapping.lastName = header;
-        } else if (lowerHeader.includes('email') || lowerHeader === 'mail') {
-          initialMapping.email = header;
-        } else if (lowerHeader.includes('company') || lowerHeader.includes('organisation') || lowerHeader === 'org') {
-          initialMapping.organisationName = header;
-        } else if (lowerHeader.includes('job type') || lowerHeader.includes('trade') || lowerHeader === 'jobtype') {
-          initialMapping.jobTypeName = header;
-        } else if (lowerHeader.includes('role') || lowerHeader.includes('position') || lowerHeader === 'title') {
-          initialMapping.position = header;
-        } else if (lowerHeader.includes('dept') || lowerHeader.includes('department')) {
-          initialMapping.department = header;
-        } else if (lowerHeader.includes('mobile') || lowerHeader.includes('phone') || lowerHeader === 'cell') {
-          initialMapping.mobileNumber = header;
-        } else if (lowerHeader.includes('work') && lowerHeader.includes('phone')) {
-          initialMapping.workPhone = header;
-        } else if (lowerHeader.includes('customer') || lowerHeader.includes('client') || lowerHeader.includes('active')) {
-          initialMapping.isCustomer = header;
-        } else if (lowerHeader.includes('newsletter') || lowerHeader.includes('subscribe')) {
-          initialMapping.subscribedToNewsletter = header;
-        }
-      });
-
-      setColumnMapping(initialMapping);
+      // First guess only -- the mapping screen below is where it gets confirmed.
+      setColumnMapping(autoMapHeaders(data.headers));
       setIsMapped(true);
     } catch (err) {
       alert(`Error parsing spreadsheet: ${getErrorMessage(err)}`);
@@ -714,6 +670,7 @@ export default function App() {
         }
       }
 
+      const status = data.status ?? (data.isCustomer ? 'customer' : 'prospect');
       const dbContact = {
         first_name: data.firstName,
         last_name: data.lastName,
@@ -733,7 +690,8 @@ export default function App() {
         department: data.department || null,
         position: data.position || null,
         notes: data.notes || null,
-        is_customer: Boolean(data.isCustomer),
+        status,
+        is_customer: status === 'customer',
         subscribed_to_newsletter: Boolean(data.subscribedToNewsletter),
       };
 
@@ -757,7 +715,7 @@ export default function App() {
       }
 
       const servicesBought = Array.isArray(data.servicesBought) ? data.servicesBought : [];
-      if (contactId && data.isCustomer && servicesBought.length > 0) {
+      if (contactId && status === 'customer' && servicesBought.length > 0) {
         const joinRecords = servicesBought.map((serviceId: string) => ({
           contact_id: contactId,
           service_id: serviceId,
@@ -843,29 +801,53 @@ export default function App() {
       // No contact list: the browser only holds the page on screen, so the route reads
       // the full book server-side. Sending contacts.map(...) here would have quietly
       // synced one page and reported it as a complete run.
-      const response = await fetch('/api/integrations/emailoctopus/sync', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          apiKey: emailOctopusApiKey,
-          listId: emailOctopusListId,
-        }),
-      });
+      let offset = 0;
+      let syncedCount = 0;
+      let errorsCount = 0;
 
-      const result = await response.json();
+      let syncCompleted = false;
 
-      if (response.ok && result.success) {
-        await recordSyncLog(`Sync completed: ${result.syncedCount} subscribers synced`, 'success');
-        alert('Sync completed successfully!');
-      } else {
-        const errMessage = result.message || result.error || 'Unknown error';
-        await recordSyncLog(`Sync failed: ${errMessage}`, 'failed').catch((logError) => {
-          console.error('Failed to record sync failure:', logError);
+      for (let chunk = 0; chunk < 1000; chunk += 1) {
+        const response = await fetch('/api/integrations/emailoctopus/sync', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            apiKey: emailOctopusApiKey,
+            listId: emailOctopusListId,
+            offset,
+          }),
         });
-        alert(`Sync failed: ${errMessage}`);
+
+        const result = await response.json();
+
+        if (!response.ok || !result.success) {
+          throw new Error(result.message || result.error || 'Unknown error');
+        }
+
+        syncedCount += Number(result.syncedCount) || 0;
+        errorsCount += Number(result.errorsCount) || 0;
+
+        if (!result.hasMore) {
+          syncCompleted = true;
+          break;
+        }
+        if (!Number.isInteger(result.nextOffset) || result.nextOffset <= offset) {
+          throw new Error('EmailOctopus sync returned an invalid continuation cursor.');
+        }
+        offset = result.nextOffset;
       }
+
+      if (!syncCompleted) {
+        throw new Error('EmailOctopus sync exceeded the maximum number of chunks.');
+      }
+
+      await recordSyncLog(
+        `Sync completed: ${syncedCount} subscribers synced${errorsCount ? `, ${errorsCount} failed` : ''}`,
+        errorsCount ? 'failed' : 'success'
+      );
+      alert(errorsCount ? 'Sync completed with some failures.' : 'Sync completed successfully!');
     } catch (err) {
       console.error('Sync error:', err);
       await recordSyncLog(`Sync failed: ${getErrorMessage(err)}`, 'failed').catch((logError) => {
@@ -874,6 +856,62 @@ export default function App() {
       alert(`Sync failed: ${getErrorMessage(err)}`);
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  const checkEmailOctopus = useCallback(async () => {
+    setEmailOctopusHealth({ status: 'checking', missing: [] });
+
+    try {
+      const response = await fetch('/api/integrations/emailoctopus/fields');
+      const result = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Could not validate the EmailOctopus list.');
+      }
+
+      const missing = Array.isArray(result.missing) ? result.missing : [];
+      setEmailOctopusHealth({
+        status: result.ready ? 'ready' : 'needs_fields',
+        missing,
+      });
+    } catch (error) {
+      console.error('EmailOctopus connection check failed:', error);
+      setEmailOctopusHealth({ status: 'error', missing: [] });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (currentView !== 'integrations') return;
+
+    if (!isEmailOctopusConfigured) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void checkEmailOctopus();
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [checkEmailOctopus, currentView, isEmailOctopusConfigured]);
+
+  const prepareEmailOctopusFields = async () => {
+    setIsPreparingEmailOctopus(true);
+
+    try {
+      const response = await fetch('/api/integrations/emailoctopus/fields', { method: 'POST' });
+      const result = await response.json().catch(() => ({}));
+
+      if (!response.ok || (Array.isArray(result.failed) && result.failed.length > 0)) {
+        throw new Error(result.error || 'Some EmailOctopus fields could not be created.');
+      }
+
+      await checkEmailOctopus();
+    } catch (error) {
+      console.error('EmailOctopus field setup failed:', error);
+      alert(`Field setup failed: ${getErrorMessage(error)}`);
+    } finally {
+      setIsPreparingEmailOctopus(false);
     }
   };
 
@@ -933,6 +971,7 @@ export default function App() {
                   country: 'Australia',
                   department: '',
                   position: '',
+                  status: 'prospect',
                   isCustomer: false,
                   subscribedToNewsletter: false,
                   organisation: null,
@@ -982,6 +1021,7 @@ export default function App() {
               page={contactsPage}
               pageSize={contactsPageSize}
               total={contactsTotal}
+              shown={contacts.length}
               onPageChange={setContactsPage}
               onPageSizeChange={(size) => {
                 setContactsPageSize(size);
@@ -1061,7 +1101,7 @@ export default function App() {
                   <span className={styles.eyebrowDot} />
                   Spreadsheet Tools
                 </div>
-                <h1 className={styles.pageTitle}>Excel spreadsheet importer</h1>
+                <h1 className={styles.pageTitle}>Spreadsheet importer</h1>
                 <span className={styles.pageSubtitle}>Upload client list files to ingest data records into the database.</span>
               </div>
             </header>
@@ -1070,7 +1110,7 @@ export default function App() {
               <div className={styles.sectionIntro} style={{ padding: '12px' }}>
                 <h3 className={styles.sectionIntroTitle}>Data Ingestion Panel</h3>
                 <p className={styles.sectionIntroDesc}>
-                  Upload spreadsheets (`.xls`, `.xlsx`) to import contact profiles, resolve company associations, and sync newsletter subscriptions.
+                  Upload spreadsheets (`.xls`, `.xlsx`, `.csv` or Apple `.numbers`) to import contact profiles, resolve company associations, and sync newsletter subscriptions.
                 </p>
                 <div className={styles.checklist}>
                   <div className={styles.checklistItem}>
@@ -1112,7 +1152,7 @@ export default function App() {
                       type="file" 
                       ref={fileInputRef} 
                       style={{ display: 'none' }} 
-                      accept=".xlsx,.xls,.csv" 
+                      accept=".xlsx,.xlsm,.xls,.csv,.tsv,.numbers"
                       onChange={handleFileChange} 
                     />
                     <div className="innerCore" style={{ padding: '48px 24px' }}>
@@ -1124,8 +1164,8 @@ export default function App() {
                             <line x1="12" y1="3" x2="12" y2="15" />
                           </svg>
                         </div>
-                        <h4 style={{ color: 'var(--text-primary)', marginBottom: '6px', fontSize: '1rem', fontWeight: 600 }}>Drag and drop XLS files here</h4>
-                        <span style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>or click to browse local files</span>
+                        <h4 style={{ color: 'var(--text-primary)', marginBottom: '6px', fontSize: '1rem', fontWeight: 600 }}>Drag and drop a spreadsheet here</h4>
+                        <span style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>Excel (.xls, .xlsx), CSV or Apple Numbers (.numbers)</span>
                       </div>
                     </div>
                   </div>
@@ -1173,7 +1213,7 @@ export default function App() {
                       <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '20px' }}>
                         <thead>
                           <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                            <th style={{ textAlign: 'left', padding: '8px 12px', fontSize: '0.72rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Excel Column Header</th>
+                            <th style={{ textAlign: 'left', padding: '8px 12px', fontSize: '0.72rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Spreadsheet Column Header</th>
                             <th style={{ textAlign: 'left', padding: '8px 12px', fontSize: '0.72rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Maps to CRM Field</th>
                           </tr>
                         </thead>
@@ -1338,14 +1378,28 @@ export default function App() {
                 <div className={statsStyles.cardInner}>
                   <div className={statsStyles.header}>
                     <span className={statsStyles.label}>Connection State</span>
-                    <div className={`${styles.statusDot} ${isConnected ? styles.statusActive : styles.statusIdle}`} />
+                    <div className={`${styles.statusDot} ${emailOctopusHealth.status === 'ready' ? styles.statusActive : styles.statusIdle}`} />
                   </div>
                   <span className={statsStyles.value} style={{ fontSize: '1.8rem' }}>
-                    {isConnected ? 'Connected' : 'Disconnected'}
+                    {emailOctopusHealth.status === 'ready'
+                      ? 'Ready'
+                      : emailOctopusHealth.status === 'needs_fields'
+                        ? 'Setup required'
+                        : emailOctopusHealth.status === 'checking'
+                          ? 'Checking'
+                          : isEmailOctopusConfigured
+                            ? 'Connection failed'
+                            : 'Not configured'}
                   </span>
                   <div className={statsStyles.trend}>
-                    <span className={isConnected ? statsStyles.trendPositive : statsStyles.trendNeutral}>
-                      {isConnected ? 'EmailOctopus synchronization active' : 'Requires API token authentication'}
+                    <span className={emailOctopusHealth.status === 'ready' ? statsStyles.trendPositive : statsStyles.trendNeutral}>
+                      {emailOctopusHealth.status === 'ready'
+                        ? 'List and campaign merge fields verified'
+                        : emailOctopusHealth.status === 'needs_fields'
+                          ? `${emailOctopusHealth.missing.length} required merge fields missing`
+                          : isEmailOctopusConfigured
+                            ? 'Saved credentials could not validate the list'
+                            : 'Requires API key and list ID'}
                     </span>
                   </div>
                 </div>
@@ -1384,27 +1438,45 @@ export default function App() {
               <div className={styles.sectionIntro} style={{ padding: '12px' }}>
                 <h3 className={styles.sectionIntroTitle}>Sync Configurations</h3>
                 <p className={styles.sectionIntroDesc}>
-                  By connecting your API credentials, the CRM will perform automatic, bi-directional updates. Toggling newsletter subscriptions on client profiles will automatically propagate changes to your EmailOctopus campaigns list.
+                  On-demand sync pushes newsletter contacts to EmailOctopus. Subscriber webhooks import new website signups when the website and EmailOctopus are configured to call this CRM.
                 </p>
                 <div className={styles.statusCard} style={{ marginTop: '12px' }}>
                   <div className={styles.statusHeader}>
-                    <span className={`${styles.statusDot} ${isConnected ? styles.statusActive : styles.statusIdle}`} />
+                    <span className={`${styles.statusDot} ${emailOctopusHealth.status === 'ready' ? styles.statusActive : styles.statusIdle}`} />
                     <span className={styles.settingLabel} style={{ marginBottom: 0 }}>Sync Engine Status</span>
                   </div>
                   <p style={{ color: 'var(--text-secondary)', fontSize: '0.82rem', lineHeight: '1.5' }}>
-                    {isConnected ? 'Connected. EmailOctopus synchronization active.' : 'Idle. Configure your API token in the settings menu to enable live webhooks and automated background list replication.'}
+                    {emailOctopusHealth.status === 'ready'
+                      ? 'Ready. The list exists and every campaign merge field is available.'
+                      : emailOctopusHealth.status === 'needs_fields'
+                        ? `Connected, but missing: ${emailOctopusHealth.missing.join(', ')}.`
+                        : emailOctopusHealth.status === 'checking'
+                          ? 'Validating the saved API key, list and merge fields.'
+                          : isEmailOctopusConfigured
+                            ? 'The saved API key or list ID could not be validated.'
+                            : 'Configure the API key and list ID in Settings.'}
                   </p>
+                  {emailOctopusHealth.status === 'needs_fields' && (
+                    <button
+                      className={styles.actionButton}
+                      style={{ marginTop: '16px', width: '100%', justifyContent: 'center' }}
+                      onClick={prepareEmailOctopusFields}
+                      disabled={isPreparingEmailOctopus}
+                    >
+                      {isPreparingEmailOctopus ? 'Creating fields...' : 'Create missing fields'}
+                    </button>
+                  )}
                   <button 
                     className={styles.actionButton} 
                     style={{ marginTop: '16px', width: '100%', justifyContent: 'center' }}
                     onClick={() => {
-                      if (!isConnected) {
-                        alert('Please configure your EmailOctopus API Key and List ID in settings first.');
+                      if (!isEmailOctopusReachable) {
+                        alert('Validate the EmailOctopus API key and List ID before syncing.');
                         return;
                       }
                       handleManualSync();
                     }}
-                    disabled={isSyncing}
+                    disabled={isSyncing || !isEmailOctopusReachable}
                   >
                     {isSyncing ? 'Syncing...' : 'Sync Now'}
                   </button>
@@ -1448,6 +1520,7 @@ export default function App() {
                     page={syncLogsPage}
                     pageSize={SYNC_LOG_PAGE_SIZE}
                     total={syncLogsTotal}
+                    shown={syncLogs.length}
                     onPageChange={setSyncLogsPage}
                     label="sync events"
                     testId="sync-logs-pagination"
@@ -1483,6 +1556,8 @@ export default function App() {
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                <OperationsPanel />
+
                 {/* Database Config Card */}
                 <div className="outerShell">
                   <div className="innerCore" style={{ padding: '24px' }}>

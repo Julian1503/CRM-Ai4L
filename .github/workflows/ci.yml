@@ -21,6 +21,10 @@ jobs:
       # rather than passing vacuously.
       NEXT_PUBLIC_SUPABASE_URL: https://ci.supabase.co
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-anon-key
+      E2E_BROWSERS: chromium
+      E2E_SKIP_BUILD: "true"
+      E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
+      E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
 
     steps:
       - uses: actions/checkout@v4
@@ -49,10 +53,14 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
-      # Runs against the production build. Signed-in specs skip without E2E_EMAIL /
-      # E2E_PASSWORD; the unauthenticated security specs always run.
-      - name: End-to-end tests
-        run: npx playwright test --project=chromium
+      - name: Public end-to-end security tests
+        run: npx playwright test --project=public-chromium
+
+      # authenticated-sign-out depends on the authenticated Chromium project, so logout
+      # is guaranteed to run last and cannot invalidate another test's Supabase session.
+      - name: Authenticated end-to-end tests
+        if: ${{ env.E2E_EMAIL != '' && env.E2E_PASSWORD != '' }}
+        run: npx playwright test --project=authenticated-sign-out
 
       - name: Upload Playwright report
         if: failure()

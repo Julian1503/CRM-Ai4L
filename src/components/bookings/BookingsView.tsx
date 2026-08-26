@@ -257,6 +257,7 @@ export default function BookingsView() {
         page={page}
         pageSize={pageSize}
         total={total}
+        shown={bookings.length}
         onPageChange={setPage}
         onPageSizeChange={(size) => {
           setPageSize(size)

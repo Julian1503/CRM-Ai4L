@@ -87,6 +87,26 @@ describe('POST /api/segments/preview', () => {
     })
   })
 
+  it('counts each dropdown option alongside the total', async () => {
+    // The builder shows these next to the option labels, so an operator can see a
+    // job type is empty in the chosen state before saving a segment that sends to
+    // nobody.
+    const rows = [
+      { state: 'NSW', job_type_id: 'elec', status: 'lead' },
+      { state: 'NSW', job_type_id: 'plumb', status: 'customer' },
+      { state: 'VIC', job_type_id: 'elec', status: 'lead' },
+    ]
+    mockCreateServerClient.mockResolvedValue(
+      createDbMock(createQueryBuilderMock({ data: rows, error: null, count: rows.length }))
+    )
+
+    const body = await (await post({ definition: { state: 'NSW' } })).json()
+
+    expect(body.facets.state).toEqual({ '': 3, NSW: 2, VIC: 1 })
+    expect(body.facets.jobType).toEqual({ '': 2, elec: 1, plumb: 1 })
+    expect(body.facets.truncated).toBe(false)
+  })
+
   it('reads through the active contacts view', async () => {
     const { db } = setup()
 

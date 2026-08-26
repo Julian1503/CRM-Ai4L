@@ -1,5 +1,10 @@
 import * as XLSX from 'xlsx';
-import { parseExcelBuffer, mapAndValidateRows } from './excelParser';
+import {
+  parseExcelBuffer,
+  mapAndValidateRows,
+  isSupportedSpreadsheetName,
+  SUPPORTED_SPREADSHEET_EXTENSIONS,
+} from './excelParser';
 
 // Helper function to create a mock excel file buffer
 function createExcelBuffer(headers: string[], rows: string[][]): Buffer {
@@ -120,5 +125,62 @@ describe('excelParser - mapAndValidateRows', () => {
     expect(results[0].isValid).toBe(true);
     expect(results[0].data?.firstName).toBe('Ada');
     expect(results[0].data?.lastName).toBe('Lovelace');
+  });
+});
+
+
+describe('excelParser - non-Excel workbook containers', () => {
+  it('parses a CSV upload through the same entry point', () => {
+    const csv = 'First Name,Email\nAda,ada@example.com\n';
+    const result = parseExcelBuffer(Buffer.from(csv, 'utf8'));
+
+    expect(result.headers).toEqual(['First Name', 'Email']);
+    expect(result.rows[0]).toEqual({ 'First Name': 'Ada', Email: 'ada@example.com' });
+  });
+
+  it('does not leak a UTF-8 BOM into the first header', () => {
+    // Excel on Windows writes the BOM; left in place it becomes part of the header key
+    // and every mapping lookup against that column silently misses.
+    const csv = 'First Name,Email\nJosé,jose@example.com\n';
+    const buffer = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(csv, 'utf8')]);
+    const result = parseExcelBuffer(buffer);
+
+    expect(result.headers[0]).toBe('First Name');
+    expect(result.rows[0]['First Name']).toBe('José');
+  });
+
+  it('strips the leading apostrophe spreadsheets use to force a number to text', () => {
+    // Apollo exports phone numbers as '+61 2 8263 4000 so Excel keeps the leading plus.
+    const csv = 'First Name,Phone\nAda,"\'+61 2 8263 4000"\n';
+    const result = parseExcelBuffer(Buffer.from(csv, 'utf8'));
+
+    expect(result.rows[0].Phone).toBe('+61 2 8263 4000');
+  });
+
+  it('keeps an apostrophe that is part of the value', () => {
+    const csv = 'First Name,Company\nAda,"\'Round Midnight"\n';
+    const result = parseExcelBuffer(Buffer.from(csv, 'utf8'));
+
+    expect(result.rows[0].Company).toBe("'Round Midnight");
+  });
+});
+
+describe('excelParser - isSupportedSpreadsheetName', () => {
+  it.each(['contacts.xlsx', 'contacts.XLS', 'contacts.csv', 'apollo export.numbers'])(
+    'accepts %s',
+    (name) => {
+      expect(isSupportedSpreadsheetName(name)).toBe(true);
+    }
+  );
+
+  it.each(['contacts.pdf', 'contacts.docx', 'contacts.numbers.exe', 'contacts', ''])(
+    'rejects %s',
+    (name) => {
+      expect(isSupportedSpreadsheetName(name)).toBe(false);
+    }
+  );
+
+  it('lists the Apple Numbers extension among the supported formats', () => {
+    expect(SUPPORTED_SPREADSHEET_EXTENSIONS).toContain('.numbers');
   });
 });

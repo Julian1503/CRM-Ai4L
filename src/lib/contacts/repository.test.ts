@@ -2,7 +2,7 @@ import { createDbMock, createQueryBuilderMock } from '@/test/supabaseMock'
 
 import { parseContactFilters } from './query'
 import { applyContactFilters, archiveContact, contactSource, restoreContact,
-  findOrganisationIdsMatching,
+  findOrganisationIdsMatching, fetchContactsForExport, ContactExportLimitError,
 } from './repository'
 
 describe('contactSource', () => {
@@ -165,6 +165,50 @@ describe('restoreContact', () => {
     await expect(restoreContact(db as never, 'contact-1')).rejects.toThrow(
       /already an active contact with that email/i
     )
+  })
+})
+
+describe('fetchContactsForExport', () => {
+  const filters = parseContactFilters({})
+
+  it('loads every page rather than trusting one oversized response', async () => {
+    const pages = [
+      createQueryBuilderMock({ data: [{ id: 'c1' }, { id: 'c2' }], error: null, count: 3 }),
+      createQueryBuilderMock({ data: [{ id: 'c3' }], error: null, count: 3 }),
+    ]
+    let index = 0
+    const db = createDbMock(() => pages[Math.min(index++, pages.length - 1)])
+
+    const result = await fetchContactsForExport(db as never, filters, 10, 2)
+
+    expect(result.rows.map((row) => row.id)).toEqual(['c1', 'c2', 'c3'])
+    expect(pages[0].argsFor('range')).toEqual([0, 1])
+    expect(pages[1].argsFor('range')).toEqual([2, 3])
+  })
+
+  it('throws before presenting a partial export above the configured limit', async () => {
+    const builder = createQueryBuilderMock({ data: [{ id: 'c1' }], error: null, count: 11 })
+
+    await expect(
+      fetchContactsForExport(createDbMock(builder) as never, filters, 10, 2)
+    ).rejects.toBeInstanceOf(ContactExportLimitError)
+  })
+
+  it('fails if the provider stops returning rows before the reported total', async () => {
+    const pages = [
+      createQueryBuilderMock({ data: [{ id: 'c1' }, { id: 'c2' }], error: null, count: 3 }),
+      createQueryBuilderMock({ data: [], error: null, count: 3 }),
+    ]
+    let index = 0
+
+    await expect(
+      fetchContactsForExport(
+        createDbMock(() => pages[Math.min(index++, pages.length - 1)]) as never,
+        filters,
+        10,
+        2
+      )
+    ).rejects.toThrow(/stopped after 2 of 3/i)
   })
 })
 

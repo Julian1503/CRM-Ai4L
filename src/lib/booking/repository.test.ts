@@ -100,10 +100,10 @@ describe('markCheckoutStarted', () => {
 
 describe('markBookingPaid', () => {
   it('records the charged amount against the session', async () => {
-    const builder = createQueryBuilderMock({ data: null, error: null })
+    const builder = createQueryBuilderMock({ data: [{ id: 'b1' }], error: null })
     const db = createDbMock(builder)
 
-    await markBookingPaid(db as never, 'cs_1', 0)
+    await expect(markBookingPaid(db as never, 'cs_1', 0)).resolves.toBe(true)
 
     const update = builder.argsFor('update') as [Record<string, unknown>]
     expect(update[0]).toMatchObject({ status: 'paid', charged_amount_cents: 0 })
@@ -124,6 +124,14 @@ describe('markBookingPaid', () => {
       method: 'in',
       args: ['status', ['pending', 'checkout_started']],
     })
+  })
+
+  it('reports when the completed session matched no booking', async () => {
+    const builder = createQueryBuilderMock({ data: [], error: null })
+
+    await expect(
+      markBookingPaid(createDbMock(builder) as never, 'cs_missing', 0, 'b1')
+    ).resolves.toBe(false)
   })
 })
 
@@ -146,29 +154,62 @@ describe('markBookingScheduled', () => {
     expect(update[0]).toMatchObject({ status: 'booked', calendly_invitee_uri: params.inviteeUri })
   })
 
-  it('will not resurrect a cancelled booking', async () => {
+  it('only schedules a booking that passed checkout', async () => {
     const bookings = createQueryBuilderMock({ data: [{ id: 'b1' }], error: null })
 
     await markBookingScheduled(createDbMock(bookings) as never, { ...params, bookingId: 'b1' })
 
-    expect(bookings.allFor('neq')).toContainEqual({ method: 'neq', args: ['status', 'cancelled'] })
+    expect(bookings.allFor('in')).toContainEqual({
+      method: 'in',
+      args: ['status', ['paid', 'booked']],
+    })
   })
 
   it('falls back to matching the invitee by email', async () => {
     // Calendly does not guarantee custom parameters come back on the webhook.
     const bookings = createQueryBuilderMock([
-      { data: [], error: null }, // id match found nothing
-      { data: [{ id: 'b2' }], error: null }, // email match
+      { data: { id: 'b2' }, error: null }, // newest paid booking lookup
+      { data: [{ id: 'b2' }], error: null }, // exact update
     ])
     const contacts = createQueryBuilderMock({ data: { id: 'c1' }, error: null })
 
     const db = createDbMock((table: string) => (table === 'contacts' ? contacts : bookings))
 
     await expect(
-      markBookingScheduled(db as never, { ...params, bookingId: 'missing', email: 'A@Example.com' })
+      markBookingScheduled(db as never, { ...params, email: 'A@Example.com' })
     ).resolves.toBe(true)
 
     expect(contacts.allFor('eq')).toContainEqual({ method: 'eq', args: ['email', 'a@example.com'] })
+    expect(bookings.allFor('eq')).toContainEqual({ method: 'eq', args: ['id', 'b2'] })
+  })
+
+  it('does not let Calendly bypass checkout', async () => {
+    const bookings = createQueryBuilderMock({ data: [], error: null })
+
+    await expect(
+      markBookingScheduled(createDbMock(bookings) as never, { ...params, bookingId: 'b1' })
+    ).resolves.toBe(false)
+
+    expect(bookings.allFor('in')).toContainEqual({
+      method: 'in',
+      args: ['status', ['paid', 'booked']],
+    })
+  })
+
+  it('does not fall back to email when an exact tracking id was supplied but rejected', async () => {
+    const bookings = createQueryBuilderMock({ data: [], error: null })
+    const contacts = createQueryBuilderMock({ data: { id: 'c1' }, error: null })
+    const db = createDbMock((table: string) => (table === 'contacts' ? contacts : bookings))
+
+    await expect(
+      markBookingScheduled(db as never, {
+        ...params,
+        bookingId: 'unpaid-booking',
+        email: 'lead@example.com',
+      })
+    ).resolves.toBe(false)
+
+    expect(contacts.allFor('select')).toHaveLength(0)
   })
 
   it('reports no match rather than inventing a booking', async () => {

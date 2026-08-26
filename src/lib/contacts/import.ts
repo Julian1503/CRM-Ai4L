@@ -7,6 +7,8 @@ import type {
 } from '@/lib/db/types'
 import type { MappedContactRow } from '@/lib/excelParser'
 
+import { normaliseAuState } from './states'
+
 /**
  * Bulk contact import.
  *
@@ -53,7 +55,9 @@ export function toImportPayload(rows: MappedContactRow[]): ImportContactPayloadR
       setIfPresent(payload, 'work_phone', data.workPhone)
       setIfPresent(payload, 'address', data.address)
       setIfPresent(payload, 'suburb', data.suburb)
-      setIfPresent(payload, 'state', data.state)
+      // Folded to a state code here, at the only door bulk data comes through. See
+      // normaliseAuState: an unfolded "New South Wales" matches no segment.
+      setIfPresent(payload, 'state', normaliseAuState(data.state))
       setIfPresent(payload, 'postcode', data.postcode)
       setIfPresent(payload, 'country', data.country)
       setIfPresent(payload, 'department', data.department)

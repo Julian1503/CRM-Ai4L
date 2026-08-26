@@ -83,6 +83,44 @@ describe('MarketingView', () => {
     expect(screen.getByRole('option', { name: 'NSW leads' })).toBeInTheDocument()
   })
 
+  it('counts each filter option next to its label', async () => {
+    // Without the numbers the only way to learn a combination is empty is to save the
+    // segment and read the preview.
+    routeFetch({
+      ...defaultHandlers,
+      'POST /api/segments/preview': jsonResponse({
+        total: 5,
+        truncated: false,
+        estimatedSendMs: 0,
+        facets: {
+          state: { '': 9, NSW: 5, VIC: 3 },
+          jobType: { '': 5, 'job-1': 2 },
+          status: { '': 5, lead: 3 },
+          truncated: false,
+        },
+      }),
+    })
+
+    render(<MarketingView jobTypes={jobTypes} />)
+
+    expect(await screen.findByRole('option', { name: 'NSW (5)' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Any state (9)' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Electrician (2)' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Lead (3)' })).toBeInTheDocument()
+    // Counted but matched by nobody -- an explicit zero, not a missing number.
+    expect(screen.getByRole('option', { name: 'Customer (0)' })).toBeInTheDocument()
+  })
+
+  it('leaves the options bare until the first count arrives', async () => {
+    // A zero rendered while the request is in flight reads as "empty segment".
+    routeFetch({ ...defaultHandlers, 'POST /api/segments/preview': jsonResponse({}, false, 500) })
+
+    render(<MarketingView jobTypes={jobTypes} />)
+
+    expect(await screen.findByRole('option', { name: 'Any state' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Electrician' })).toBeInTheDocument()
+  })
+
   it('shows the live audience count', async () => {
     render(<MarketingView jobTypes={jobTypes} />)
 
@@ -340,9 +378,214 @@ describe('MarketingView', () => {
         expect(JSON.parse(call![1].body)).toEqual({ status: 'in_review' })
       })
     })
+
+    it('returns a campaign under review to draft for corrections', async () => {
+      render(<MarketingView jobTypes={jobTypes} />)
+
+      fireEvent.click(await screen.findByTestId('draft-camp-1'))
+
+      await waitFor(() => {
+        const call = mockFetch.mock.calls.find(
+          (entry) => entry[0] === '/api/campaigns/camp-1' && entry[1]?.method === 'PATCH'
+        )
+        expect(JSON.parse(call![1].body)).toEqual({ status: 'draft' })
+      })
+    })
+
+    it('retries only the failed recipients through the send endpoint', async () => {
+      routeFetch({
+        ...defaultHandlers,
+        'GET /api/campaigns': jsonResponse({
+          campaigns: [
+            {
+              id: 'camp-1',
+              name: 'August offer',
+              status: 'failed',
+              segment_id: 'seg-1',
+              provider_automation_id: 'auto-1',
+              merge_fields: {},
+              segment: { name: 'NSW leads' },
+            },
+          ],
+        }),
+        'POST /api/campaigns/camp-1/send': jsonResponse({
+          status: 'sent',
+          hasMore: false,
+          failed: 0,
+        }),
+      })
+
+      render(<MarketingView jobTypes={jobTypes} />)
+      fireEvent.click(await screen.findByTestId('retry-camp-1'))
+
+      await waitFor(() =>
+        expect(mockFetch).toHaveBeenCalledWith(
+          '/api/campaigns/camp-1/send',
+          expect.objectContaining({ method: 'POST' })
+        )
+      )
+    })
+
+    it('edits segment and automation settings while the campaign is a draft', async () => {
+      routeFetch({
+        ...defaultHandlers,
+        'GET /api/campaigns': jsonResponse({
+          campaigns: [
+            {
+              id: 'camp-1',
+              name: 'August offer',
+              status: 'draft',
+              segment_id: 'seg-1',
+              provider_automation_id: '',
+              merge_fields: {},
+              segment: { name: 'NSW leads' },
+            },
+          ],
+        }),
+        'PATCH /api/campaigns/camp-1': jsonResponse({ campaign: {} }),
+      })
+
+      render(<MarketingView jobTypes={jobTypes} />)
+      fireEvent.change(await screen.findByTestId('edit-automation-camp-1'), {
+        target: { value: 'auto-9' },
+      })
+      fireEvent.click(screen.getByTestId('save-settings-camp-1'))
+
+      await waitFor(() => {
+        const call = mockFetch.mock.calls.find(
+          (entry) => entry[0] === '/api/campaigns/camp-1' && entry[1]?.method === 'PATCH'
+        )
+        expect(JSON.parse(call![1].body)).toEqual({
+          segmentId: 'seg-1',
+          providerAutomationId: 'auto-9',
+        })
+      })
+    })
+  })
+
+  describe('an audience of nobody', () => {
+    it('warns while building a segment that matches no one', async () => {
+      routeFetch({
+        ...defaultHandlers,
+        'POST /api/segments/preview': jsonResponse({
+          total: 0,
+          truncated: false,
+          estimatedSendMs: 0,
+        }),
+      })
+
+      render(<MarketingView jobTypes={jobTypes} />)
+
+      expect(await screen.findByTestId('segment-preview-empty')).toHaveTextContent(
+        /cannot\s+generate copy or send/i
+      )
+    })
+
+    it('counts the audience for the campaign whose copy is open', async () => {
+      routeFetch({
+        ...defaultHandlers,
+        'GET /api/campaigns': jsonResponse({
+          campaigns: [
+            {
+              id: 'camp-1',
+              name: 'August offer',
+              status: 'draft',
+              segment_id: 'seg-1',
+              provider_automation_id: 'auto-1',
+              segment: { name: 'NSW leads' },
+              merge_fields: {},
+            },
+          ],
+        }),
+        'POST /api/segments/preview': jsonResponse({
+          total: 42,
+          truncated: false,
+          estimatedSendMs: 0,
+        }),
+      })
+
+      render(<MarketingView jobTypes={jobTypes} />)
+
+      fireEvent.click(await screen.findByTestId('review-copy-camp-1'))
+
+      await waitFor(() =>
+        expect(screen.getByTestId('composer-audience')).toHaveTextContent(
+          'NSW leads · 42 contacts'
+        )
+      )
+    })
   })
 
   describe('copy editor', () => {
+    /** One campaign in the list, so the label under test is unambiguous. */
+    function withCampaign(campaign: Record<string, unknown>) {
+      routeFetch({
+        ...defaultHandlers,
+        'GET /api/campaigns': jsonResponse({
+          campaigns: [
+            {
+              id: 'camp-1',
+              name: 'August offer',
+              segment_id: 'seg-1',
+              provider_automation_id: 'auto-1',
+              segment: { name: 'NSW leads' },
+              ...campaign,
+            },
+          ],
+        }),
+      })
+    }
+
+    describe('its entry point names what is behind it', () => {
+      // A button labelled just "Copy" reads as "duplicate this campaign". The AI
+      // copywriter is the only way to fill a draft, and it lives behind this control,
+      // so the label has to say so or the feature is undiscoverable.
+      it('offers to write the copy when a draft has none', async () => {
+        withCampaign({ status: 'draft', merge_fields: {} })
+        render(<MarketingView jobTypes={jobTypes} />)
+
+        expect(await screen.findByTestId('review-copy-camp-1')).toHaveTextContent(
+          'Write copy with AI'
+        )
+      })
+
+      it('offers to edit once a draft has copy', async () => {
+        withCampaign({ status: 'draft', merge_fields: { subject: 'Book a review' } })
+        render(<MarketingView jobTypes={jobTypes} />)
+
+        expect(await screen.findByTestId('review-copy-camp-1')).toHaveTextContent(
+          'Edit copy'
+        )
+      })
+
+      it('offers to view copy that is past review and locked', async () => {
+        withCampaign({ status: 'approved', merge_fields: { subject: 'Book a review' } })
+        render(<MarketingView jobTypes={jobTypes} />)
+
+        expect(await screen.findByTestId('review-copy-camp-1')).toHaveTextContent(
+          'View copy'
+        )
+      })
+
+      it('says hide while the panel is open', async () => {
+        withCampaign({ status: 'draft', merge_fields: {} })
+        render(<MarketingView jobTypes={jobTypes} />)
+
+        fireEvent.click(await screen.findByTestId('review-copy-camp-1'))
+
+        expect(screen.getByTestId('review-copy-camp-1')).toHaveTextContent('Hide copy')
+      })
+
+      it('ignores blank merge fields when deciding the label', async () => {
+        withCampaign({ status: 'draft', merge_fields: { subject: '   ' } })
+        render(<MarketingView jobTypes={jobTypes} />)
+
+        expect(await screen.findByTestId('review-copy-camp-1')).toHaveTextContent(
+          'Write copy with AI'
+        )
+      })
+    })
+
     it('stays closed until asked for', async () => {
       render(<MarketingView jobTypes={jobTypes} />)
 

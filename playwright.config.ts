@@ -1,12 +1,62 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const DEFAULT_BASE_URL = 'http://127.0.0.1:3100';
+const AUTH_STATE_PATH = 'test-results/.auth/user.json';
+const SIGN_OUT_TEST = /signs the user out and blocks the dashboard afterwards/;
+
+const baseURL = (process.env.E2E_BASE_URL?.trim() || DEFAULT_BASE_URL).replace(/\/$/, '');
+const parsedBaseURL = new URL(baseURL);
+const hasCredentials = Boolean(process.env.E2E_EMAIL && process.env.E2E_PASSWORD);
+const useExternalServer = process.env.E2E_EXTERNAL_SERVER === 'true';
+const reuseExistingServer = process.env.E2E_REUSE_EXISTING_SERVER === 'true';
+const skipBuild = process.env.E2E_SKIP_BUILD === 'true';
+
+if (!useExternalServer && !['127.0.0.1', 'localhost'].includes(parsedBaseURL.hostname)) {
+  throw new Error('Set E2E_EXTERNAL_SERVER=true when E2E_BASE_URL is not local.');
+}
+
+const localPort = parsedBaseURL.port || (parsedBaseURL.protocol === 'https:' ? '443' : '80');
+const allBrowserDefinitions = [
+  { name: 'chromium', device: devices['Desktop Chrome'] },
+  { name: 'firefox', device: devices['Desktop Firefox'] },
+  { name: 'webkit', device: devices['Desktop Safari'] },
+] as const;
+const requestedBrowsers = new Set(
+  (process.env.E2E_BROWSERS || allBrowserDefinitions.map(({ name }) => name).join(','))
+    .split(',')
+    .map((name) => name.trim())
+    .filter(Boolean)
+);
+const browserDefinitions = allBrowserDefinitions.filter(({ name }) => requestedBrowsers.has(name));
+
+if (browserDefinitions.length !== requestedBrowsers.size || browserDefinitions.length === 0) {
+  throw new Error('E2E_BROWSERS must contain one or more of: chromium, firefox, webkit.');
+}
+
+const publicProjects = browserDefinitions.map(({ name, device }) => ({
+  name: `public-${name}`,
+  testMatch: /auth\.spec\.ts/,
+  use: { ...device },
+}));
+
+const authenticatedProjects = browserDefinitions.map(({ name, device }) => ({
+  name: `authenticated-${name}`,
+  testMatch: /smoke\.spec\.ts/,
+  grepInvert: SIGN_OUT_TEST,
+  dependencies: hasCredentials ? ['auth-setup'] : [],
+  use: {
+    ...device,
+    ...(hasCredentials ? { storageState: AUTH_STATE_PATH } : {}),
+  },
+}));
+
 export default defineConfig({
   testDir: './src/e2e',
   fullyParallel: true,
   // 60s rather than the 30s default.
   //
-  // Every spec signs in against a remote Supabase project and loads a 5,000-row
-  // contact list, and three browser projects share one `next start`. WebKit on Windows
+  // Signed-in specs load a 5,000-row contact list, and three browser projects share one
+  // `next start`. Authentication itself is performed once by auth.setup.ts. WebKit on Windows
   // is the slowest of the three by a wide margin — a spec that clicks through four
   // workspaces passes in 53s alone and timed out at 30s in the full run. Nothing here
   // is waiting on a defect; it is waiting on real network and a real dataset. A
@@ -17,15 +67,15 @@ export default defineConfig({
   // Capped rather than left to Playwright's default (half the CPU cores).
   //
   // The bottleneck is not CPU: every spec talks to one `next start` process and one
-  // remote Supabase project, and each signed-in spec performs a real sign-in and loads
-  // a 5,000-row contact list. At the default width the server and the auth endpoint
+  // remote Supabase project, and each signed-in spec loads a 5,000-row contact list.
+  // At the default width the server and the data endpoint
   // starve, and specs fail on a 30s timeout that moves between runs -- a different one
   // each time, which is the signature of contention rather than a defect. Three keeps
   // the browser projects overlapping without queueing behind each other.
   workers: process.env.CI ? 1 : 3,
   reporter: 'html',
   use: {
-    baseURL: 'http://127.0.0.1:3000',
+    baseURL,
     trace: 'on-first-retry',
     // Emulates `prefers-reduced-motion: reduce`.
     //
@@ -38,18 +88,31 @@ export default defineConfig({
     contextOptions: { reducedMotion: 'reduce' },
   },
   projects: [
-    {
-      name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
-    },
-    {
-      name: 'firefox',
-      use: { ...devices['Desktop Firefox'] },
-    },
-    {
-      name: 'webkit',
-      use: { ...devices['Desktop Safari'] },
-    },
+    ...(hasCredentials
+      ? [
+          {
+            name: 'auth-setup',
+            testMatch: /auth\.setup\.ts/,
+            use: { ...devices['Desktop Chrome'] },
+          },
+        ]
+      : []),
+    ...publicProjects,
+    ...authenticatedProjects,
+    ...(hasCredentials
+      ? [
+          {
+            name: 'authenticated-sign-out',
+            testMatch: /smoke\.spec\.ts/,
+            grep: SIGN_OUT_TEST,
+            dependencies: browserDefinitions.map(({ name }) => `authenticated-${name}`),
+            use: {
+              ...devices['Desktop Chrome'],
+              storageState: AUTH_STATE_PATH,
+            },
+          },
+        ]
+      : []),
   ],
   // Runs against a production build rather than `next dev`, for two reasons:
   // 1. E2E should exercise the artifact that actually ships.
@@ -59,10 +122,14 @@ export default defineConfig({
   //    (ws://127.0.0.1:3000/_next/webpack-hmr -> ERR_INVALID_HTTP_RESPONSE) and
   //    reproduces on a cleared .next cache. `next build` + `next start` hydrates
   //    correctly, so this is a dev-server/environment issue, not an app defect.
-  webServer: {
-    command: 'npm run build && npm run start',
-    url: 'http://127.0.0.1:3000',
-    reuseExistingServer: !process.env.CI,
-    timeout: 180_000,
-  },
+  webServer: useExternalServer
+    ? undefined
+    : {
+        command: `${skipBuild ? '' : 'npm run build && '}npm run start -- --hostname ${parsedBaseURL.hostname} --port ${localPort}`,
+        url: baseURL,
+        // Reuse is opt-in: silently adopting a dev server makes interaction tests
+        // exercise unhydrated HTML while appearing to target a production build.
+        reuseExistingServer,
+        timeout: 180_000,
+      },
 });

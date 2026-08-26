@@ -100,6 +100,19 @@ describe('isBookingUsable', () => {
     ).toEqual({ usable: false, reason: 'already_used' })
   })
 
+  it('allows a started checkout to resume through its cancel URL', () => {
+    expect(
+      isBookingUsable(
+        {
+          expires_at: future,
+          consumed_at: '2026-08-08T11:00:00.000Z',
+          status: 'checkout_started',
+        },
+        now
+      )
+    ).toEqual({ usable: true })
+  })
+
   it('rejects a cancelled booking', () => {
     expect(
       isBookingUsable({ expires_at: future, consumed_at: null, status: 'cancelled' }, now)

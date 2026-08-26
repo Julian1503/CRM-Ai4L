@@ -378,12 +378,10 @@ describe('ContactDrawer', () => {
   })
 
   describe('status toggles', () => {
-    it('names both status checkboxes', () => {
+    it('exposes the lifecycle status and newsletter subscription controls', () => {
       setup()
 
-      expect(
-        screen.getByRole('checkbox', { name: /Is Customer/i })
-      ).toBeInTheDocument()
+      expect(screen.getByRole('combobox', { name: /Client Status/i })).toHaveValue('customer')
       expect(
         screen.getByRole('checkbox', { name: /Subscribed to Newsletter/i })
       ).toBeInTheDocument()
@@ -392,11 +390,28 @@ describe('ContactDrawer', () => {
     it('turns a customer back into a prospect', async () => {
       const { onSave } = setup()
 
-      fireEvent.click(screen.getByRole('checkbox', { name: /Is Customer/i }))
+      fireEvent.change(screen.getByRole('combobox', { name: /Client Status/i }), {
+        target: { value: 'prospect' },
+      })
       fireEvent.click(screen.getByText('Save Contact'))
 
       await waitFor(() => expect(onSave).toHaveBeenCalled())
+      expect(onSave.mock.calls[0][0].status).toBe('prospect')
       expect(onSave.mock.calls[0][0].isCustomer).toBe(false)
+    })
+
+    it('can classify a contact as a lead', async () => {
+      const { onSave } = setup()
+
+      fireEvent.change(screen.getByRole('combobox', { name: /Client Status/i }), {
+        target: { value: 'lead' },
+      })
+      fireEvent.click(screen.getByText('Save Contact'))
+
+      await waitFor(() => expect(onSave).toHaveBeenCalled())
+      expect(onSave.mock.calls[0][0]).toEqual(
+        expect.objectContaining({ status: 'lead', isCustomer: false, servicesBought: [] })
+      )
     })
 
     it('subscribes a contact to the newsletter', async () => {

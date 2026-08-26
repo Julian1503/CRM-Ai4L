@@ -2,9 +2,13 @@ import { NextResponse, type NextRequest } from 'next/server'
 import type Stripe from 'stripe'
 
 import { markBookingPaid } from '@/lib/booking/repository'
+import {
+  completeIntegrationDelivery,
+  startIntegrationDelivery,
+} from '@/lib/operations/deliveries'
 import { getStripeClient, getStripeConfig } from '@/lib/stripe/client'
 import { getAdminClient } from '@/lib/supabase/admin'
-import { claimWebhookEvent } from '@/lib/webhooks/idempotency'
+import { claimWebhookEvent, releaseWebhookEvent } from '@/lib/webhooks/idempotency'
 
 export const runtime = 'nodejs'
 
@@ -45,28 +49,76 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Invalid signature.' }, { status: 401 })
   }
 
+  const db = getAdminClient()
+  const deliveryId = await startIntegrationDelivery(db, PROVIDER, event.type)
+
   if (event.type !== 'checkout.session.completed') {
     // Acknowledge, so Stripe stops retrying an event we do not act on.
+    await completeIntegrationDelivery(db, deliveryId, {
+      status: 'succeeded',
+      eventCount: 1,
+      processedCount: 0,
+      failedCount: 0,
+    })
     return NextResponse.json({ status: 'ignored', type: event.type })
   }
 
+  let claimed = false
+
   try {
-    const db = getAdminClient()
 
     // Stripe retries aggressively; the ledger makes a replay a no-op.
     const isNew = await claimWebhookEvent(db, PROVIDER, event.id, event.type)
 
     if (!isNew) {
+      await completeIntegrationDelivery(db, deliveryId, {
+        status: 'succeeded',
+        eventCount: 1,
+        processedCount: 1,
+        failedCount: 0,
+      })
       return NextResponse.json({ status: 'duplicate' })
     }
+    claimed = true
 
     const session = event.data.object as Stripe.Checkout.Session
+    const bookingId = session.metadata?.booking_id?.trim()
+    const paymentConfirmed =
+      session.status === 'complete' &&
+      (session.payment_status === 'paid' || session.payment_status === 'no_payment_required')
 
-    await markBookingPaid(db, session.id, session.amount_total ?? 0)
+    if (!bookingId || !paymentConfirmed || session.amount_total !== 0) {
+      throw new Error('Checkout session did not confirm the expected $0 booking.')
+    }
+
+    const matched = await markBookingPaid(db, session.id, session.amount_total, bookingId)
+
+    if (!matched) {
+      throw new Error('Checkout session matched no pending booking.')
+    }
+
+    await completeIntegrationDelivery(db, deliveryId, {
+      status: 'succeeded',
+      eventCount: 1,
+      processedCount: 1,
+      failedCount: 0,
+    })
 
     return NextResponse.json({ status: 'ok', session: session.id })
   } catch (error) {
     console.error('Stripe webhook processing failed:', error)
+
+    if (claimed) {
+      await releaseWebhookEvent(db, PROVIDER, event.id)
+    }
+
+    await completeIntegrationDelivery(db, deliveryId, {
+      status: 'failed',
+      eventCount: 1,
+      processedCount: 0,
+      failedCount: 1,
+      errorCode: 'processing_failed',
+    })
 
     // 500 so Stripe retries; the ledger makes that safe.
     return NextResponse.json({ error: 'Processing failed.' }, { status: 500 })

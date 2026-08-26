@@ -56,9 +56,10 @@ export function isBookingUsable(booking: BookingLike, nowMs: number): BookingUsa
     return { usable: false, reason: 'cancelled' }
   }
 
-  // Single-use. Without this, one forwarded link books repeatedly against the same
-  // promotion code.
-  if (booking.consumed_at) {
+  // A started checkout may be resumed from the cancel URL. It still points to the
+  // same Stripe session, so this does not create a second redemption. Every later
+  // state remains single-use.
+  if (booking.consumed_at && booking.status !== 'checkout_started') {
     return { usable: false, reason: 'already_used' }
   }
 

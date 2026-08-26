@@ -6,6 +6,9 @@ import { gsap } from 'gsap';
 import { useGSAP } from '@gsap/react';
 
 import { prefersReducedMotion } from '@/lib/motion';
+import type { ContactStatus } from '@/lib/db/types';
+
+type ActiveContactStatus = Exclude<ContactStatus, 'archived'>;
 
 export interface TableContact {
   id: string;
@@ -22,6 +25,8 @@ export interface TableContact {
   country?: string;
   department?: string;
   position?: string;
+  /** Canonical CRM lifecycle status. `isCustomer` remains for legacy call sites. */
+  status?: ActiveContactStatus;
   isCustomer: boolean;
   subscribedToNewsletter: boolean;
   /** FK to job_types; drives the job-type filter and segmentation. */
@@ -84,6 +89,9 @@ export default function ContactTable({
     if (sortKey !== key) return 'none';
     return sortDir === 'asc' ? 'ascending' : 'descending';
   };
+
+  const getContactStatus = (contact: TableContact): ActiveContactStatus =>
+    contact.status ?? (contact.isCustomer ? 'customer' : 'prospect');
 
   return (
     <div ref={containerRef} className={styles.tableShell}>
@@ -158,7 +166,16 @@ export default function ContactTable({
                   </td>
                 </tr>
               ))
-            ) : contacts.map((contact) => (
+            ) : contacts.map((contact) => {
+              const status = getContactStatus(contact);
+              const statusClass =
+                status === 'customer'
+                  ? styles.statusCustomer
+                  : status === 'lead'
+                    ? styles.statusLead
+                    : styles.statusProspect;
+
+              return (
               <tr 
                 key={contact.id} 
                 className={styles.tr} 
@@ -180,9 +197,9 @@ export default function ContactTable({
                   {contact.position || <span style={{ color: 'var(--text-muted)' }}>—</span>}
                 </td>
                 <td className={styles.td}>
-                  <span className={`${styles.statusPill} ${contact.isCustomer ? styles.statusCustomer : styles.statusProspect}`}>
+                  <span className={`${styles.statusPill} ${statusClass}`}>
                     <span className={styles.pulseDot} />
-                    {contact.isCustomer ? 'Customer' : 'Prospect'}
+                    {status === 'customer' ? 'Customer' : status === 'lead' ? 'Lead' : 'Prospect'}
                   </span>
                 </td>
                 <td className={styles.td}>
@@ -192,7 +209,8 @@ export default function ContactTable({
                   </span>
                 </td>
               </tr>
-            ))}
+              );
+            })}
             {!isLoading && contacts.length === 0 && (
               <tr>
                 <td colSpan={5} className={styles.td} style={{ padding: '0' }}>

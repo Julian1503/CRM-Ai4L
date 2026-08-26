@@ -67,8 +67,8 @@ describe('ArchiveView', () => {
     // with no results), so findByTestId resolves immediately against a node still
     // reading "No archived contacts" and the assertion races the fetch.
     await waitFor(() =>
-      expect(screen.getByTestId('archive-pagination-summary')).toHaveTextContent(
-        'Showing 1–50 of 120'
+      expect(screen.getByTestId('archive-pagination-position')).toHaveTextContent(
+        'Page 1 of 3'
       )
     )
 

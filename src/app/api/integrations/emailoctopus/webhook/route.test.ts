@@ -8,9 +8,15 @@ import { NextRequest } from 'next/server'
 import { createDbMock, createQueryBuilderMock } from '@/test/supabaseMock'
 
 const mockGetAdminClient = jest.fn()
+const mockStartIntegrationDelivery = jest.fn().mockResolvedValue('delivery-1')
+const mockCompleteIntegrationDelivery = jest.fn().mockResolvedValue(undefined)
 
 jest.mock('@/lib/supabase/admin', () => ({
   getAdminClient: () => mockGetAdminClient(),
+}))
+jest.mock('@/lib/operations/deliveries', () => ({
+  startIntegrationDelivery: (...args: unknown[]) => mockStartIntegrationDelivery(...args),
+  completeIntegrationDelivery: (...args: unknown[]) => mockCompleteIntegrationDelivery(...args),
 }))
 
 import { POST } from './route'
@@ -183,7 +189,16 @@ describe('POST emailoctopus webhook', () => {
 
       expect(response.status).toBe(200)
       await expect(response.json()).resolves.toMatchObject({ status: 'ok', ignored: 1 })
-      expect(mockGetAdminClient).not.toHaveBeenCalled()
+      expect(mockStartIntegrationDelivery).toHaveBeenCalledWith(
+        expect.anything(),
+        'emailoctopus',
+        'batch'
+      )
+      expect(mockCompleteIntegrationDelivery).toHaveBeenCalledWith(
+        expect.anything(),
+        'delivery-1',
+        expect.objectContaining({ status: 'succeeded', eventCount: 1 })
+      )
     })
 
     it('skips a malformed event without failing the rest of the delivery', async () => {

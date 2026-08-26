@@ -48,7 +48,7 @@ function stubContactsTable(count: number) {
   return { ranges }
 }
 
-import { POST } from './route'
+import { POST, SYNC_CHUNK_SIZE } from './route'
 
 function post(body: unknown) {
   return POST(
@@ -86,21 +86,33 @@ describe('POST /api/integrations/emailoctopus/sync', () => {
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toMatchObject({ syncedCount: 3, skippedCount: 0 })
     expect(mockSync).toHaveBeenCalledTimes(3)
-    expect(ranges[0]).toEqual([0, 199])
+    expect(ranges[0]).toEqual([0, SYNC_CHUNK_SIZE])
   })
 
-  it('reads past the first page rather than syncing a prefix', async () => {
-    // An unbounded read stops at PostgREST's 1000-row cap without reporting it; paging
-    // to a short page is what proves the whole table was covered.
-    const { ranges } = stubContactsTable(450)
+  it('returns a continuation cursor instead of processing the whole database in one request', async () => {
+    const { ranges } = stubContactsTable(125)
 
-    const response = await post({ apiKey: 'eo-key', listId: 'list-1' })
+    const first = await post({ apiKey: 'eo-key', listId: 'list-1' })
+    const firstBody = await first.json()
+    const second = await post({
+      apiKey: 'eo-key',
+      listId: 'list-1',
+      offset: firstBody.nextOffset,
+    })
 
-    await expect(response.json()).resolves.toMatchObject({ syncedCount: 450 })
+    expect(firstBody).toMatchObject({
+      syncedCount: SYNC_CHUNK_SIZE,
+      hasMore: true,
+      nextOffset: SYNC_CHUNK_SIZE,
+    })
+    await expect(second.json()).resolves.toMatchObject({
+      syncedCount: SYNC_CHUNK_SIZE,
+      hasMore: true,
+      nextOffset: SYNC_CHUNK_SIZE * 2,
+    })
     expect(ranges).toEqual([
-      [0, 199],
-      [200, 399],
-      [400, 599],
+      [0, SYNC_CHUNK_SIZE],
+      [SYNC_CHUNK_SIZE, SYNC_CHUNK_SIZE * 2],
     ])
   })
 

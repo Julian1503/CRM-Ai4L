@@ -72,8 +72,28 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       )
     }
 
-    const origin = request.nextUrl.origin
+    const origin = process.env.NEXT_PUBLIC_APP_URL?.trim() || request.nextUrl.origin
     const stripe = getStripeClient(stripeConfig.secretKey)
+
+    if (booking.status === 'checkout_started' && booking.stripe_session_id) {
+      const existing = await stripe.checkout.sessions.retrieve(booking.stripe_session_id)
+
+      if (existing.status === 'open' && existing.url) {
+        return NextResponse.json({ url: existing.url, resumed: true }, { headers: NO_STORE })
+      }
+
+      if (existing.status === 'complete') {
+        return NextResponse.json(
+          { url: `${origin}/book/${token}/scheduled?session=${existing.id}`, resumed: true },
+          { headers: NO_STORE }
+        )
+      }
+
+      return NextResponse.json(
+        { error: 'This checkout session is no longer available.' },
+        { status: 410, headers: NO_STORE }
+      )
+    }
 
     const { sessionId, url } = await createConsultationCheckout(stripe, {
       priceId: stripeConfig.priceId,

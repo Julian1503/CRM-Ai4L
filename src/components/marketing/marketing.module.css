@@ -299,91 +299,411 @@
 
 .actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
 }
 
-/* --- Copy review -------------------------------------------------------------
-   The reviewer's screen. Laid out two columns so the whole message can be taken
-   in at once rather than scrolled through field by field -- approval is a
-   judgement about the copy as a whole, not about seven separate strings. */
-.copyEditor {
-  margin-top: 1rem;
-  padding: 1rem 1.125rem 1.125rem;
-  background: var(--bg-subtle, rgba(99, 102, 241, 0.04));
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md, 0.75rem);
+.campaignSettings {
+  display: grid;
+  grid-template-columns: minmax(12rem, 1fr) minmax(14rem, 1fr) auto;
+  flex-basis: 100%;
+  gap: 0.75rem;
+  align-items: end;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
 }
 
-.copyHeader {
+@media (max-width: 760px) {
+  .campaignSettings {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* --- Copy composer ----------------------------------------------------------
+   Laid out as the email rather than as a form. A reviewer is judging a headline
+   against its preview line and three benefits against each other, which a grid of
+   seven labelled boxes made you reassemble in your head first.
+
+   It is a composer, not a preview: the delivered template lives in EmailOctopus and
+   we do not have it, so this borrows the *structure* of an email (subject, preview
+   line, body, button) and none of the template's own typography or colour. */
+.copyEditor {
+  margin-top: 0.875rem;
+  overflow: hidden;
+  background: var(--bg-app);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 0.875rem);
+  box-shadow: var(--shadow-sm);
+}
+
+.composerBar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  margin-bottom: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
 }
 
 .copyTitle {
   margin: 0;
-  font-family: var(--font-display, inherit);
-  font-size: 1rem;
-  font-weight: 600;
+  font-family: var(--font-heading, inherit);
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
   color: var(--text-primary);
 }
 
-.copyMeta {
-  margin: 0.5rem 0 0;
-  font-size: 0.8125rem;
+.composerSub {
+  font-size: 0.75rem;
   color: var(--text-secondary);
 }
 
-.copyFields {
+/* Envelope: the header lines an inbox shows before the message is opened. */
+.envelope {
+  padding: 0.25rem 1rem;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+}
+
+.envelopeRow {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
-  gap: 0.875rem;
-  margin: 0.875rem 0 1rem;
+  grid-template-columns: 4.5rem minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: start;
+  padding: 0.625rem 0;
 }
 
-/* The merge tag is the contract with the EmailOctopus template. Shown beside every
-   label because a mismatch between the two is invisible until a send goes out with a
-   hole in it. */
-.tag {
-  margin-left: 0.375rem;
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 0.6875rem;
-  font-weight: 500;
+.envelopeRow + .envelopeRow {
+  border-top: 1px dashed var(--border);
+}
+
+.envelopeLabel {
+  padding-top: 0.3rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* The audience reads as an addressee chip, because that is what it is. */
+.envelopeTo {
+  justify-self: start;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--primary-muted);
+  border-radius: var(--radius-full);
+}
+
+.envelopeField {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+/* Every editable slot is a borderless field that reads as the copy itself. The
+   affordance arrives on hover and focus instead of sitting there as a box.
+
+   The wrapper carries the typography and the box; the textarea inherits both. A
+   hidden replica of the value shares the same grid cell, which is what makes the
+   field grow to fit rather than leaving a hole under short copy and a scrollbar
+   inside long copy. */
+.grow {
+  display: grid;
+  padding: 0.2rem 0.4rem;
+  margin: -0.2rem -0.4rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.grow::after {
+  content: attr(data-replicate) ' ';
+  visibility: hidden;
+}
+
+.grow > .slotInput,
+.grow::after {
+  grid-area: 1 / 1 / 2 / 2;
+  min-width: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  line-height: inherit;
+  color: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.slotInput {
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  border: 0;
+  outline: none;
+  overflow: hidden;
+  resize: none;
+}
+
+.slotInput::placeholder {
+  color: var(--text-muted);
+}
+
+.grow:hover:not(:focus-within) {
+  background: var(--bg-app);
+}
+
+.grow:focus-within {
+  background: var(--bg-card);
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px rgba(130, 214, 237, 0.28);
+}
+
+.subjectSlot {
+  font-family: var(--font-heading, inherit);
+  font-size: 1.02rem;
+  font-weight: 650;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+
+.previewSlot {
+  font-size: 0.83rem;
+  line-height: 1.5;
   color: var(--text-secondary);
-  opacity: 0.75;
+}
+
+/* Sheet: the message body. Indented to the envelope's field column so the subject
+   line and the first line of the message share a left edge, and held to a reading
+   measure so the copy is judged at the width it will be read at. */
+.sheet {
+  padding: var(--space-lg) 1rem var(--space-xl) 6.25rem;
+  background: var(--bg-card);
+}
+
+.sheetBlock {
+  max-width: 32rem;
+}
+
+.introSlot {
+  font-size: 0.94rem;
+  line-height: 1.65;
+  color: var(--text-primary);
+}
+
+.benefits {
+  max-width: 32rem;
+  margin: var(--space-lg) 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.benefit {
+  display: grid;
+  grid-template-columns: 1.35rem minmax(0, 1fr);
+  gap: 0.6rem;
+  align-items: start;
+}
+
+.benefitMark {
+  display: grid;
+  place-items: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  color: var(--primary);
+  background: var(--primary-muted);
+  border-radius: var(--radius-full);
+}
+
+.benefitField {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.benefitSlot {
+  font-size: 0.89rem;
+  line-height: 1.55;
+  color: var(--text-primary);
+}
+
+.ctaBlock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  max-width: 32rem;
+  margin-top: var(--space-xl);
+}
+
+/* The button is sized by its label, so copy too long for the template shows up as a
+   button that has stopped looking like one. */
+.ctaButton {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 0.65rem 1.5rem;
+  background: var(--primary);
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-md);
+}
+
+/* White on blue, so the shared focus treatment -- which paints the field white --
+   would make the label vanish. A light ring instead. */
+.ctaSlot {
+  min-width: 9rem;
+  max-width: 100%;
+  font-size: 0.88rem;
+  font-weight: 700;
+  line-height: 1.25;
+  text-align: center;
+  color: var(--text-on-primary);
+}
+
+.ctaSlot:hover:not(:focus-within),
+.ctaSlot:focus-within {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.5);
+}
+
+.ctaSlot .slotInput::placeholder {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+/* A button label is one line. Left to wrap it broke over two lines mid-phrase, which
+   is not how the template renders it -- and a label too long for the button should
+   read as a button that has outgrown its copy, not as a two-line paragraph. */
+.ctaSlot > .slotInput,
+.ctaSlot::after {
+  white-space: pre;
+}
+
+.ctaNote {
+  max-width: 24rem;
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.extraField {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  max-width: 32rem;
+  margin-top: var(--space-md);
+}
+
+/* Tag and counter are the contract with the template, not part of the message, so
+   they stay out of the way until the slot is touched. An overrun is a broken layout
+   in the delivered email, so that one never hides. */
+.slotMeta,
+.slotMetaOver {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.2rem;
+  /* Held to the glyph height so the hidden state reserves a thin strip rather than a
+     full line -- the row keeps its height on hover instead of jumping. */
+  line-height: 1;
+  transition: opacity var(--transition-fast);
+}
+
+.slotMeta {
+  opacity: 0;
+}
+
+.envelopeField:hover .slotMeta,
+.envelopeField:focus-within .slotMeta,
+.benefitField:hover .slotMeta,
+.benefitField:focus-within .slotMeta,
+.sheetBlock:hover .slotMeta,
+.sheetBlock:focus-within .slotMeta,
+.extraField:hover .slotMeta,
+.extraField:focus-within .slotMeta,
+.ctaBlock:hover .slotMeta,
+.ctaBlock:focus-within .slotMeta {
+  opacity: 1;
+}
+
+.tag {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.66rem;
+  font-weight: 500;
+  color: var(--text-muted);
 }
 
 .count {
-  font-size: 0.6875rem;
+  font-size: 0.66rem;
   font-variant-numeric: tabular-nums;
-  color: var(--text-secondary);
+  color: var(--text-muted);
 }
 
-/* An overrun is a broken layout in the delivered email, not a style preference,
-   so it reads as an error rather than a hint. */
 .countOver {
-  font-size: 0.6875rem;
+  font-size: 0.66rem;
   font-variant-numeric: tabular-nums;
-  font-weight: 600;
+  font-weight: 700;
   color: #8a1c1c;
 }
 
-.copyEditor textarea.input {
-  resize: vertical;
-  line-height: 1.45;
-}
-
-.copyEditor textarea.input:disabled {
-  opacity: 0.7;
-  cursor: not-allowed;
-}
-
-@media (max-width: 768px) {
-  .copyFields {
-    grid-template-columns: 1fr;
+/* The composer is nested inside a campaign row, so it loses the indent before the
+   viewport gets tight. */
+@media (max-width: 60rem) {
+  .envelopeRow {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.25rem;
   }
+
+  .envelopeLabel {
+    padding-top: 0;
+  }
+
+  .sheet {
+    padding-left: 1rem;
+  }
+}
+
+/* Stated between the envelope and the message, because it is a fact about the
+   addressee: there is nobody to send this to. */
+.emptyAudience {
+  margin: 0;
+  padding: 0.7rem 1rem;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  color: #8a1c1c;
+  background: var(--danger-bg);
+  border-bottom: 1px solid rgba(239, 68, 68, 0.28);
+}
+
+.composerFooter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border);
+}
+
+.copyMeta {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.copyEditor textarea:disabled {
+  opacity: 0.75;
+  cursor: not-allowed;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -8,7 +8,10 @@ import {
   isExportFormat,
 } from '@/lib/contacts/export'
 import { parseContactFilters } from '@/lib/contacts/query'
-import { fetchContacts } from '@/lib/contacts/repository'
+import {
+  ContactExportLimitError,
+  fetchContactsForExport,
+} from '@/lib/contacts/repository'
 import { CSV_BOM } from '@/lib/csv'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 
@@ -49,7 +52,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   try {
     const db = await createSupabaseServerClient()
-    const { rows } = await fetchContacts(db, filters)
+    const { rows } = await fetchContactsForExport(db, filters, EXPORT_MAX_ROWS)
 
     const body = CSV_BOM + buildContactCsv(rows, requestedFormat)
     const filename = buildExportFilename(requestedFormat, new Date().toISOString())
@@ -65,6 +68,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     })
   } catch (error) {
     console.error('Contact export failed:', error)
+
+    if (error instanceof ContactExportLimitError) {
+      return NextResponse.json(
+        { error: error.message, total: error.total, maxRows: error.maxRows },
+        { status: 422 }
+      )
+    }
 
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Export failed.' },

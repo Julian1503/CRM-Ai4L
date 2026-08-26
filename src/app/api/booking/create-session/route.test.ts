@@ -9,11 +9,14 @@ import { hashBookingToken } from '@/lib/booking/token'
 const mockGetAdminClient = jest.fn()
 const mockGetStripeConfig = jest.fn()
 const mockSessionCreate = jest.fn()
+const mockSessionRetrieve = jest.fn()
 
 jest.mock('@/lib/supabase/admin', () => ({ getAdminClient: () => mockGetAdminClient() }))
 jest.mock('@/lib/stripe/client', () => ({
   getStripeConfig: () => mockGetStripeConfig(),
-  getStripeClient: () => ({ checkout: { sessions: { create: mockSessionCreate } } }),
+  getStripeClient: () => ({
+    checkout: { sessions: { create: mockSessionCreate, retrieve: mockSessionRetrieve } },
+  }),
 }))
 
 import { POST } from './route'
@@ -57,6 +60,11 @@ describe('POST /api/booking/create-session', () => {
       webhookSecret: 'whsec_1',
     })
     mockSessionCreate.mockResolvedValue({ id: 'cs_1', url: 'https://checkout.stripe.com/x' })
+    mockSessionRetrieve.mockResolvedValue({
+      id: 'cs_1',
+      status: 'open',
+      url: 'https://checkout.stripe.com/x',
+    })
     setupDb(validBooking)
   })
 
@@ -110,11 +118,34 @@ describe('POST /api/booking/create-session', () => {
     expect(mockSessionCreate).not.toHaveBeenCalled()
   })
 
-  it('rejects a link that was already used', async () => {
-    setupDb({ ...validBooking, consumed_at: new Date().toISOString(), status: 'checkout_started' })
+  it('resumes the existing checkout after returning through the cancel URL', async () => {
+    setupDb({
+      ...validBooking,
+      consumed_at: new Date().toISOString(),
+      status: 'checkout_started',
+      stripe_session_id: 'cs_1',
+    })
 
-    expect((await POST(request())).status).toBe(410)
+    const response = await POST(request())
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({ resumed: true })
+    expect(mockSessionRetrieve).toHaveBeenCalledWith('cs_1')
     expect(mockSessionCreate).not.toHaveBeenCalled()
+  })
+
+  it('continues to scheduling when the existing session already completed', async () => {
+    setupDb({
+      ...validBooking,
+      consumed_at: new Date().toISOString(),
+      status: 'checkout_started',
+      stripe_session_id: 'cs_1',
+    })
+    mockSessionRetrieve.mockResolvedValue({ id: 'cs_1', status: 'complete', url: null })
+
+    const body = await (await POST(request())).json()
+
+    expect(body.url).toBe('https://crm.example.com/book/tok-1/scheduled?session=cs_1')
   })
 
   it('rejects a cancelled booking', async () => {

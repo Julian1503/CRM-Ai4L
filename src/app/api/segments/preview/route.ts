@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 
 import { badRequest, ok, readJsonBody, requireSessionOr401, serverError } from '@/lib/api/responses'
+import { resolveSegmentFacets } from '@/lib/marketing/facets'
 import { estimateDrainMs } from '@/lib/marketing/rateLimiter'
 import { resolveSegmentMembers, segmentDefinitionToFilters } from '@/lib/marketing/segments'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
@@ -15,6 +16,9 @@ export const runtime = 'nodejs'
  * 100-token bucket refilling at 10/sec, audience size translates directly into wall
  * clock — a 10k segment is ~17 minutes. Better to see that while defining the segment
  * than after approving the campaign.
+ *
+ * `facets` carries the same audience counted per dropdown option, so the builder can
+ * show what each state, job type and status would leave you with before you pick it.
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const guard = await requireSessionOr401()
@@ -29,12 +33,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     const db = await createSupabaseServerClient()
     const filters = segmentDefinitionToFilters(body.definition)
-    const members = await resolveSegmentMembers(db, body.definition)
+    // Independent reads of the same audience; serialising them would double the
+    // latency of a preview that fires on every dropdown change.
+    const [members, facets] = await Promise.all([
+      resolveSegmentMembers(db, body.definition),
+      resolveSegmentFacets(db, body.definition),
+    ])
 
     return ok({
       total: members.total,
       truncated: members.truncated,
       estimatedSendMs: estimateDrainMs(members.total),
+      facets,
       // Echoed back so the UI can show what was actually applied, including the
       // invariants the definition cannot override.
       appliedFilters: {

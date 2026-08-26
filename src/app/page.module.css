@@ -86,6 +86,19 @@
   min-width: 0;
 }
 
+/* Every pane keeps its own height, and the column above scrolls.
+   Without this the panes are flex items in a fixed-height column, so they carry the
+   default flex-shrink: 1 and get compressed to fit 100vh instead of overflowing into
+   the scroll. Most of them survive that -- a flex item's automatic minimum size is its
+   content -- but the contact table does not: .tableShell sets overflow: hidden, and an
+   item that establishes a scroll container has an automatic minimum of zero. So the
+   whole page's excess height was taken out of the table and clipped there. Measured at
+   1440x900: a 50-row table rendered 12 rows, and .mainContent never scrolled because
+   nothing overflowed it. */
+.mainContent > * {
+  flex-shrink: 0;
+}
+
 .headerSection {
   display: flex;
   justify-content: space-between;

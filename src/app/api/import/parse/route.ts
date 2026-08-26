@@ -1,7 +1,11 @@
 import { NextResponse, type NextRequest } from 'next/server'
 
 import { getSession } from '@/lib/auth/dal'
-import { parseExcelBuffer } from '@/lib/excelParser'
+import {
+  isSupportedSpreadsheetName,
+  parseExcelBuffer,
+  SUPPORTED_SPREADSHEET_EXTENSIONS,
+} from '@/lib/excelParser'
 
 export const runtime = 'nodejs'
 
@@ -29,6 +33,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return NextResponse.json(
         { error: 'No file uploaded' },
         { status: 400, headers: NO_STORE }
+      )
+    }
+
+    // Checked before the size ceiling only because it is cheaper; both run before the
+    // body is read into memory. Browsers report the MIME type of a .numbers package
+    // inconsistently (often as a bare application/zip), so the extension is what decides.
+    if (!isSupportedSpreadsheetName(file.name)) {
+      return NextResponse.json(
+        {
+          error: `Unsupported file type. Upload one of: ${SUPPORTED_SPREADSHEET_EXTENSIONS.join(', ')}.`,
+        },
+        { status: 415, headers: NO_STORE }
       )
     }
 

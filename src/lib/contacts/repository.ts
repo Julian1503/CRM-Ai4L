@@ -51,6 +51,17 @@ export type ContactFilterOptions = {
   organisationIds?: readonly string[]
 }
 
+/** Raised instead of returning a silently truncated export. */
+export class ContactExportLimitError extends Error {
+  constructor(
+    readonly total: number,
+    readonly maxRows: number
+  ) {
+    super(`This export contains ${total} contacts; the safe limit is ${maxRows}. Narrow the filters and try again.`)
+    this.name = 'ContactExportLimitError'
+  }
+}
+
 /** Applies filters, ordering and a bounded range to a contacts query. */
 export function applyContactFilters<T extends Filterable>(
   query: T,
@@ -168,6 +179,46 @@ export async function fetchContacts(
   }
 
   return { rows: data ?? [], total: count ?? 0 }
+}
+
+/**
+ * Loads a complete filtered set in bounded PostgREST pages.
+ *
+ * Supabase projects commonly cap each response at 1,000 rows even when a larger
+ * range is requested. The total count is checked before continuing, and an empty
+ * intermediate page is treated as an error so an export can never look complete
+ * while containing only a prefix.
+ */
+export async function fetchContactsForExport(
+  db: SupabaseClient<Database>,
+  filters: ContactFilters,
+  maxRows: number,
+  pageSize = 1_000
+): Promise<ContactPage> {
+  const safePageSize = Math.max(1, Math.min(pageSize, maxRows))
+  const rows: ContactRow[] = []
+  let page = 1
+  let total = 0
+
+  do {
+    const result = await fetchContacts(db, { ...filters, page, pageSize: safePageSize })
+    total = result.total
+
+    if (total > maxRows) {
+      throw new ContactExportLimitError(total, maxRows)
+    }
+
+    if (result.rows.length === 0 && rows.length < total) {
+      throw new Error(
+        `Contact export stopped after ${rows.length} of ${total} rows. Narrow the filters and retry.`
+      )
+    }
+
+    rows.push(...result.rows)
+    page += 1
+  } while (rows.length < total)
+
+  return { rows, total }
 }
 
 /**

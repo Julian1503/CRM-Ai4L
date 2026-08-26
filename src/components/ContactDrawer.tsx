@@ -195,7 +195,10 @@ export default function ContactDrawer({
         // jobTypeId as undefined and silently clears a classification the tag-sync
         // script had already assigned.
         jobTypeId: contact.jobTypeId || '',
-        isCustomer: contact.isCustomer ?? false,
+        status: contact.status ?? (contact.isCustomer ? 'customer' : 'prospect'),
+        isCustomer: contact.status
+          ? contact.status === 'customer'
+          : (contact.isCustomer ?? false),
         servicesBought: contact.servicesBought || [],
         subscribedToNewsletter: contact.subscribedToNewsletter ?? false,
       });
@@ -209,8 +212,12 @@ export default function ContactDrawer({
     setFormData((prev) => {
       const updated = { ...prev, [field]: value };
       
-      // If we turn off customer status, empty the services list
-      if (field === 'isCustomer' && !value) {
+      if (field === 'status') {
+        updated.isCustomer = value === 'customer';
+      }
+
+      // Services are only meaningful for converted customers.
+      if (field === 'status' && value !== 'customer') {
         updated.servicesBought = [];
       }
       
@@ -506,21 +513,24 @@ export default function ContactDrawer({
           <div className={styles.section}>
             <h3 className={styles.sectionTitle}>Status & Sync</h3>
             
-            {/* A <label> wrapping a real checkbox, not a div with onClick around a
-                readOnly one. The previous shape was unreachable by keyboard (a div is
-                not focusable), announced nothing to a screen reader, and gave every
-                service the same element id. */}
-            <label className={styles.checkboxContainer}>
-              <input
-                type="checkbox"
-                className={styles.checkbox}
-                checked={formData.isCustomer || false}
-                onChange={(e) => handleInputChange('isCustomer', e.target.checked)}
-              />
-              <span className={styles.label}>Is Customer (Prospect if unchecked)</span>
-            </label>
+            <div className={styles.field}>
+              <label className={styles.label} htmlFor="contact-status">Client Status</label>
+              <select
+                id="contact-status"
+                className={styles.input}
+                value={formData.status || 'prospect'}
+                onChange={(e) => handleInputChange('status', e.target.value)}
+              >
+                <option value="lead">Lead</option>
+                <option value="prospect">Prospect</option>
+                <option value="customer">Customer</option>
+              </select>
+              <span className={styles.hint}>
+                Drives client-status filters and marketing segments.
+              </span>
+            </div>
 
-            {formData.isCustomer && (
+            {formData.status === 'customer' && (
               <fieldset className={styles.field} style={{ marginTop: '14px' }}>
                 <legend className={styles.label}>Services Bought</legend>
                 <div className={styles.servicesGrid}>

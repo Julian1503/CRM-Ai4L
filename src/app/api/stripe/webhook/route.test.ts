@@ -8,11 +8,17 @@ import { createDbMock, createQueryBuilderMock } from '@/test/supabaseMock'
 const mockGetAdminClient = jest.fn()
 const mockConstructEvent = jest.fn()
 const mockGetStripeConfig = jest.fn()
+const mockStartIntegrationDelivery = jest.fn().mockResolvedValue('delivery-1')
+const mockCompleteIntegrationDelivery = jest.fn().mockResolvedValue(undefined)
 
 jest.mock('@/lib/supabase/admin', () => ({ getAdminClient: () => mockGetAdminClient() }))
 jest.mock('@/lib/stripe/client', () => ({
   getStripeConfig: () => mockGetStripeConfig(),
   getStripeClient: () => ({ webhooks: { constructEvent: mockConstructEvent } }),
+}))
+jest.mock('@/lib/operations/deliveries', () => ({
+  startIntegrationDelivery: (...args: unknown[]) => mockStartIntegrationDelivery(...args),
+  completeIntegrationDelivery: (...args: unknown[]) => mockCompleteIntegrationDelivery(...args),
 }))
 
 import { POST } from './route'
@@ -29,14 +35,22 @@ function request(body = '{"id":"evt_1"}', signature: string | null = 't=1,v1=abc
 const completedEvent = {
   id: 'evt_1',
   type: 'checkout.session.completed',
-  data: { object: { id: 'cs_1', amount_total: 0, metadata: { booking_id: 'b1' } } },
+  data: {
+    object: {
+      id: 'cs_1',
+      status: 'complete',
+      payment_status: 'no_payment_required',
+      amount_total: 0,
+      metadata: { booking_id: 'b1' },
+    },
+  },
 }
 
 function setupDb(claimed = true) {
   const webhookEvents = createQueryBuilderMock(
     claimed ? { data: null, error: null } : { data: null, error: { code: '23505', message: 'dup' } }
   )
-  const bookings = createQueryBuilderMock({ data: null, error: null })
+  const bookings = createQueryBuilderMock({ data: [{ id: 'b1' }], error: null })
 
   const db = createDbMock((table: string) =>
     table === 'webhook_events' ? webhookEvents : bookings
@@ -122,6 +136,7 @@ describe('POST /api/stripe/webhook', () => {
         method: 'eq',
         args: ['stripe_session_id', 'cs_1'],
       })
+      expect(bookings.allFor('eq')).toContainEqual({ method: 'eq', args: ['id', 'b1'] })
     })
 
     it('acknowledges event types it does not act on', async () => {
@@ -156,6 +171,17 @@ describe('POST /api/stripe/webhook', () => {
       const response = await POST(request())
 
       expect(response.status).toBe(500)
+    })
+
+    it('releases a claimed event when processing fails so Stripe can retry it', async () => {
+      const webhookEvents = createQueryBuilderMock({ data: null, error: null })
+      const failing = createQueryBuilderMock({ data: null, error: { message: 'db down' } })
+      mockGetAdminClient.mockReturnValue(
+        createDbMock((table: string) => (table === 'webhook_events' ? webhookEvents : failing))
+      )
+
+      expect((await POST(request())).status).toBe(500)
+      expect(webhookEvents.allFor('delete')).toHaveLength(1)
     })
   })
 })

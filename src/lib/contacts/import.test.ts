@@ -69,6 +69,23 @@ describe('toImportPayload', () => {
     expect(row.subscribed_to_newsletter).toBe(true)
   })
 
+  it('folds a spelled-out state into the code the segment filter uses', () => {
+    // The importer is the only place this can be fixed: a contact stored as
+    // "New South Wales" never matches a segment filtering on NSW, so it silently
+    // drops out of every state-based campaign.
+    const [payload] = toImportPayload([
+      validRow({ state: 'New South Wales' }),
+    ])
+
+    expect(payload.state).toBe('NSW')
+  })
+
+  it('keeps a state it cannot fold, rather than dropping the value', () => {
+    const [payload] = toImportPayload([validRow({ state: 'Texas' })])
+
+    expect(payload.state).toBe('Texas')
+  })
+
   it('returns an empty array when nothing is valid', () => {
     expect(toImportPayload([{ isValid: false, errors: ['bad'] }])).toEqual([])
   })

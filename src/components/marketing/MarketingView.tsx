@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react'
 
 import { AU_STATES } from '@/lib/contacts/states'
+import type { FacetCounts, SegmentFacets } from '@/lib/marketing/facets'
 
 import Pagination from '@/components/ui/Pagination'
 
@@ -30,9 +31,48 @@ type Preview = {
   total: number
   truncated: boolean
   estimatedSendMs: number
+  /** Per-option counts for the three filter lists; absent on an older cached response. */
+  facets?: SegmentFacets & { truncated: boolean }
 }
 
 export type JobTypeOption = { id: string; name: string }
+
+/** Campaign statuses whose copy can still be rewritten, mirroring the generate route. */
+const COPY_EDITABLE_STATUSES = new Set<Campaign['status']>(['draft', 'failed'])
+
+/**
+ * Names the copy panel after what it is for.
+ *
+ * The control used to read "Copy", which in a list of campaigns looks like a duplicate
+ * button rather than the way in to the AI copywriter -- the only place in the app that
+ * writes campaign text. Nothing else on screen mentions it, so an operator with a
+ * segment and a draft had no visible route to the feature.
+ */
+function copyToggleLabel(campaign: Campaign, isOpen: boolean): string {
+  if (isOpen) return 'Hide copy'
+
+  const hasCopy = Object.values(campaign.merge_fields ?? {}).some(
+    (value) => typeof value === 'string' && value.trim() !== ''
+  )
+
+  if (hasCopy) return COPY_EDITABLE_STATUSES.has(campaign.status) ? 'Edit copy' : 'View copy'
+
+  return COPY_EDITABLE_STATUSES.has(campaign.status) ? 'Write copy with AI' : 'View copy'
+}
+
+/**
+ * The ` (12)` a filter option carries.
+ *
+ * Counted against the other two selections, so the number says what picking this
+ * option would actually leave you with rather than how many exist overall. Nothing is
+ * shown until the first preview lands: a placeholder zero reads as "empty segment",
+ * which is a different thing from "not counted yet".
+ */
+function optionCount(counts: FacetCounts | undefined, value: string): string {
+  if (!counts) return ''
+
+  return ` (${counts[value] ?? 0})`
+}
 
 function formatDuration(ms: number): string {
   if (ms < 1000) return 'under a second'
@@ -81,6 +121,12 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
   const [segmentStatus, setSegmentStatus] = useState('')
   const [preview, setPreview] = useState<Preview | null>(null)
 
+  // Audience sizes, keyed by campaign *and* segment so a re-pointed campaign does not
+  // read a stale count. The composer says who the email is going to, and refuses to
+  // generate for nobody -- which the route rejects with a 409 the operator would
+  // otherwise only meet after clicking.
+  const [audienceByCampaign, setAudienceByCampaign] = useState<Record<string, number>>({})
+
   // Which campaign's copy is open for review. One at a time: reviewing is a focused
   // act, and two expanded editors invite editing the wrong one.
   const [reviewingId, setReviewingId] = useState<string | null>(null)
@@ -89,6 +135,9 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
   const [campaignName, setCampaignName] = useState('')
   const [campaignSegment, setCampaignSegment] = useState('')
   const [automationId, setAutomationId] = useState('')
+  const [campaignEdits, setCampaignEdits] = useState<
+    Record<string, { segmentId: string; automationId: string }>
+  >({})
 
   const load = useCallback(async () => {
     try {
@@ -152,6 +201,50 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
     return () => clearTimeout(timer)
   }, [definition])
 
+  const reviewingCampaign = campaigns.find((item) => item.id === reviewingId)
+  const reviewingSegment = pickableSegments.find(
+    (item) => item.id === reviewingCampaign?.segment_id
+  )
+  // Derived, not stored: "not counted yet" is the absence of a key, so closing and
+  // reopening a panel never flashes a stale number.
+  const audienceKey =
+    reviewingCampaign && reviewingSegment
+      ? `${reviewingCampaign.id}:${reviewingSegment.id}`
+      : null
+  const reviewingAudience = audienceKey ? audienceByCampaign[audienceKey] : undefined
+
+  useEffect(() => {
+    if (!audienceKey || !reviewingSegment || reviewingAudience !== undefined) return
+
+    let cancelled = false
+
+    void (async () => {
+      try {
+        const response = await fetch('/api/segments/preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ definition: reviewingSegment.definition }),
+        })
+
+        if (!response.ok) return
+
+        const body = await response.json()
+
+        // Recorded only when the server actually returned a number: "not counted"
+        // must not masquerade as "matches nobody" and block generation wrongly.
+        if (!cancelled && typeof body.total === 'number') {
+          setAudienceByCampaign((current) => ({ ...current, [audienceKey]: body.total }))
+        }
+      } catch {
+        // The composer falls back to naming the segment without a count.
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [audienceKey, reviewingSegment, reviewingAudience])
+
   const createSegment = async () => {
     setError(null)
     setBusy('segment')
@@ -205,17 +298,53 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
     }
   }
 
-  const act = async (campaign: Campaign, action: 'review' | 'approve' | 'send') => {
+  const saveCampaignSettings = async (campaign: Campaign) => {
+    const edit = campaignEdits[campaign.id] ?? {
+      segmentId: campaign.segment_id ?? '',
+      automationId: campaign.provider_automation_id ?? '',
+    }
+
     setError(null)
     setBusy(campaign.id)
 
     try {
-      if (action === 'review') {
+      const response = await fetch(`/api/campaigns/${campaign.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          segmentId: edit.segmentId,
+          providerAutomationId: edit.automationId,
+        }),
+      })
+      if (!response.ok) throw new Error(await readError(response))
+
+      setCampaignEdits((current) => {
+        const next = { ...current }
+        delete next[campaign.id]
+        return next
+      })
+      await load()
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Could not save campaign settings.')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const act = async (
+    campaign: Campaign,
+    action: 'draft' | 'review' | 'approve' | 'send'
+  ) => {
+    setError(null)
+    setBusy(campaign.id)
+
+    try {
+      if (action === 'draft' || action === 'review') {
         // Moving to review is a plain status change; approval is the guarded step.
         const response = await fetch(`/api/campaigns/${campaign.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'in_review' }),
+          body: JSON.stringify({ status: action === 'draft' ? 'draft' : 'in_review' }),
         })
         if (!response.ok) throw new Error(await readError(response))
       }
@@ -298,10 +427,11 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
               onChange={(event) => setSegmentState(event.target.value)}
               data-testid="segment-state"
             >
-              <option value="">Any state</option>
+              <option value="">Any state{optionCount(preview?.facets?.state, '')}</option>
               {AU_STATES.map((state) => (
                 <option key={state.code} value={state.code}>
                   {state.code}
+                  {optionCount(preview?.facets?.state, state.code)}
                 </option>
               ))}
             </select>
@@ -315,10 +445,11 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
               onChange={(event) => setSegmentJobType(event.target.value)}
               data-testid="segment-job-type"
             >
-              <option value="">Any job type</option>
+              <option value="">Any job type{optionCount(preview?.facets?.jobType, '')}</option>
               {jobTypes.map((jobType) => (
                 <option key={jobType.id} value={jobType.id}>
                   {jobType.name}
+                  {optionCount(preview?.facets?.jobType, jobType.id)}
                 </option>
               ))}
             </select>
@@ -332,10 +463,14 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
               onChange={(event) => setSegmentStatus(event.target.value)}
               data-testid="segment-status"
             >
-              <option value="">Any status</option>
-              <option value="lead">Lead</option>
-              <option value="prospect">Prospect</option>
-              <option value="customer">Customer</option>
+              <option value="">Any status{optionCount(preview?.facets?.status, '')}</option>
+              <option value="lead">Lead{optionCount(preview?.facets?.status, 'lead')}</option>
+              <option value="prospect">
+                Prospect{optionCount(preview?.facets?.status, 'prospect')}
+              </option>
+              <option value="customer">
+                Customer{optionCount(preview?.facets?.status, 'customer')}
+              </option>
             </select>
           </label>
         </div>
@@ -352,6 +487,12 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
                 {preview.total > 0 && (
                   <span className={styles.previewMeta}>
                     ≈ {formatDuration(preview.estimatedSendMs)} to send
+                  </span>
+                )}
+                {preview.total === 0 && (
+                  <span className={styles.previewWarning} data-testid="segment-preview-empty">
+                    Nothing matches these filters. A campaign on this segment cannot
+                    generate copy or send.
                   </span>
                 )}
                 {preview.truncated && (
@@ -394,6 +535,7 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
           page={segmentsPage}
           pageSize={segmentsPageSize}
           total={segmentsTotal}
+          shown={segments.length}
           onPageChange={setSegmentsPage}
           onPageSizeChange={(size) => {
             setSegmentsPageSize(size)
@@ -408,6 +550,11 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
         <h2 id="campaigns-heading" className={styles.panelTitle}>
           Campaigns
         </h2>
+        <p className={styles.panelHint}>
+          Create a draft against a segment, then open <strong>Write copy with AI</strong>{' '}
+          to have Claude draft the campaign fields for that audience. Copy and settings
+          can be changed while a campaign is a draft or after a failed send.
+        </p>
 
         <div className={styles.formRow}>
           <label className={styles.field}>
@@ -467,7 +614,13 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
 
         <ul className={styles.list}>
           {campaigns.length === 0 && <li className={styles.empty}>No campaigns yet.</li>}
-          {campaigns.map((campaign) => (
+          {campaigns.map((campaign) => {
+            const edit = campaignEdits[campaign.id] ?? {
+              segmentId: campaign.segment_id ?? '',
+              automationId: campaign.provider_automation_id ?? '',
+            }
+
+            return (
             <li key={campaign.id} className={styles.campaignItem}>
               <div className={styles.campaignMain}>
                 <span className={styles.itemName}>{campaign.name}</span>
@@ -491,7 +644,7 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
                   aria-expanded={reviewingId === campaign.id}
                   data-testid={`review-copy-${campaign.id}`}
                 >
-                  {reviewingId === campaign.id ? 'Hide copy' : 'Copy'}
+                  {copyToggleLabel(campaign, reviewingId === campaign.id)}
                 </button>
                 {campaign.status === 'draft' && (
                   <button
@@ -504,14 +657,36 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
                   </button>
                 )}
                 {campaign.status === 'in_review' && (
+                  <>
+                    <button
+                      type="button"
+                      className={styles.secondaryBtn}
+                      onClick={() => act(campaign, 'draft')}
+                      disabled={busy !== null}
+                      data-testid={`draft-${campaign.id}`}
+                    >
+                      Return to draft
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.primaryBtn}
+                      onClick={() => act(campaign, 'approve')}
+                      disabled={busy !== null}
+                      data-testid={`approve-${campaign.id}`}
+                    >
+                      Approve
+                    </button>
+                  </>
+                )}
+                {campaign.status === 'approved' && (
                   <button
                     type="button"
-                    className={styles.primaryBtn}
-                    onClick={() => act(campaign, 'approve')}
+                    className={styles.secondaryBtn}
+                    onClick={() => act(campaign, 'draft')}
                     disabled={busy !== null}
-                    data-testid={`approve-${campaign.id}`}
+                    data-testid={`draft-${campaign.id}`}
                   >
-                    Approve
+                    Return to draft
                   </button>
                 )}
                 {(campaign.status === 'approved' || campaign.status === 'sending') && (
@@ -525,13 +700,87 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
                     {campaign.status === 'sending' ? 'Resume send' : 'Send now'}
                   </button>
                 )}
+                {campaign.status === 'failed' && (
+                  <>
+                    <button
+                      type="button"
+                      className={styles.secondaryBtn}
+                      onClick={() => act(campaign, 'draft')}
+                      disabled={busy !== null}
+                      data-testid={`draft-${campaign.id}`}
+                    >
+                      Return to draft
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.dangerBtn}
+                      onClick={() => act(campaign, 'send')}
+                      disabled={busy !== null}
+                      data-testid={`retry-${campaign.id}`}
+                    >
+                      Retry failed
+                    </button>
+                  </>
+                )}
               </div>
+
+              {COPY_EDITABLE_STATUSES.has(campaign.status) && (
+                <div className={styles.campaignSettings}>
+                  <label className={styles.field}>
+                    <span className={styles.label}>Segment</span>
+                    <select
+                      className={styles.input}
+                      value={edit.segmentId}
+                      onChange={(event) =>
+                        setCampaignEdits((current) => ({
+                          ...current,
+                          [campaign.id]: { ...edit, segmentId: event.target.value },
+                        }))
+                      }
+                      data-testid={`edit-segment-${campaign.id}`}
+                    >
+                      <option value="">Choose a segment</option>
+                      {pickableSegments.map((segment) => (
+                        <option key={segment.id} value={segment.id}>
+                          {segment.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className={styles.field}>
+                    <span className={styles.label}>EmailOctopus automation ID</span>
+                    <input
+                      className={styles.input}
+                      value={edit.automationId}
+                      onChange={(event) =>
+                        setCampaignEdits((current) => ({
+                          ...current,
+                          [campaign.id]: { ...edit, automationId: event.target.value },
+                        }))
+                      }
+                      placeholder="Required before approval"
+                      data-testid={`edit-automation-${campaign.id}`}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className={styles.secondaryBtn}
+                    onClick={() => saveCampaignSettings(campaign)}
+                    disabled={busy !== null}
+                    data-testid={`save-settings-${campaign.id}`}
+                  >
+                    Save settings
+                  </button>
+                </div>
+              )}
 
               {reviewingId === campaign.id && (
                 <CampaignCopyEditor
                   campaignId={campaign.id}
                   campaignName={campaign.name}
-                  editable={campaign.status === 'draft' || campaign.status === 'failed'}
+                  audienceLabel={campaign.segment?.name ?? undefined}
+                  audienceSize={reviewingAudience}
+                  editable={COPY_EDITABLE_STATUSES.has(campaign.status)}
                   mergeFields={campaign.merge_fields ?? {}}
                   onSaved={(mergeFields, status) => {
                     // Take the status from the server rather than assuming. Generating
@@ -553,13 +802,15 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
                 />
               )}
             </li>
-          ))}
+            )
+          })}
         </ul>
 
         <Pagination
           page={campaignsPage}
           pageSize={campaignsPageSize}
           total={campaignsTotal}
+          shown={campaigns.length}
           onPageChange={setCampaignsPage}
           onPageSizeChange={(size) => {
             setCampaignsPageSize(size)

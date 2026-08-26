@@ -168,6 +168,12 @@ test.describe('unauthenticated access', () => {
     expect(response.status()).toBe(401)
   })
 
+  test('protects the operational health aggregate', async ({ request }) => {
+    const response = await request.get('/api/operations/summary', { maxRedirects: 0 })
+
+    expect(response.status()).toBe(401)
+  })
+
   test('lets the emailoctopus webhook through to its own signature check', async ({
     request,
   }) => {

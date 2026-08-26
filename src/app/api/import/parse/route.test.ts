@@ -5,7 +5,10 @@ const mockGetSession = jest.fn()
 const mockParseExcelBuffer = jest.fn()
 
 jest.mock('@/lib/auth/dal', () => ({ getSession: () => mockGetSession() }))
+// Only the parse itself is doubled; the format allowlist is the real one, so these
+// tests fail if the route and the parser ever disagree about what can be uploaded.
 jest.mock('@/lib/excelParser', () => ({
+  ...jest.requireActual('@/lib/excelParser'),
   parseExcelBuffer: (buffer: Buffer) => mockParseExcelBuffer(buffer),
 }))
 
@@ -26,8 +29,9 @@ function uploadRequest(file: unknown) {
   } as unknown as Parameters<typeof POST>[0]
 }
 
-function spreadsheet(sizeBytes = 1024) {
+function spreadsheet(sizeBytes = 1024, name = 'contacts.xlsx') {
   return {
+    name,
     size: sizeBytes,
     arrayBuffer: async () => new ArrayBuffer(8),
   }
@@ -77,6 +81,7 @@ describe('POST /api/import/parse', () => {
       // The point of the check is that it happens before arrayBuffer(), so a hostile
       // upload cannot exhaust memory in the parser.
       const oversized = {
+        name: 'contacts.xlsx',
         size: 10 * 1024 * 1024 + 1,
         arrayBuffer: jest.fn(),
       }
@@ -92,6 +97,35 @@ describe('POST /api/import/parse', () => {
       const response = await POST(uploadRequest(spreadsheet(10 * 1024 * 1024)))
 
       expect(response.status).toBe(200)
+    })
+  })
+
+  describe('accepted formats', () => {
+    it.each([
+      ['an Excel workbook', 'contacts.xlsx'],
+      ['a legacy Excel workbook', 'contacts.xls'],
+      ['a CSV export', 'contacts.csv'],
+      ['an Apple Numbers document', 'apollo-contacts-export REQUIRED FIELDS.numbers'],
+    ])('parses %s', async (_case, name) => {
+      const response = await POST(uploadRequest(spreadsheet(1024, name)))
+
+      expect(response.status).toBe(200)
+      expect(mockParseExcelBuffer).toHaveBeenCalled()
+    })
+
+    it('rejects an unsupported format before handing it to the parser', async () => {
+      const response = await POST(uploadRequest(spreadsheet(1024, 'contacts.pdf')))
+
+      expect(response.status).toBe(415)
+      expect((await response.json()).error).toContain('.numbers')
+      expect(mockParseExcelBuffer).not.toHaveBeenCalled()
+    })
+
+    it('rejects a file with no extension at all', async () => {
+      const response = await POST(uploadRequest(spreadsheet(1024, 'contacts')))
+
+      expect(response.status).toBe(415)
+      expect(mockParseExcelBuffer).not.toHaveBeenCalled()
     })
   })
 

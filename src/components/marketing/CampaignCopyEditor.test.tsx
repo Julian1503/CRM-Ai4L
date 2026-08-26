@@ -48,6 +48,117 @@ describe('CampaignCopyEditor', () => {
     mockFetch({ ok: true, body: { campaign: { merge_fields: fullCopy() } } })
   })
 
+  describe('an audience that cannot receive the email', () => {
+    // Generation fails with a 409 when the segment matches nobody. The route is right
+    // to refuse, but the operator learned it only after clicking, from a banner
+    // elsewhere on the page -- so the count belongs on the To line, before the click.
+    it('shows the audience size beside the addressee', () => {
+      renderEditor({ audienceLabel: 'NSW leads', audienceSize: 5082 })
+
+      expect(screen.getByTestId('composer-audience')).toHaveTextContent(
+        'NSW leads · 5,082 contacts'
+      )
+    })
+
+    it('says one contact in the singular', () => {
+      renderEditor({ audienceLabel: 'NSW leads', audienceSize: 1 })
+
+      expect(screen.getByTestId('composer-audience')).toHaveTextContent('1 contact')
+    })
+
+    it('names the segment alone when the size is not known yet', () => {
+      renderEditor({ audienceLabel: 'NSW leads' })
+
+      expect(screen.getByTestId('composer-audience')).toHaveTextContent('NSW leads')
+      expect(screen.getByTestId('composer-audience')).not.toHaveTextContent('contacts')
+    })
+
+    it('refuses to generate for an empty audience, and says why', () => {
+      renderEditor({ audienceLabel: 'NSW Ele', audienceSize: 0 })
+
+      expect(screen.getByTestId('generate-copy')).toBeDisabled()
+      expect(screen.getByTestId('empty-audience')).toHaveTextContent(
+        /matches no contacts/i
+      )
+    })
+
+    it('does not block generation before the count arrives', () => {
+      renderEditor({ audienceLabel: 'NSW Ele' })
+
+      expect(screen.getByTestId('generate-copy')).toBeEnabled()
+      expect(screen.queryByTestId('empty-audience')).toBeNull()
+    })
+
+    it('leaves an audience with contacts alone', () => {
+      renderEditor({ audienceLabel: 'NSW leads', audienceSize: 42 })
+
+      expect(screen.getByTestId('generate-copy')).toBeEnabled()
+      expect(screen.queryByTestId('empty-audience')).toBeNull()
+    })
+  })
+
+  describe('the email composer layout', () => {
+    it('addresses the email to the campaign audience', () => {
+      renderEditor({ audienceLabel: 'NSW leads' })
+
+      expect(screen.getByTestId('composer-audience')).toHaveTextContent('NSW leads')
+    })
+
+    it('falls back to naming the segment generically when none is passed', () => {
+      renderEditor()
+
+      expect(screen.getByTestId('composer-audience')).toHaveTextContent(
+        'the campaign segment'
+      )
+    })
+
+    it('puts the headline in the subject line and the preheader in the preview line', () => {
+      renderEditor()
+
+      const subject = screen.getByTestId('composer-subject')
+      const preview = screen.getByTestId('composer-preview')
+
+      expect(subject).toContainElement(screen.getByTestId('copy-field-Headline'))
+      expect(preview).toContainElement(screen.getByTestId('copy-field-Preheader'))
+    })
+
+    it('lays the body out as the message itself -- intro, benefits, then the button', () => {
+      renderEditor()
+
+      const body = screen.getByTestId('composer-body')
+
+      expect(body).toContainElement(screen.getByTestId('copy-field-Intro'))
+      for (const tag of ['Benefit1', 'Benefit2', 'Benefit3']) {
+        expect(body).toContainElement(screen.getByTestId(`copy-field-${tag}`))
+      }
+      expect(body).toContainElement(screen.getByTestId('copy-field-CtaLabel'))
+    })
+
+    it('shows the benefits as a list, because that is what the template renders', () => {
+      renderEditor()
+
+      expect(screen.getAllByTestId('composer-benefit')).toHaveLength(3)
+    })
+
+    it('says the booking link is added per recipient, where the button is', () => {
+      renderEditor()
+
+      expect(screen.getByTestId('composer-cta-note')).toHaveTextContent(
+        /booking link/i
+      )
+    })
+
+    it('renders any merge field it has no slot for, so a new one cannot go missing', () => {
+      // The slots are hand-placed. If the contract grows a field, it must still be
+      // editable rather than silently dropped out of the composer.
+      renderEditor()
+
+      for (const field of CAMPAIGN_COPY_FIELDS) {
+        expect(screen.getByTestId(`copy-field-${field.tag}`)).toBeInTheDocument()
+      }
+    })
+  })
+
   it('renders one input per merge field, labelled with its tag', () => {
     renderEditor()
 

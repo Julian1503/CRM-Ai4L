@@ -166,10 +166,17 @@ describe('Home Page & Excel Importer UI Integration Tests', () => {
     fireEvent.click(importTab);
 
     // Verify Importer page heading
-    expect(screen.getByText('Excel spreadsheet importer')).toBeInTheDocument();
+    expect(screen.getByText('Spreadsheet importer')).toBeInTheDocument();
     
     // Verify dropzone title
-    expect(screen.getByText('Drag and drop XLS files here')).toBeInTheDocument();
+    expect(screen.getByText('Drag and drop a spreadsheet here')).toBeInTheDocument();
+
+    // The dropzone must offer every format the parse route accepts -- Apple Numbers
+    // included, since that is what an Apollo export is handed over as.
+    const fileInput = screen.getByTestId('excel-file-input') as HTMLInputElement;
+    expect(fileInput.accept).toContain('.numbers');
+    expect(fileInput.accept).toContain('.csv');
+    expect(fileInput.accept).toContain('.xls');
   });
 
   it('simulates file upload, triggers API request, and displays column mapper with auto-selection heuristics', async () => {
@@ -197,7 +204,7 @@ describe('Home Page & Excel Importer UI Integration Tests', () => {
     // Verify Mapping UI headers and auto-mapping selections with waitFor
     await waitFor(() => {
       expect(screen.getByText('File Uploaded: Leads.xlsx')).toBeInTheDocument();
-      expect(screen.getByText('Excel Column Header')).toBeInTheDocument();
+      expect(screen.getByText('Spreadsheet Column Header')).toBeInTheDocument();
       expect(screen.getByText('Maps to CRM Field')).toBeInTheDocument();
       
       const emailSelect = screen.getByTestId('mapping-select-email') as HTMLSelectElement;
@@ -235,10 +242,17 @@ describe('Home Page & Excel Importer UI Integration Tests', () => {
 
   it('saves EmailOctopus credentials and triggers manual sync', async () => {
     routeFetch({
+      '/api/integrations/emailoctopus/fields': jsonResponse({
+        tags: ['Headline'],
+        missing: [],
+        ready: true,
+      }),
       '/api/integrations/emailoctopus/sync': jsonResponse({
         success: true,
         syncedCount: 3,
         errorsCount: 0,
+        hasMore: false,
+        nextOffset: null,
       }),
     });
 
@@ -267,9 +281,9 @@ describe('Home Page & Excel Importer UI Integration Tests', () => {
     // 5. Navigate to Integrations (EmailOctopus) tab
     fireEvent.click(screen.getByTestId('nav-item-integrations'));
     
-    // Connection State should now read "Connected" (since keys exist)
+    // Connection State is based on a real list/field check, not merely stored keys.
     await waitFor(() => {
-      expect(screen.getByText('Connected')).toBeInTheDocument();
+      expect(screen.getByText('Ready')).toBeInTheDocument();
     });
 
     // 6. Click "Sync Now" to trigger manual synchronization
@@ -285,6 +299,7 @@ describe('Home Page & Excel Importer UI Integration Tests', () => {
     const syncCall = mockFetch.mock.calls.find(
       (call) => call[0] === '/api/integrations/emailoctopus/sync'
     );
+    expect(JSON.parse(syncCall?.[1].body)).toMatchObject({ offset: 0 });
     expect(JSON.parse(syncCall?.[1].body)).not.toHaveProperty('contacts');
 
     // Check that success notice is logged in the sync timeline
@@ -315,8 +330,8 @@ describe('Home Page & Excel Importer UI Integration Tests', () => {
     // the first paint reading "No contacts", so findByTestId resolves before the fetch
     // and the assertion races it.
     await waitFor(() =>
-      expect(screen.getByTestId('contacts-pagination-summary')).toHaveTextContent(
-        'Showing 1–50 of 3,482 contacts'
+      expect(screen.getByTestId('contacts-pagination-position')).toHaveTextContent(
+        'Page 1 of 70'
       )
     );
 

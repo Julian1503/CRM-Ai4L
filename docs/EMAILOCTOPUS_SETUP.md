@@ -139,3 +139,18 @@ Australian **Spam Act 2003** applies to every campaign sent from here.
 Get written confirmation from the client that the existing 5,082-contact list has consent
 to receive marketing before any broad send. That is a legal exposure for them, not just a
 deliverability risk.
+
+---
+
+## 6. End-to-end intake canary
+
+After the webhook is registered, verify the real route, database write, idempotency ledger,
+and unsubscribe path with:
+
+```bash
+npm run verify:newsletter -- https://your-crm-host.example.com
+```
+
+The command uses a unique `example.invalid` contact and removes the contact, sync logs,
+and webhook ledger fixtures before it exits. A failed cleanup is treated as a failed
+canary so synthetic contact data is never silently left behind.

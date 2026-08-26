@@ -73,6 +73,17 @@ describe('/api/campaigns/[id]', () => {
     expect(update[0]).toMatchObject({ name: 'Renamed', provider_automation_id: 'auto-9' })
   })
 
+  it('refuses to rewrite settings after approval until the campaign returns to draft', async () => {
+    setup({ id: 'camp-1', status: 'approved' })
+
+    const response = await patch({ providerAutomationId: 'auto-10' })
+
+    expect(response.status).toBe(409)
+    await expect(response.json()).resolves.toMatchObject({
+      error: expect.stringMatching(/return.*draft/i),
+    })
+  })
+
   it('moves a draft into review', async () => {
     const { campaigns } = setup({ id: 'camp-1', status: 'draft' })
 

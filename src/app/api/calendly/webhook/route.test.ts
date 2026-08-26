@@ -8,8 +8,14 @@ import { NextRequest } from 'next/server'
 import { createDbMock, createQueryBuilderMock } from '@/test/supabaseMock'
 
 const mockGetAdminClient = jest.fn()
+const mockStartIntegrationDelivery = jest.fn().mockResolvedValue('delivery-1')
+const mockCompleteIntegrationDelivery = jest.fn().mockResolvedValue(undefined)
 
 jest.mock('@/lib/supabase/admin', () => ({ getAdminClient: () => mockGetAdminClient() }))
+jest.mock('@/lib/operations/deliveries', () => ({
+  startIntegrationDelivery: (...args: unknown[]) => mockStartIntegrationDelivery(...args),
+  completeIntegrationDelivery: (...args: unknown[]) => mockCompleteIntegrationDelivery(...args),
+}))
 
 import { POST } from './route'
 
@@ -198,6 +204,22 @@ describe('POST /api/calendly/webhook', () => {
 
       await expect(response.json()).resolves.toMatchObject({ status: 'duplicate' })
       expect(bookings.allFor('update')).toHaveLength(0)
+    })
+
+    it('releases a claimed event when processing fails so Calendly can retry it', async () => {
+      const webhookEvents = createQueryBuilderMock({ data: null, error: null })
+      const failingBookings = createQueryBuilderMock({
+        data: null,
+        error: { message: 'db down' },
+      })
+      mockGetAdminClient.mockReturnValue(
+        createDbMock((table: string) =>
+          table === 'webhook_events' ? webhookEvents : failingBookings
+        )
+      )
+
+      expect((await POST(request(created))).status).toBe(500)
+      expect(webhookEvents.allFor('delete')).toHaveLength(1)
     })
   })
 })

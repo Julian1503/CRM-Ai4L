@@ -1,8 +1,12 @@
 import { NextResponse, type NextRequest } from 'next/server'
 
 import { markBookingCancelled, markBookingScheduled } from '@/lib/booking/repository'
+import {
+  completeIntegrationDelivery,
+  startIntegrationDelivery,
+} from '@/lib/operations/deliveries'
 import { getAdminClient } from '@/lib/supabase/admin'
-import { claimWebhookEvent, deriveEventId } from '@/lib/webhooks/idempotency'
+import { claimWebhookEvent, deriveEventId, releaseWebhookEvent } from '@/lib/webhooks/idempotency'
 import { verifyWebhookSignature } from '@/lib/webhooks/verify'
 
 export const runtime = 'nodejs'
@@ -61,11 +65,21 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Invalid signature.' }, { status: 401 })
   }
 
+  const db = getAdminClient()
+  const deliveryId = await startIntegrationDelivery(db, PROVIDER)
+
   let body: CalendlyPayload
 
   try {
     body = JSON.parse(rawBody)
   } catch {
+    await completeIntegrationDelivery(db, deliveryId, {
+      status: 'failed',
+      eventCount: 0,
+      processedCount: 0,
+      failedCount: 0,
+      errorCode: 'malformed_json',
+    })
     return NextResponse.json({ error: 'Malformed JSON body.' }, { status: 400 })
   }
 
@@ -73,27 +87,54 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const payload = body.payload
 
   if (eventName !== 'invitee.created' && eventName !== 'invitee.canceled') {
+    await completeIntegrationDelivery(db, deliveryId, {
+      status: 'succeeded',
+      eventCount: 1,
+      processedCount: 0,
+      failedCount: 0,
+    })
     return NextResponse.json({ status: 'ignored', event: eventName ?? null })
   }
 
   const inviteeUri = payload?.uri
 
   if (!inviteeUri) {
+    await completeIntegrationDelivery(db, deliveryId, {
+      status: 'failed',
+      eventCount: 1,
+      processedCount: 0,
+      failedCount: 1,
+      errorCode: 'invalid_payload',
+    })
     return NextResponse.json({ error: 'Invalid webhook payload.' }, { status: 400 })
   }
 
-  try {
-    const db = getAdminClient()
+  const eventId = deriveEventId(rawBody, request.headers.get('calendly-webhook-id'))
+  let claimed = false
 
-    const eventId = deriveEventId(rawBody, request.headers.get('calendly-webhook-id'))
+  try {
     const isNew = await claimWebhookEvent(db, PROVIDER, eventId, eventName)
 
     if (!isNew) {
+      await completeIntegrationDelivery(db, deliveryId, {
+        status: 'succeeded',
+        eventCount: 1,
+        processedCount: 1,
+        failedCount: 0,
+      })
       return NextResponse.json({ status: 'duplicate' })
     }
+    claimed = true
 
     if (eventName === 'invitee.canceled') {
       const cancelled = await markBookingCancelled(db, inviteeUri)
+
+      await completeIntegrationDelivery(db, deliveryId, {
+        status: 'succeeded',
+        eventCount: 1,
+        processedCount: 1,
+        failedCount: 0,
+      })
 
       return NextResponse.json({ status: cancelled ? 'ok' : 'unmatched' })
     }
@@ -115,9 +156,28 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       })
     }
 
+    await completeIntegrationDelivery(db, deliveryId, {
+      status: 'succeeded',
+      eventCount: 1,
+      processedCount: 1,
+      failedCount: 0,
+    })
+
     return NextResponse.json({ status: matched ? 'ok' : 'unmatched' })
   } catch (error) {
     console.error('Calendly webhook processing failed:', error)
+
+    if (claimed) {
+      await releaseWebhookEvent(db, PROVIDER, eventId)
+    }
+
+    await completeIntegrationDelivery(db, deliveryId, {
+      status: 'failed',
+      eventCount: 1,
+      processedCount: 0,
+      failedCount: 1,
+      errorCode: 'processing_failed',
+    })
 
     return NextResponse.json({ error: 'Processing failed.' }, { status: 500 })
   }

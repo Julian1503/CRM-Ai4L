@@ -147,9 +147,10 @@ export async function markCheckoutStarted(
 export async function markBookingPaid(
   db: SupabaseClient<Database>,
   sessionId: string,
-  chargedAmountCents: number
-): Promise<void> {
-  const { error } = await db
+  chargedAmountCents: number,
+  bookingId?: string | null
+): Promise<boolean> {
+  let query = db
     .from('bookings')
     .update({
       status: 'paid',
@@ -159,9 +160,17 @@ export async function markBookingPaid(
     .eq('stripe_session_id', sessionId)
     .in('status', ['pending', 'checkout_started'])
 
+  if (bookingId) {
+    query = query.eq('id', bookingId)
+  }
+
+  const { data, error } = await query.select('id')
+
   if (error) {
     throw new Error(`Could not record payment: ${error.message}`)
   }
+
+  return Boolean(data && data.length > 0)
 }
 
 /**
@@ -193,18 +202,20 @@ export async function markBookingScheduled(
       .from('bookings')
       .update(updates)
       .eq('id', params.bookingId)
-      .neq('status', 'cancelled')
+      .in('status', ['paid', 'booked'])
       .select('id')
 
     if (error) throw new Error(`Could not record booking: ${error.message}`)
-    if (data && data.length > 0) return true
+    return Boolean(data && data.length > 0)
   }
 
   if (!params.email) {
     return false
   }
 
-  // Fall back to the most recent unscheduled booking for that contact.
+  // Fall back to the most recent paid booking for that contact. Email matching is
+  // necessarily weaker than the tracking id, so select one row first and update that
+  // exact id rather than booking every pending offer for the same address.
   const { data: contact, error: contactError } = await db
     .from('contacts')
     .select('id')
@@ -215,11 +226,23 @@ export async function markBookingScheduled(
   if (contactError) throw new Error(`Could not match invitee: ${contactError.message}`)
   if (!contact) return false
 
+  const { data: booking, error: bookingError } = await db
+    .from('bookings')
+    .select('id')
+    .eq('contact_id', contact.id)
+    .in('status', ['paid', 'booked'])
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (bookingError) throw new Error(`Could not match booking: ${bookingError.message}`)
+  if (!booking) return false
+
   const { data, error } = await db
     .from('bookings')
     .update(updates)
-    .eq('contact_id', contact.id)
-    .in('status', ['pending', 'checkout_started', 'paid'])
+    .eq('id', booking.id)
+    .in('status', ['paid', 'booked'])
     .select('id')
 
   if (error) throw new Error(`Could not record booking: ${error.message}`)

@@ -5,6 +5,10 @@ import {
   parseNewsletterBatch,
   type NewsletterEvent,
 } from '@/lib/contacts/newsletter'
+import {
+  completeIntegrationDelivery,
+  startIntegrationDelivery,
+} from '@/lib/operations/deliveries'
 import { getAdminClient } from '@/lib/supabase/admin'
 import {
   claimWebhookEvent,
@@ -110,16 +114,33 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Invalid signature.' }, { status: 401 })
   }
 
+  const db = getAdminClient()
+  const deliveryId = await startIntegrationDelivery(db, PROVIDER, 'batch')
+
   let payload: unknown
   try {
     payload = JSON.parse(rawBody)
   } catch {
+    await completeIntegrationDelivery(db, deliveryId, {
+      status: 'failed',
+      eventCount: 0,
+      processedCount: 0,
+      failedCount: 0,
+      errorCode: 'malformed_json',
+    })
     return NextResponse.json({ error: 'Malformed JSON body.' }, { status: 400 })
   }
 
   const batch = parseNewsletterBatch(payload)
 
   if (!batch) {
+    await completeIntegrationDelivery(db, deliveryId, {
+      status: 'failed',
+      eventCount: 0,
+      processedCount: 0,
+      failedCount: 0,
+      errorCode: 'invalid_payload',
+    })
     return NextResponse.json({ error: 'Invalid webhook payload.' }, { status: 400 })
   }
 
@@ -136,15 +157,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const counts: Counts = { created: 0, updated: 0, noop: 0, duplicate: 0 }
 
-  // Nothing actionable — answer without opening a database connection.
+  // Nothing actionable still completes the trace; ignored events are not failures.
   if (batch.events.length === 0) {
+    await completeIntegrationDelivery(db, deliveryId, {
+      status: batch.invalid > 0 ? 'completed_with_errors' : 'succeeded',
+      eventCount: summary.received,
+      processedCount: 0,
+      failedCount: batch.invalid,
+      ...(batch.invalid > 0 ? { errorCode: 'invalid_payload' as const } : {}),
+    })
     return NextResponse.json({ status: 'ok', ...summary, ...counts })
   }
 
   const notes: string[] = []
   const failures: string[] = []
-
-  const db = getAdminClient()
 
   // Sequential on purpose: two events for the same address in one batch must not race.
   for (const event of batch.events) {
@@ -170,6 +196,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (failures.length > 0) {
     console.error(`EmailOctopus webhook processing failed: ${failures.join('; ')}`)
 
+    await completeIntegrationDelivery(db, deliveryId, {
+      status: 'failed',
+      eventCount: summary.received,
+      processedCount: counts.created + counts.updated + counts.noop + counts.duplicate,
+      failedCount: batch.invalid + failures.length,
+      errorCode: 'processing_failed',
+    })
+
     // 500 so the provider retries. The ledger skips what already succeeded, and the
     // failed events released their claims, so a retry reprocesses exactly those.
     return NextResponse.json(
@@ -177,6 +211,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       { status: 500 }
     )
   }
+
+  await completeIntegrationDelivery(db, deliveryId, {
+    status: batch.invalid > 0 ? 'completed_with_errors' : 'succeeded',
+    eventCount: summary.received,
+    processedCount: counts.created + counts.updated + counts.noop + counts.duplicate,
+    failedCount: batch.invalid,
+    ...(batch.invalid > 0 ? { errorCode: 'invalid_payload' as const } : {}),
+  })
 
   return NextResponse.json({ status: 'ok', ...summary, ...counts })
 }

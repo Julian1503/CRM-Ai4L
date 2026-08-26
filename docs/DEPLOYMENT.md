@@ -15,7 +15,7 @@ from memory.
 | What | Why it blocks | Status |
 |---|---|---|
 | Vercel account + project | Nothing can be deployed without one | **Open** |
-| Subdomain (e.g. `crm.hellobloom.com`) | `NEXT_PUBLIC_APP_URL` is baked into the build — see §3 | **Open** |
+| Subdomain (e.g. `crm-ai4-l.vercel.app`) | `NEXT_PUBLIC_APP_URL` is baked into the build — see §3 | **Open** |
 | DNS control for that subdomain | To point it at Vercel and issue TLS | **Open** |
 
 Until a public HTTPS host exists, **none of the three webhooks can be exercised**, so
@@ -167,6 +167,22 @@ automation, which are separate from the webhook and equally required before a se
 
 ## 5. Verify the deployment
 
+Before deploying, validate configuration without making any provider changes:
+
+```bash
+npm run preflight
+npm run preflight -- --online
+```
+
+The online mode confirms every required table and aggregate exists, the EmailOctopus list
+is reachable, the Stripe Price is active at $500 AUD, the coupon is valid at 100% off for
+one use, and the Calendly scheduling page resolves. It is read-only. After deployment,
+include the final host to also prove `NEXT_PUBLIC_APP_URL` matches what was built:
+
+```bash
+npm run preflight -- --online https://<host>
+```
+
 ```bash
 npm run verify:deployment https://<host>
 ```
@@ -202,13 +218,16 @@ npm run verify:deployment http://127.0.0.1:3100
 ## 6. Order of operations
 
 1. Client creates the Vercel project and points the subdomain at it.
-2. Set every variable from §3, `NEXT_PUBLIC_APP_URL` to the final host.
-3. Deploy. Confirm TLS and that the subdomain resolves.
-4. `npm run verify:deployment https://<host>` — all 17 green before going further.
-5. `npm run db:create-admin` if the admin account does not exist yet, and sign in.
-6. Enter the EmailOctopus API key and list id in the app's settings screen.
-7. Register the three webhooks (§4).
-8. `npm run db:sync-job-types -- --dry-run` to confirm the contact book is classified.
-9. Only then: create a segment, generate copy, approve, and send to a **test list of two
+2. Apply migrations with `npx supabase db push`, then run `npm run db:verify`.
+3. Set every variable from §3, `NEXT_PUBLIC_APP_URL` to the final host.
+4. Run `npm run preflight -- --online`; provider or schema failures block deployment.
+5. Deploy. Confirm TLS and that the subdomain resolves.
+6. Run both `npm run preflight -- --online https://<host>` and
+   `npm run verify:deployment https://<host>` before going further.
+7. `npm run db:create-admin` if the admin account does not exist yet, and sign in.
+8. Enter the EmailOctopus API key and list id in the app's settings screen.
+9. Register the three webhooks (§4), then run the newsletter canary.
+10. `npm run db:sync-job-types -- --dry-run` to confirm the contact book is classified.
+11. Only then: create a segment, generate copy, approve, and send to a **test list of two
    or three of your own addresses**. Confirm the booking link in the received email is
    absolute and reachable before sending to anyone real.

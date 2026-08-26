@@ -117,6 +117,20 @@ describe('GET /api/contacts/export', () => {
     expect(range[1]).toBeLessThan(100_000)
   })
 
+  it('refuses an export above the safe limit instead of truncating it', async () => {
+    const builder = createQueryBuilderMock({
+      data: [contactRow],
+      error: null,
+      count: 10_001,
+    })
+    mockCreateServerClient.mockResolvedValue(createDbMock(builder))
+
+    const response = await get()
+
+    expect(response.status).toBe(422)
+    await expect(response.json()).resolves.toMatchObject({ total: 10_001, maxRows: 10_000 })
+  })
+
   it('excludes archived contacts by default', async () => {
     const db = createDbMock(createQueryBuilderMock({ data: [], error: null, count: 0 }))
     mockCreateServerClient.mockResolvedValue(db)
