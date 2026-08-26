@@ -5,7 +5,11 @@
  * is missing (as it is under jsdom), and that stand-in has no `ok` or `clone`. Real
  * Response semantics matter here — the adapter branches on status codes.
  */
-import { EMAILOCTOPUS_CAPABILITIES, createEmailOctopusProvider } from './emailOctopus'
+import {
+  EMAILOCTOPUS_CAPABILITIES,
+  createEmailOctopusProvider,
+  emailOctopusContactId,
+} from './emailOctopus'
 
 function response(
   status: number,
@@ -160,6 +164,53 @@ describe('triggerSend', () => {
 
     const result = await provider(fetchImpl).triggerSend(params)
 
-    expect(result).toEqual({ ok: true, reference: null })
+    // The queue endpoint answers empty, so the contact id is the only handle there is.
+    expect(result).toEqual({
+      ok: true,
+      reference: emailOctopusContactId('a@example.com'),
+    })
+  })
+
+  it('identifies the recipient by contact_id, not by email address', async () => {
+    // The defect this pins: the v2 queue endpoint takes `contact_id` (an id, or the MD5
+    // of the lowercased email). Posting `email_address` is rejected 422 for every
+    // recipient, so a whole campaign failed without a single email going out.
+    const fetchImpl = jest.fn().mockResolvedValue(response(200))
+
+    await provider(fetchImpl).triggerSend({ ...params, email: ' Ada@Example.com ' })
+
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body)
+    expect(body).toEqual({ contact_id: emailOctopusContactId('ada@example.com') })
+    expect(body.email_address).toBeUndefined()
+  })
+
+  it('reports which field a 422 rejected', async () => {
+    // "HTTP 422" tells an operator nothing; the pointer names what to fix.
+    const fetchImpl = jest.fn().mockResolvedValue(
+      response(422, {
+        detail: 'The request was invalid.',
+        errors: [{ pointer: '/contact_id', detail: 'This value should not be blank.' }],
+      })
+    )
+
+    const result = await provider(fetchImpl).triggerSend(params)
+
+    expect(result).toMatchObject({
+      ok: false,
+      retryable: false,
+      error:
+        'The request was invalid. (contact_id: This value should not be blank.)',
+    })
+  })
+})
+
+describe('emailOctopusContactId', () => {
+  it('is the MD5 of the lowercased, trimmed address', () => {
+    // Documented as accepted in place of the contact id, which is what lets a send
+    // queue a contact without first looking it up.
+    expect(emailOctopusContactId('  OTTO@example.COM ')).toBe(
+      emailOctopusContactId('otto@example.com')
+    )
+    expect(emailOctopusContactId('otto@example.com')).toMatch(/^[0-9a-f]{32}$/)
   })
 })

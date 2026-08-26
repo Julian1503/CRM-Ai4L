@@ -303,6 +303,21 @@
   gap: 0.5rem;
 }
 
+/* The send ledger, reported under the campaign row it belongs to. Full-width so a
+   provider's own error message can be read rather than truncated into the row. */
+.sendReport {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.sendReportFailed {
+  composes: sendReport;
+  color: #8a1c1c;
+}
+
 .campaignSettings {
   display: grid;
   grid-template-columns: minmax(12rem, 1fr) minmax(14rem, 1fr) auto;

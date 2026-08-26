@@ -320,8 +320,33 @@ describe('executeCampaignSends', () => {
     })
 
     expect(progress).toMatchObject({ sent: 0, failed: 0, remaining: 1 })
-    // No status write at all: the row stays pending.
-    expect(sends.allFor('update')).toHaveLength(0)
+
+    // The row stays pending, but the reason is written down: a retryable failure used
+    // to leave no trace anywhere, so a stalled send looked like a working one.
+    const updates = sends.allFor('update') as { args: [Record<string, unknown>] }[]
+    expect(updates).toHaveLength(1)
+    expect(updates[0].args[0]).toMatchObject({ error: '429' })
+    expect(updates[0].args[0].status).toBeUndefined()
+    expect(progress.deferredReason).toBe('429')
+  })
+
+  it('reports why a recipient failed, not just that one did', async () => {
+    // A count with no reason is what made a failed campaign unactionable: the operator
+    // saw "failed" and had to read the database to learn the provider had rejected it.
+    const { db } = setup([contactRow('c1')])
+    const provider = fakeProvider({
+      triggerSend: jest.fn().mockResolvedValue({
+        ok: false,
+        error: 'Automation not found.',
+        retryable: false,
+      }),
+    })
+
+    const progress = await executeCampaignSends(db as never, provider, campaign, {
+      bucket: fastBucket(),
+    })
+
+    expect(progress).toMatchObject({ failed: 1, failureReason: 'Automation not found.' })
   })
 
   it('stalls the whole bucket on a provider backoff', async () => {

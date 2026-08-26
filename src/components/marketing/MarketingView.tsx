@@ -37,6 +37,109 @@ type Preview = {
 
 export type JobTypeOption = { id: string; name: string }
 
+/**
+ * What the send ledger says about one campaign, as `/api/campaigns/[id]/send` reports
+ * it. Read for campaigns that are sending or have failed, so "failed" is never a bare
+ * word on screen.
+ */
+type SendReport = {
+  total: number
+  sent: number
+  failed: number
+  pending: number
+  failureReason: string | null
+  stallReason: string | null
+}
+
+/** One chunk's own result, as opposed to the campaign's cumulative totals. */
+type SendChunk = {
+  processed: number
+  sent: number
+  failed: number
+  deferred: number
+  reason: string | null
+}
+
+type SendResult = {
+  hasMore?: boolean
+  sent?: number
+  failed?: number
+  pending?: number
+  failureReason?: string | null
+  chunk?: SendChunk
+}
+
+/** Campaign statuses whose send ledger is worth reading back. */
+const REPORTED_STATUSES = new Set<Campaign['status']>(['sending', 'failed'])
+
+/**
+ * How many chunks one click will drive before handing back control.
+ *
+ * 200 chunks of 200 recipients covers any segment the preview will let through. Hitting
+ * it means something is wrong rather than large.
+ */
+const MAX_SEND_CHUNKS = 200
+
+/**
+ * What to tell the operator when a send finishes with failures.
+ *
+ * The whole reason this exists: the endpoint answers 200 for a send in which every
+ * single recipient failed, so success at the HTTP level said nothing about success at
+ * the campaign level, and the click appeared to work while the campaign quietly went
+ * to "failed".
+ */
+function describeSendOutcome(result: SendResult): string | null {
+  const failed = result.failed ?? 0
+
+  if (failed === 0) return null
+
+  const sent = result.sent ?? 0
+  const reason = result.failureReason
+    ? ` EmailOctopus said: ${result.failureReason}`
+    : ''
+
+  if (sent === 0) {
+    return `The send failed. None of the ${failed} recipients were emailed.${reason}`
+  }
+
+  return `Sent to ${sent} of ${sent + failed} recipients. ${failed} failed.${reason}`
+}
+
+/**
+ * What to tell the operator when a chunk moves nothing.
+ *
+ * Every attempt came back retryable — a rate limit, or the provider being down — so the
+ * rows stay pending and repeating the call would spin. Naming the provider's reason is
+ * the difference between "try again later" and an hour of guessing.
+ */
+function describeStall(chunk: SendChunk): string {
+  const scope = `${chunk.deferred} recipient${chunk.deferred === 1 ? '' : 's'}`
+
+  return chunk.reason
+    ? `Sending paused with ${scope} still to go — EmailOctopus is not accepting sends ` +
+        `right now: ${chunk.reason} The campaign stays resumable; use "Resume send" ` +
+        `once it recovers.`
+    : `Sending paused with ${scope} still to go, because EmailOctopus kept deferring ` +
+        `the requests. The campaign stays resumable; use "Resume send" to continue.`
+}
+
+/** A one-line summary of a campaign's ledger, for the row itself. */
+function describeReport(report: SendReport): string {
+  if (report.failed > 0) {
+    const reason = report.failureReason ? ` — ${report.failureReason}` : ''
+
+    return `${report.failed} of ${report.total} recipients failed${reason}`
+  }
+
+  if (report.pending > 0) {
+    const reason = report.stallReason ? ` — ${report.stallReason}` : ''
+
+    return `${report.sent} of ${report.total} sent, ${report.pending} still to go${reason}`
+  }
+
+  return `${report.sent} of ${report.total} sent`
+}
+
 /** Campaign statuses whose copy can still be rewritten, mirroring the generate route. */
 const COPY_EDITABLE_STATUSES = new Set<Campaign['status']>(['draft', 'failed'])
 
@@ -114,6 +217,9 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
 
+  // Per-campaign send reports, so a failure outlives the click that caused it.
+  const [sendReports, setSendReports] = useState<Record<string, SendReport>>({})
+
   // Segment draft
   const [segmentName, setSegmentName] = useState('')
   const [segmentState, setSegmentState] = useState('')
@@ -139,6 +245,42 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
     Record<string, { segmentId: string; automationId: string }>
   >({})
 
+  /**
+   * Reads the ledger for campaigns that are sending or have failed.
+   *
+   * Fetched in parallel and merged rather than replaced, so a report already on screen
+   * survives a refresh whose request fails.
+   */
+  const loadSendReports = useCallback(async (targets: Campaign[]) => {
+    if (targets.length === 0) return
+
+    const entries = await Promise.all(
+      targets.map(async (campaign) => {
+        try {
+          const response = await fetch(`/api/campaigns/${campaign.id}/send`)
+
+          if (!response.ok) return null
+
+          const body = await response.json()
+
+          // The endpoint answers with counts; anything else is a routing accident and
+          // must not render as "0 of 0 sent".
+          if (typeof body?.total !== 'number') return null
+
+          return [campaign.id, body as SendReport] as const
+        } catch {
+          return null
+        }
+      })
+    )
+
+    const found = entries.filter((entry): entry is [string, SendReport] => entry !== null)
+
+    if (found.length === 0) return
+
+    setSendReports((current) => ({ ...current, ...Object.fromEntries(found) }))
+  }, [])
+
   const load = useCallback(async () => {
     try {
       const [segmentsResponse, campaignsResponse, pickerResponse] = await Promise.all([
@@ -154,8 +296,13 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
       }
       if (campaignsResponse.ok) {
         const body = await campaignsResponse.json()
-        setCampaigns(body.campaigns ?? [])
+        const loaded: Campaign[] = body.campaigns ?? []
+
+        setCampaigns(loaded)
         setCampaignsTotal(body.total ?? 0)
+        // Only for the campaigns that have something to report — a draft has no ledger,
+        // and a request per row would be a page of requests for nothing.
+        void loadSendReports(loaded.filter((item) => REPORTED_STATUSES.has(item.status)))
       }
       if (pickerResponse.ok) {
         const body = await pickerResponse.json()
@@ -165,7 +312,7 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Could not load marketing data.')
     }
-  }, [segmentsPage, segmentsPageSize, campaignsPage, campaignsPageSize])
+  }, [segmentsPage, segmentsPageSize, campaignsPage, campaignsPageSize, loadSendReports])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -338,6 +485,9 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
     setError(null)
     setBusy(campaign.id)
 
+    // Set when a send finishes with failures: a 200 that still needs saying out loud.
+    let outcome: string | null = null
+
     try {
       if (action === 'draft' || action === 'review') {
         // Moving to review is a plain status change; approval is the guarded step.
@@ -362,19 +512,38 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
           const response = await fetch(`/api/campaigns/${campaign.id}/send`, { method: 'POST' })
           if (!response.ok) throw new Error(await readError(response))
 
-          const result = await response.json()
-          if (!result.hasMore) break
+          const result = (await response.json()) as SendResult
+          const chunk = result.chunk
+
+          // A chunk that attempted recipients and neither sent nor failed any of them
+          // has made no progress; calling again would only repeat it.
+          if (chunk && chunk.processed > 0 && chunk.sent === 0 && chunk.failed === 0) {
+            throw new Error(describeStall(chunk))
+          }
+
+          if (!result.hasMore) {
+            // A completed send is still a failed send when the ledger says so, and the
+            // endpoint reports that with a 200.
+            outcome = describeSendOutcome(result)
+            break
+          }
 
           guard += 1
-          if (guard > 200) {
+          if (guard > MAX_SEND_CHUNKS) {
             throw new Error('Send is taking longer than expected. Resume it from this screen.')
           }
         }
       }
 
       await load()
+
+      // After the reload, so the banner is not wiped by the refresh it describes.
+      if (outcome) setError(outcome)
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : 'Action failed.')
+      // The ledger holds the detail behind a mid-send failure; the row should show it
+      // even though the loop stopped early.
+      await load()
     } finally {
       setBusy(null)
     }
@@ -633,6 +802,17 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
               <span className={`${styles.status} ${styles[`status_${campaign.status}`]}`}>
                 {campaign.status.replace('_', ' ')}
               </span>
+
+              {sendReports[campaign.id] && REPORTED_STATUSES.has(campaign.status) && (
+                <p
+                  className={
+                    campaign.status === 'failed' ? styles.sendReportFailed : styles.sendReport
+                  }
+                  data-testid={`send-report-${campaign.id}`}
+                >
+                  {describeReport(sendReports[campaign.id])}
+                </p>
+              )}
 
               <div className={styles.actions}>
                 <button

@@ -13,7 +13,7 @@ jest.mock('@/lib/supabase/server', () => ({
   createSupabaseServerClient: () => mockCreateServerClient(),
 }))
 
-import { POST } from './route'
+import { GET, POST } from './route'
 
 const CREDENTIALS = [
   { key: 'emailoctopus_api_key', value: 'eo-key' },
@@ -36,6 +36,10 @@ type Setup = {
   pendingAfter?: number
   failedAfter?: number
   sentAfter?: number
+  /** Recorded against a failed ledger row, as the provider worded it. */
+  failureReason?: string
+  /** Recorded against a still-pending row when the provider deferred the send. */
+  stallReason?: string
 }
 
 function setup(options: Setup = {}) {
@@ -47,6 +51,8 @@ function setup(options: Setup = {}) {
     pendingAfter = 0,
     failedAfter = 0,
     sentAfter = 0,
+    failureReason,
+    stallReason,
   } = options
 
   const campaignStatus =
@@ -78,6 +84,13 @@ function setup(options: Setup = {}) {
     { data: null, error: null, count: pendingAfter }, // remaining count
     { data: null, error: null, count: failedAfter }, // cumulative failed count
     { data: null, error: null, count: sentAfter }, // cumulative sent count
+    // Reason lookups, which the summary only performs for a non-empty bucket.
+    ...(failedAfter > 0
+      ? [{ data: failureReason ? { error: failureReason } : null, error: null }]
+      : []),
+    ...(pendingAfter > 0
+      ? [{ data: stallReason ? { error: stallReason } : null, error: null }]
+      : []),
   ])
 
   const db = createDbMock((table: string) => {
@@ -269,6 +282,80 @@ describe('POST /api/campaigns/[id]/send', () => {
         hasMore: false,
       })
       expect(campaigns.allFor('update').at(-1)?.args[0]).toMatchObject({ status: 'failed' })
+    })
+  })
+
+  describe('reporting a failure', () => {
+    it('answers with the reason recipients failed, not just how many', async () => {
+      // The response is a 200 even when every recipient failed, so without this the
+      // caller has nothing to show and the campaign just changes status.
+      setup({
+        campaign: { ...approvedCampaign, status: 'sending' },
+        pendingAfter: 0,
+        failedAfter: 3,
+        sentAfter: 0,
+        failureReason: 'Automation not found.',
+      })
+
+      const response = await send()
+
+      await expect(response.json()).resolves.toMatchObject({
+        status: 'failed',
+        failed: 3,
+        failureReason: 'Automation not found.',
+      })
+    })
+
+    it('reports what this chunk itself achieved', async () => {
+      // A chunk that processed recipients and moved none of them is stalled; the
+      // caller needs to be able to tell that from ordinary progress.
+      setup({ campaign: { ...approvedCampaign, status: 'sending' }, pendingAfter: 5 })
+
+      const response = await send()
+
+      await expect(response.json()).resolves.toMatchObject({
+        chunk: { processed: 0, sent: 0, failed: 0, deferred: 0, reason: null },
+      })
+    })
+  })
+
+  describe('GET', () => {
+    function report(id = 'camp-1') {
+      return GET(
+        new NextRequest(`https://crm.example.com/api/campaigns/${id}/send`),
+        { params: Promise.resolve({ id }) }
+      )
+    }
+
+    it('refuses an unauthenticated request', async () => {
+      setup()
+      mockGetSession.mockResolvedValue(null)
+
+      expect((await report()).status).toBe(401)
+    })
+
+    it('reads the ledger back so a failure outlives the click', async () => {
+      // Reloading the page must not lose why a campaign failed.
+      const sends = createQueryBuilderMock([
+        { data: null, error: null, count: 0 }, // pending
+        { data: null, error: null, count: 2 }, // failed
+        { data: null, error: null, count: 8 }, // sent
+        { data: { error: 'This value should not be blank.' }, error: null },
+      ])
+
+      mockCreateServerClient.mockResolvedValue(createDbMock(() => sends))
+
+      const response = await report()
+
+      expect(response.status).toBe(200)
+      await expect(response.json()).resolves.toEqual({
+        total: 10,
+        sent: 8,
+        failed: 2,
+        pending: 0,
+        failureReason: 'This value should not be blank.',
+        stallReason: null,
+      })
     })
   })
 })

@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 import { EMAILOCTOPUS_LIMIT } from '../rateLimiter'
 
 import type {
@@ -24,9 +26,15 @@ import type {
  * - Reporting is keyed to campaign ids; there appear to be no automation reporting
  *   endpoints, so per-send opens and clicks likely never surface. Recorded as
  *   `perSendReporting: 'unknown'` rather than guessed either way.
- *
- * NOTE: the exact request body for the queue endpoint has not been exercised against a
- * live account. It is confined to `triggerSend` below.
+ * - The queue endpoint identifies the recipient by `contact_id`, never by email address.
+ *   v2 accepts either the contact's id or "an MD5 hash of the lowercase version of the
+ *   contact's email address", which is what `emailOctopusContactId` computes. Posting
+ *   `email_address` instead is rejected 422 for every recipient, which is how this
+ *   adapter shipped: each send failed non-retryably and the campaign ended `failed`
+ *   with the reason buried in the ledger.
+ * - Errors follow RFC 7807: `detail` carries the message, and a 422 adds an `errors[]`
+ *   array whose entries name the offending field. Both are read below, because
+ *   "HTTP 422" alone tells an operator nothing they can act on.
  */
 
 const API_BASE = 'https://api.emailoctopus.com'
@@ -44,6 +52,39 @@ export const EMAILOCTOPUS_CAPABILITIES: ProviderCapabilities = {
 
 type Fetcher = typeof fetch
 
+/**
+ * The contact identifier the API expects.
+ *
+ * Documented as "the ID of the contact, or an MD5 hash of the lowercase version of the
+ * contact's email address". The hash is used rather than the id returned by the contact
+ * upsert because it needs no round trip and stays correct for a contact this app has
+ * never written.
+ */
+export function emailOctopusContactId(email: string): string {
+  return createHash('md5').update(email.trim().toLowerCase(), 'utf8').digest('hex')
+}
+
+/** Field-level complaints from a 422, e.g. `contact_id: This value is not valid.` */
+function readValidationDetails(record: Record<string, unknown>): string[] {
+  if (!Array.isArray(record.errors)) return []
+
+  return record.errors
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') return null
+
+      const { pointer, detail } = entry as Record<string, unknown>
+
+      if (typeof detail !== 'string') return null
+
+      // The pointer is a JSON pointer such as `/contact_id`; the leading slash is
+      // noise to an operator reading this in a banner.
+      return typeof pointer === 'string' && pointer.trim() !== ''
+        ? `${pointer.replace(/^\//, '')}: ${detail}`
+        : detail
+    })
+    .filter((entry): entry is string => entry !== null)
+}
+
 async function readError(response: Response): Promise<string> {
   try {
     const body = await response.json()
@@ -51,8 +92,13 @@ async function readError(response: Response): Promise<string> {
     if (body && typeof body === 'object') {
       const record = body as Record<string, unknown>
       const detail = record.detail ?? record.message
+      const validation = readValidationDetails(record)
 
-      if (typeof detail === 'string') return detail
+      if (typeof detail === 'string') {
+        return validation.length > 0 ? `${detail} (${validation.join('; ')})` : detail
+      }
+
+      if (validation.length > 0) return validation.join('; ')
     }
   } catch {
     // Non-JSON body.
@@ -126,16 +172,21 @@ export function createEmailOctopusProvider(config: {
         }
       }
 
+      const contactId = emailOctopusContactId(email)
+
       const response = await doFetch(
         `${API_BASE}/automations/${encodeURIComponent(campaignHandle)}/queue`,
         {
           method: 'POST',
           headers,
-          body: JSON.stringify({ email_address: email }),
+          body: JSON.stringify({ contact_id: contactId }),
         }
       )
 
-      let reference: string | null = null
+      // The queue endpoint answers with an empty body, so the contact id is the only
+      // handle on the queued send. Recorded so a ledger row can be traced back to a
+      // contact in EmailOctopus.
+      let reference: string | null = contactId
       try {
         const body = await response.clone().json()
         if (body && typeof body === 'object') {

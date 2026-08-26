@@ -30,7 +30,19 @@ export type SendProgress = {
   total: number
   sent: number
   failed: number
+  /** Rows this run touched but left `pending` because the failure was retryable. */
   remaining: number
+  /**
+   * Why a recipient failed, verbatim from the provider.
+   *
+   * Carried out of the loop because a chunk that returns `failed: 40` and nothing else
+   * leaves an operator with no way to tell a missing merge field from a bad automation
+   * id. The first one is kept rather than the last: with a systematic misconfiguration
+   * every row fails the same way, and the first is the one that started it.
+   */
+  failureReason?: string
+  /** Why work was deferred — a rate limit or a provider outage, not a bad request. */
+  deferredReason?: string
 }
 
 type PendingSend = {
@@ -116,13 +128,21 @@ export async function executeCampaignSends(
   const pending = (data ?? []) as unknown as PendingSend[]
   let sent = 0
   let failed = 0
+  let failureReason: string | undefined
+  let deferredReason: string | undefined
+
+  const recordFailure = (reason: string) => {
+    failureReason ??= reason
+    failed += 1
+  }
 
   for (const row of pending) {
     const contact = row.contact
 
     if (!contact?.email) {
-      await markSend(db, row.id, 'failed', { error: 'Contact has no email address.' })
-      failed += 1
+      const reason = 'Contact has no email address.'
+      await markSend(db, row.id, 'failed', { error: reason })
+      recordFailure(reason)
       continue
     }
 
@@ -147,10 +167,13 @@ export async function executeCampaignSends(
       } catch (bookingError) {
         // Sending an email whose call to action is a dead link is worse than not
         // sending it, so this fails the recipient rather than proceeding.
-        await markSend(db, row.id, 'failed', {
-          error: bookingError instanceof Error ? bookingError.message : 'Could not create booking link.',
-        })
-        failed += 1
+        const reason =
+          bookingError instanceof Error
+            ? bookingError.message
+            : 'Could not create booking link.'
+
+        await markSend(db, row.id, 'failed', { error: reason })
+        recordFailure(reason)
         continue
       }
     }
@@ -163,11 +186,13 @@ export async function executeCampaignSends(
       if (!fieldOutcome.ok) {
         if (fieldOutcome.retryable) {
           if (fieldOutcome.retryAfterMs) bucket.pauseFor(fieldOutcome.retryAfterMs)
+          deferredReason ??= fieldOutcome.error
+          await noteDeferred(db, row.id, fieldOutcome.error)
           continue
         }
 
         await markSend(db, row.id, 'failed', { error: fieldOutcome.error })
-        failed += 1
+        recordFailure(fieldOutcome.error)
         continue
       }
     }
@@ -188,11 +213,13 @@ export async function executeCampaignSends(
     if (outcome.retryable) {
       // Left pending on purpose so the next run retries it.
       if (outcome.retryAfterMs) bucket.pauseFor(outcome.retryAfterMs)
+      deferredReason ??= outcome.error
+      await noteDeferred(db, row.id, outcome.error)
       continue
     }
 
     await markSend(db, row.id, 'failed', { error: outcome.error })
-    failed += 1
+    recordFailure(outcome.error)
   }
 
   return {
@@ -200,7 +227,28 @@ export async function executeCampaignSends(
     sent,
     failed,
     remaining: pending.length - sent - failed,
+    failureReason,
+    deferredReason,
   }
+}
+
+/**
+ * Records why a recipient is still `pending`.
+ *
+ * A retryable failure used to leave no trace anywhere: the row stayed pending, the
+ * chunk reported progress it had not made, and a send stalled behind a rate limit or a
+ * provider outage looked identical to one still working through the queue. The note is
+ * cleared by `markSend` as soon as the recipient succeeds.
+ */
+async function noteDeferred(
+  db: SupabaseClient<Database>,
+  id: string,
+  reason: string
+): Promise<void> {
+  await db
+    .from('campaign_sends')
+    .update({ error: reason, attempted_at: new Date().toISOString() })
+    .eq('id', id)
 }
 
 async function markSend(

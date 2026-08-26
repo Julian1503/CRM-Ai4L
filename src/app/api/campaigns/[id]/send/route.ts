@@ -13,6 +13,7 @@ import { isSendable } from '@/lib/marketing/campaignStatus'
 import { createEmailOctopusProvider } from '@/lib/marketing/providers/emailOctopus'
 import { executeCampaignSends, prepareCampaignSends } from '@/lib/marketing/send'
 import { resolveSegmentMembers } from '@/lib/marketing/segments'
+import { readCampaignSendSummary } from '@/lib/marketing/sendStatus'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 
 export const runtime = 'nodejs'
@@ -164,33 +165,8 @@ export async function POST(
 
     // Read cumulative ledger totals. Chunk-local numbers are not enough to decide
     // whether the campaign as a whole succeeded.
-    const { count: stillPending, error: pendingCountError } = await db
-      .from('campaign_sends')
-      .select('id', { count: 'exact', head: true })
-      .eq('campaign_id', campaign.id)
-      .eq('status', 'pending')
-
-    if (pendingCountError) throw new Error(pendingCountError.message)
-
-    const { count: totalFailed, error: failedCountError } = await db
-      .from('campaign_sends')
-      .select('id', { count: 'exact', head: true })
-      .eq('campaign_id', campaign.id)
-      .eq('status', 'failed')
-
-    if (failedCountError) throw new Error(failedCountError.message)
-
-    const { count: totalSent, error: sentCountError } = await db
-      .from('campaign_sends')
-      .select('id', { count: 'exact', head: true })
-      .eq('campaign_id', campaign.id)
-      .eq('status', 'sent')
-
-    if (sentCountError) throw new Error(sentCountError.message)
-
-    const pending = stillPending ?? 0
-    const failed = totalFailed ?? 0
-    const sent = totalSent ?? 0
+    const summary = await readCampaignSendSummary(db, campaign.id)
+    const { pending, failed, sent } = summary
     let finalStatus: 'sending' | 'sent' | 'failed' = 'sending'
 
     if (pending === 0) {
@@ -212,8 +188,55 @@ export async function POST(
       pending,
       /** True while the caller should keep invoking this endpoint. */
       hasMore: pending > 0,
+      /**
+       * What this invocation actually achieved.
+       *
+       * Separate from the cumulative totals because the caller needs both: the totals
+       * say whether the campaign succeeded, and these say whether *this* chunk moved.
+       * A chunk that processed recipients and neither sent nor failed any of them is
+       * stalled — every attempt came back retryable — and looping on it forever is
+       * how a rate-limited send used to masquerade as progress.
+       */
+      chunk: {
+        processed: progress.total,
+        sent: progress.sent,
+        failed: progress.failed,
+        deferred: progress.remaining,
+        reason: progress.deferredReason ?? null,
+      },
+      /** Why recipients failed, in the provider's own words. Null when none did. */
+      failureReason: summary.failureReason ?? progress.failureReason ?? null,
     })
   } catch (error) {
     return serverError(error, 'Could not send campaign.')
+  }
+}
+
+/**
+ * Reports what happened to a campaign's recipients.
+ *
+ * Exists so a failure survives the click that caused it: the POST response is gone as
+ * soon as the operator reloads, while a campaign sitting in `failed` needs to be able
+ * to say why on every visit.
+ */
+export async function GET(
+  _request: NextRequest,
+  { params }: RouteContext
+): Promise<NextResponse> {
+  const guard = await requireSessionOr401()
+  if ('response' in guard) return guard.response
+
+  const { id } = await params
+
+  if (!id) {
+    return badRequest('Campaign id is required.')
+  }
+
+  try {
+    const db = await createSupabaseServerClient()
+
+    return ok(await readCampaignSendSummary(db, id))
+  } catch (error) {
+    return serverError(error, 'Could not read the send report.')
   }
 }
