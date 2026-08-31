@@ -15,10 +15,17 @@ function routeFetch(handlers: Record<string, unknown>) {
     const method = init?.method ?? 'GET'
     const key = `${method} ${url}`
 
-    for (const [pattern, response] of Object.entries(handlers)) {
+    for (const [pattern, response] of Object.entries(handlers).sort(
+      ([left], [right]) => right.length - left.length
+    )) {
+      if ((key.includes('/audience') || key.includes('/preflight')) && !pattern.includes('/audience') && !pattern.includes('/preflight')) continue
       if (key.startsWith(pattern)) {
         return response as ReturnType<typeof jsonResponse>
       }
+    }
+
+    if (key.startsWith('GET /api/campaigns/') && key.includes('/preflight')) {
+      return jsonResponse({ total: 1, recipients: [] })
     }
 
     return jsonResponse({})
@@ -218,6 +225,43 @@ describe('MarketingView', () => {
     )
   })
 
+  it('checks the live audience before sending', async () => {
+    routeFetch({
+      ...defaultHandlers,
+      'GET /api/campaigns': jsonResponse({
+        campaigns: [
+          {
+            id: 'camp-1',
+            name: 'August offer',
+            status: 'approved',
+            segment_id: 'seg-1',
+            provider_automation_id: 'auto-1',
+            segment: { name: 'NSW leads' },
+          },
+        ],
+      }),
+      'GET /api/campaigns/camp-1/preflight': jsonResponse({ total: 7, ready: true }),
+      'POST /api/campaigns/camp-1/send': jsonResponse({ hasMore: false, sent: 7, failed: 0 }),
+    })
+
+    render(<MarketingView jobTypes={jobTypes} />)
+    fireEvent.click(await screen.findByTestId('send-camp-1'))
+
+    await waitFor(() => expect(screen.getByTestId('send-confirm-dialog')).toHaveTextContent('7'))
+    expect(mockFetch).not.toHaveBeenCalledWith(
+      '/api/campaigns/camp-1/send',
+      expect.objectContaining({ method: 'POST' })
+    )
+
+    fireEvent.click(screen.getByTestId('confirm-send'))
+    await waitFor(() =>
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/campaigns/camp-1/send',
+        expect.objectContaining({ method: 'POST' })
+      )
+    )
+  })
+
   it('surfaces a refused approval instead of failing silently', async () => {
     routeFetch({
       ...defaultHandlers,
@@ -243,6 +287,9 @@ describe('MarketingView', () => {
     mockFetch.mockImplementation(async (url: string, init?: { method?: string }) => {
       const key = `${init?.method ?? 'GET'} ${url}`
 
+      if (key.startsWith('GET /api/campaigns/camp-1/preflight')) {
+        return jsonResponse({ total: 1, recipients: [] })
+      }
       if (key === 'POST /api/campaigns/camp-1/send') {
         sendCalls += 1
         return jsonResponse({ hasMore: sendCalls < 3, pending: 3 - sendCalls })
@@ -267,6 +314,9 @@ describe('MarketingView', () => {
 
     render(<MarketingView jobTypes={jobTypes} />)
     fireEvent.click(await screen.findByTestId('send-camp-1'))
+    const confirmButton = await screen.findByTestId('confirm-send')
+    await waitFor(() => expect(confirmButton).not.toBeDisabled())
+    fireEvent.click(confirmButton)
 
     await waitFor(() => expect(sendCalls).toBe(3))
   })
@@ -444,6 +494,9 @@ describe('MarketingView', () => {
 
     render(<MarketingView jobTypes={jobTypes} />)
     fireEvent.click(await screen.findByTestId('send-camp-1'))
+    const confirmButton = await screen.findByTestId('confirm-send')
+    await waitFor(() => expect(confirmButton).not.toBeDisabled())
+    fireEvent.click(confirmButton)
 
     const banner = await screen.findByRole('alert')
     expect(banner).toHaveTextContent(/none of the 40 recipients were emailed/i)
@@ -478,6 +531,9 @@ describe('MarketingView', () => {
 
     render(<MarketingView jobTypes={jobTypes} />)
     fireEvent.click(await screen.findByTestId('send-camp-1'))
+    const confirmButton = await screen.findByTestId('confirm-send')
+    await waitFor(() => expect(confirmButton).not.toBeDisabled())
+    fireEvent.click(confirmButton)
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
       /sent to 12 of 15 recipients\. 3 failed/i
@@ -491,6 +547,9 @@ describe('MarketingView', () => {
     mockFetch.mockImplementation(async (url: string, init?: { method?: string }) => {
       const key = `${init?.method ?? 'GET'} ${url}`
 
+      if (key.startsWith('GET /api/campaigns/camp-1/preflight')) {
+        return jsonResponse({ total: 1, recipients: [] })
+      }
       if (key === 'POST /api/campaigns/camp-1/send') {
         sendCalls += 1
         return jsonResponse({
@@ -523,6 +582,9 @@ describe('MarketingView', () => {
 
     render(<MarketingView jobTypes={jobTypes} />)
     fireEvent.click(await screen.findByTestId('send-camp-1'))
+    const confirmButton = await screen.findByTestId('confirm-send')
+    await waitFor(() => expect(confirmButton).not.toBeDisabled())
+    fireEvent.click(confirmButton)
 
     const banner = await screen.findByRole('alert')
     expect(banner).toHaveTextContent(/Too many requests/)
@@ -589,6 +651,9 @@ describe('MarketingView', () => {
 
     render(<MarketingView jobTypes={jobTypes} />)
     fireEvent.click(await screen.findByTestId('send-camp-1'))
+    const confirmButton = await screen.findByTestId('confirm-send')
+    await waitFor(() => expect(confirmButton).not.toBeDisabled())
+    fireEvent.click(confirmButton)
 
     expect(await screen.findByText(/credentials are not configured/i)).toBeInTheDocument()
   })

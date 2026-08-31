@@ -164,6 +164,7 @@ describe('ContactDrawer', () => {
 
       await waitFor(() => expect(onSave).toHaveBeenCalled())
       expect(onClose).not.toHaveBeenCalled()
+      expect(await screen.findByRole('alert')).toHaveTextContent('network')
     })
   })
 

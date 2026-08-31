@@ -204,8 +204,8 @@ describe('Home Page & Excel Importer UI Integration Tests', () => {
     // Verify Mapping UI headers and auto-mapping selections with waitFor
     await waitFor(() => {
       expect(screen.getByText('File Uploaded: Leads.xlsx')).toBeInTheDocument();
-      expect(screen.getByText('Spreadsheet Column Header')).toBeInTheDocument();
-      expect(screen.getByText('Maps to CRM Field')).toBeInTheDocument();
+      expect(screen.getByText('CRM field')).toBeInTheDocument();
+      expect(screen.getByText('Spreadsheet column')).toBeInTheDocument();
       
       const emailSelect = screen.getByTestId('mapping-select-email') as HTMLSelectElement;
       expect(emailSelect.value).toBe('Excel Email Address');

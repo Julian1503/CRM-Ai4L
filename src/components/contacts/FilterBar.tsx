@@ -6,7 +6,7 @@ import { AU_STATES } from '@/lib/contacts/states'
 
 import styles from './FilterBar.module.css'
 
-export type StatusFilter = 'all' | 'customer' | 'prospect' | 'subscribed'
+export type StatusFilter = 'all' | 'lead' | 'prospect' | 'customer' | 'subscribed'
 
 export type JobTypeOption = { id: string; name: string }
 
@@ -28,6 +28,7 @@ interface FilterBarProps {
 
 const STATUS_TABS: { value: StatusFilter; label: string }[] = [
   { value: 'all', label: 'All List' },
+  { value: 'lead', label: 'Leads' },
   { value: 'customer', label: 'Customers' },
   { value: 'prospect', label: 'Prospects' },
   { value: 'subscribed', label: 'Subscribed' },

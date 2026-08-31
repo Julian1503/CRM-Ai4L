@@ -242,6 +242,7 @@ export default function App() {
   const [importFile, setImportFile] = useState<{ name: string; size: number } | null>(null);
   const [importProgress, setImportProgress] = useState(0);
   const [isImporting, setIsImporting] = useState(false);
+  const [isFileDragActive, setIsFileDragActive] = useState(false);
   const [isMapped, setIsMapped] = useState(false);
   const [rawHeaders, setRawHeaders] = useState<string[]>([]);
   const [rawRows, setRawRows] = useState<Record<string, string>[]>([]);
@@ -277,6 +278,7 @@ export default function App() {
     if (searchQuery.trim()) params.set('q', searchQuery.trim());
     if (jobTypeFilter) params.set('jobTypeId', jobTypeFilter);
     if (stateFilter) params.set('state', stateFilter);
+    if (statusFilter === 'lead') params.set('status', 'lead');
     if (statusFilter === 'customer') params.set('status', 'customer');
     if (statusFilter === 'prospect') params.set('status', 'prospect');
     if (statusFilter === 'subscribed') params.set('subscribed', 'true');
@@ -495,9 +497,7 @@ export default function App() {
     return log;
   }, [syncLogsPage]);
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const processImportFile = async (file: File) => {
 
     setImportFile({ name: file.name, size: file.size });
     setIsImporting(true);
@@ -535,6 +535,12 @@ export default function App() {
     } finally {
       setIsImporting(false);
     }
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) await processImportFile(file);
+    e.target.value = '';
   };
 
   const handleIngestContacts = async () => {
@@ -1145,7 +1151,39 @@ export default function App() {
                   <div 
                     className="outerShell"
                     onClick={() => fileInputRef.current?.click()}
-                    style={{ cursor: 'pointer' }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        fileInputRef.current?.click();
+                      }
+                    }}
+                    onDragEnter={(event) => {
+                      event.preventDefault();
+                      setIsFileDragActive(true);
+                    }}
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = 'copy';
+                      setIsFileDragActive(true);
+                    }}
+                    onDragLeave={(event) => {
+                      if (event.currentTarget === event.target) setIsFileDragActive(false);
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      setIsFileDragActive(false);
+                      const file = event.dataTransfer.files?.[0];
+                      if (file) void processImportFile(file);
+                    }}
+                    role="button"
+                    tabIndex={0}
+                    aria-label="Choose or drop a spreadsheet file"
+                    data-drag-active={isFileDragActive ? 'true' : 'false'}
+                    style={{
+                      cursor: 'pointer',
+                      outline: isFileDragActive ? '2px solid var(--primary)' : undefined,
+                      outlineOffset: isFileDragActive ? '4px' : undefined,
+                    }}
                   >
                     <input 
                       data-testid="excel-file-input"
@@ -1213,8 +1251,8 @@ export default function App() {
                       <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '20px' }}>
                         <thead>
                           <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                            <th style={{ textAlign: 'left', padding: '8px 12px', fontSize: '0.72rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Spreadsheet Column Header</th>
-                            <th style={{ textAlign: 'left', padding: '8px 12px', fontSize: '0.72rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Maps to CRM Field</th>
+                            <th style={{ textAlign: 'left', padding: '8px 12px', fontSize: '0.72rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>CRM field</th>
+                            <th style={{ textAlign: 'left', padding: '8px 12px', fontSize: '0.72rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Spreadsheet column</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1564,12 +1602,13 @@ export default function App() {
                     <div className={styles.sectionTitle} style={{ margin: 0, borderBottom: '1px dashed var(--border)', paddingBottom: '12px', marginBottom: '20px' }}>Database Config</div>
                     
                     <div className={styles.settingGroup}>
-                      <span className={styles.settingLabel}>Supabase Endpoint URL</span>
+                      <label className={styles.settingLabel} htmlFor="supabase-endpoint">Supabase Endpoint URL</label>
                       <input 
                         type="text" 
                         className={styles.searchInput} 
                         style={{ maxWidth: '100%', marginTop: '6px' }}
                         placeholder="https://your-project-id.supabase.co" 
+                        id="supabase-endpoint"
                         defaultValue={process.env.NEXT_PUBLIC_SUPABASE_URL || ''}
                         readOnly
                       />
@@ -1577,13 +1616,14 @@ export default function App() {
                     </div>
 
                     <div className={styles.settingGroup} style={{ marginBottom: 0 }}>
-                      <span className={styles.settingLabel}>Supabase Anon Key</span>
+                      <label className={styles.settingLabel} htmlFor="supabase-anon-key">Supabase Anon Key</label>
                       <input 
                         type="password" 
                         className={styles.searchInput} 
                         style={{ maxWidth: '100%', marginTop: '6px' }}
                         placeholder="your-supabase-anon-key" 
-                        defaultValue={process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''}
+                        id="supabase-anon-key"
+                        defaultValue={process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? 'Configured in environment' : 'Not configured'}
                         readOnly
                       />
                       <span className={styles.settingDescription}>Read from NEXT_PUBLIC_SUPABASE_ANON_KEY.</span>
@@ -1597,12 +1637,13 @@ export default function App() {
                     <div className={styles.sectionTitle} style={{ margin: 0, borderBottom: '1px dashed var(--border)', paddingBottom: '12px', marginBottom: '20px' }}>Email Marketing Keys</div>
 
                     <div className={styles.settingGroup}>
-                      <span className={styles.settingLabel}>EmailOctopus API Key</span>
+                      <label className={styles.settingLabel} htmlFor="emailoctopus-api-key">EmailOctopus API Key</label>
                       <input 
                         type="password" 
                         className={styles.searchInput} 
                         style={{ maxWidth: '100%', marginTop: '6px' }}
                         placeholder="your-emailoctopus-api-key"
+                        id="emailoctopus-api-key"
                         value={emailOctopusApiKey}
                         onChange={(e) => setEmailOctopusApiKey(e.target.value)}
                       />
@@ -1610,12 +1651,13 @@ export default function App() {
                     </div>
 
                     <div className={styles.settingGroup} style={{ marginBottom: 0 }}>
-                      <span className={styles.settingLabel}>EmailOctopus List ID</span>
+                      <label className={styles.settingLabel} htmlFor="emailoctopus-list-id">EmailOctopus List ID</label>
                       <input 
                         type="text" 
                         className={styles.searchInput} 
                         style={{ maxWidth: '100%', marginTop: '6px' }}
                         placeholder="your-emailoctopus-list-id"
+                        id="emailoctopus-list-id"
                         value={emailOctopusListId}
                         onChange={(e) => setEmailOctopusListId(e.target.value)}
                       />

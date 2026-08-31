@@ -126,6 +126,13 @@ export default async function ScheduledPage({
           </p>
         )}
 
+        {confirmed && (
+          <ol className={styles.stepper} aria-label="Booking steps">
+            <li className={styles.stepDone}><span>1</span> Free offer confirmed</li>
+            <li className={styles.stepActive}><span>2</span> Choose a time</li>
+          </ol>
+        )}
+
         <h1 className={styles.title}>
           {confirmed ? 'Choose a time that suits you' : 'We could not confirm your consultation'}
         </h1>

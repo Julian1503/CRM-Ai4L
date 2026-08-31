@@ -16,6 +16,7 @@ interface SidebarProps {
 
 export default function Sidebar({ currentView, onViewChange }: SidebarProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isMoreOpen, setIsMoreOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const logoSuffixRef = useRef<HTMLSpanElement>(null);
   const tlRef = useRef<gsap.core.Timeline | null>(null);
@@ -100,6 +101,9 @@ export default function Sidebar({ currentView, onViewChange }: SidebarProps) {
       ),
     },
   ];
+  const mobileSecondaryItems = navItems.filter((item) =>
+    ['archive', 'imports', 'integrations', 'settings'].includes(item.id)
+  );
 
   useGSAP(() => {
     if (!containerRef.current) return;
@@ -275,8 +279,11 @@ export default function Sidebar({ currentView, onViewChange }: SidebarProps) {
             <button
               key={item.id}
               data-testid={`nav-item-${item.id}`}
-              className={`${styles.navItem} ${currentView === item.id ? styles.activeItem : ''}`}
-              onClick={() => onViewChange(item.id)}
+              className={`${styles.navItem} ${mobileSecondaryItems.includes(item) ? styles.mobileSecondary : ''} ${currentView === item.id ? styles.activeItem : ''}`}
+              onClick={() => {
+                onViewChange(item.id)
+                setIsMoreOpen(false)
+              }}
               type="button"
             >
               <div className={styles.iconContainer}>
@@ -289,7 +296,49 @@ export default function Sidebar({ currentView, onViewChange }: SidebarProps) {
               {currentView === item.id && <span className={styles.activeDot} />}
             </button>
           ))}
+          <button
+            type="button"
+            className={`${styles.navItem} ${styles.moreButton} ${mobileSecondaryItems.some((item) => item.id === currentView) ? styles.activeItem : ''}`}
+            aria-expanded={isMoreOpen}
+            aria-controls="mobile-more-menu"
+            data-testid="nav-more"
+            onClick={() => setIsMoreOpen((open) => !open)}
+          >
+            <div className={styles.iconContainer}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="5" cy="12" r="1" />
+                <circle cx="12" cy="12" r="1" />
+                <circle cx="19" cy="12" r="1" />
+              </svg>
+            </div>
+            <span className={styles.desktopLabel}>More</span>
+            <span className={styles.mobileLabel}>More</span>
+          </button>
         </nav>
+        {isMoreOpen && (
+          <div id="mobile-more-menu" className={styles.mobileMoreMenu} role="menu">
+            {mobileSecondaryItems.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                role="menuitem"
+                data-testid={`mobile-more-${item.id}`}
+                className={currentView === item.id ? styles.moreMenuActive : ''}
+                onClick={() => {
+                  onViewChange(item.id)
+                  setIsMoreOpen(false)
+                }}
+              >
+                {item.label}
+              </button>
+            ))}
+            <form method="post" action="/auth/logout">
+              <button type="submit" role="menuitem" data-testid="mobile-sign-out">
+                Sign out
+              </button>
+            </form>
+          </div>
+        )}
       </div>
 
       <div className={styles.footer}>

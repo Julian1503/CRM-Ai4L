@@ -64,9 +64,14 @@ export default async function BookingPage({
               <span className={styles.priceNow}>$0</span>
             </div>
 
+            <ol className={styles.stepper} aria-label="Booking steps">
+              <li className={styles.stepActive}><span>1</span> Confirm free offer</li>
+              <li><span>2</span> Choose a time</li>
+            </ol>
+
             <p className={styles.lede}>
               A 30-minute one-to-one consultation, normally $500, is yours at no cost and
-              with no obligation. Confirm below to choose a time.
+              with no obligation. Confirm the $0 checkout below, then choose a time.
             </p>
 
             <BookingStarter token={token} />

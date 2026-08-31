@@ -413,3 +413,14 @@ fieldset.field > legend {
   line-height: 1.4;
   color: var(--text-muted);
 }
+
+.saveError {
+  margin-bottom: var(--space-md);
+  padding: 0.625rem 0.75rem;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: var(--radius-sm);
+  background: var(--danger-bg);
+  color: var(--danger);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}

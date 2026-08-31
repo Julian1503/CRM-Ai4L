@@ -45,7 +45,14 @@ export const SORT_COLUMNS: Record<ContactSortKey, string> = {
  * as typed, so a substring search over them matches on formatting as often as on the
  * number, and the client's data has none of them populated in any case.
  */
-const SEARCH_COLUMNS = ['first_name', 'last_name', 'email'] as const
+const SEARCH_COLUMNS = [
+  'first_name',
+  'last_name',
+  'email',
+  'mobile_number',
+  'work_phone',
+  'position',
+] as const
 
 export type ContactFilters = {
   q: string | null

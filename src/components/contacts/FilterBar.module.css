@@ -58,6 +58,8 @@
   display: flex;
   gap: 0.25rem;
   padding: 0.25rem;
+  max-width: 100%;
+  overflow-x: auto;
   background: var(--bg-surface);
   border-radius: var(--radius-sm);
 }
@@ -73,6 +75,7 @@
   border-radius: calc(var(--radius-sm) - 2px);
   cursor: pointer;
   white-space: nowrap;
+  flex: 0 0 auto;
   transition:
     color var(--duration-fast, 150ms) ease,
     background var(--duration-fast, 150ms) ease;

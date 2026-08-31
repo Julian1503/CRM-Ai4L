@@ -52,7 +52,7 @@ describe('FilterBar', () => {
   })
 
   describe('status tabs', () => {
-    it.each(['all', 'customer', 'prospect', 'subscribed'] as const)(
+    it.each(['all', 'lead', 'customer', 'prospect', 'subscribed'] as const)(
       'reports the "%s" tab',
       (status) => {
         const { onStatusChange } = renderBar()

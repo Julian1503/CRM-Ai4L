@@ -54,7 +54,10 @@ export default function ContactDrawer({
   const [formData, setFormData] = useState<ContactFormData>({});
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const scrollAreaRef = useRef<HTMLFormElement>(null);
+  const drawerRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   const [addressSuggestions, setAddressSuggestions] = useState<AddressSuggestion[]>([]);
   const [isSearchingAddress, setIsSearchingAddress] = useState(false);
@@ -203,8 +206,45 @@ export default function ContactDrawer({
         subscribedToNewsletter: contact.subscribedToNewsletter ?? false,
       });
       setValidationErrors({});
+      setSaveError(null);
     }
   }, [contact]);
+
+  useEffect(() => {
+    if (!contact) return;
+
+    const previousFocus = document.activeElement as HTMLElement | null;
+    closeButtonRef.current?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        if (!isSubmitting) onClose();
+        return;
+      }
+
+      if (event.key !== 'Tab') return;
+      const focusable = drawerRef.current?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href]'
+      );
+      if (!focusable || focusable.length === 0) return;
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      previousFocus?.focus?.();
+    };
+  }, [contact, isSubmitting, onClose]);
 
   if (!contact) return <div className={styles.overlay} />;
 
@@ -256,10 +296,12 @@ export default function ContactDrawer({
 
     try {
       setIsSubmitting(true);
+      setSaveError(null);
       await onSave(formData);
       onClose();
     } catch (err) {
       console.error('Failed to save contact:', err);
+      setSaveError(err instanceof Error ? err.message : 'Could not save this contact. Try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -269,14 +311,22 @@ export default function ContactDrawer({
     <>
       <div 
         className={`${styles.overlay} ${contact ? styles.overlayActive : ''}`} 
-        onClick={onClose}
+        onClick={() => {
+          if (!isSubmitting) onClose();
+        }}
       />
-      <div className={`${styles.drawer} ${contact ? styles.drawerActive : ''}`}>
+      <div
+        ref={drawerRef}
+        className={`${styles.drawer} ${contact ? styles.drawerActive : ''}`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="contact-drawer-title"
+      >
         <div className={styles.header}>
-          <h2 className={styles.title}>
+          <h2 id="contact-drawer-title" className={styles.title}>
             {formData.id ? 'Edit Contact' : 'New Contact'}
           </h2>
-          <button className={styles.closeButton} onClick={onClose}>
+          <button ref={closeButtonRef} type="button" className={styles.closeButton} onClick={onClose} disabled={isSubmitting} aria-label="Close contact editor">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="18" y1="6" x2="6" y2="18" />
               <line x1="6" y1="6" x2="18" y2="18" />
@@ -285,6 +335,11 @@ export default function ContactDrawer({
         </div>
 
         <form ref={scrollAreaRef} onSubmit={handleSubmit} className={styles.scrollArea}>
+          {saveError && (
+            <div className={styles.saveError} role="alert">
+              {saveError}
+            </div>
+          )}
           {/* Section 1: Basic Information */}
           <div className={styles.section}>
             <h3 className={styles.sectionTitle}>Basic Info</h3>
@@ -601,6 +656,7 @@ export default function ContactDrawer({
             type="button" 
             className={`${styles.button} ${styles.cancelBtn}`} 
             onClick={onClose}
+            disabled={isSubmitting}
           >
             Cancel
           </button>

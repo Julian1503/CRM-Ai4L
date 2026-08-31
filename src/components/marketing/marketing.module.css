@@ -65,6 +65,69 @@
   gap: 0.3125rem;
 }
 
+.automationField {
+  display: flex;
+  flex: 1 1 18rem;
+  flex-direction: column;
+  gap: 0.375rem;
+  min-width: 16rem;
+}
+
+.automationHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.connectionReady,
+.connectionMissing {
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.connectionReady { color: var(--success); }
+.connectionMissing { color: var(--warning); }
+
+.fieldHint {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.automationDetails {
+  display: grid;
+  gap: var(--space-sm);
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+}
+
+.automationDetails summary {
+  cursor: pointer;
+  color: var(--text-primary);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.automationSteps {
+  margin: 0;
+  padding-left: 1.25rem;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.helpLink {
+  color: var(--primary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .label {
   font-size: 0.75rem;
   font-weight: 600;
@@ -353,6 +416,52 @@
   overflow: auto;
   flex: 1;
   min-height: 0;
+}
+
+.confirmBody {
+  display: grid;
+  gap: var(--space-md);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.confirmBody p {
+  margin: 0;
+}
+
+.confirmSummary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-sm);
+  margin: 0;
+}
+
+.confirmSummary div {
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+}
+
+.confirmSummary dt {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.confirmSummary dd {
+  margin: 0.25rem 0 0;
+  color: var(--text-primary);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.confirmActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-sm);
 }
 
 .audienceTable {

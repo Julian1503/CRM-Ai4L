@@ -8,7 +8,9 @@ import type { FacetCounts, SegmentFacets } from '@/lib/marketing/facets'
 import Pagination from '@/components/ui/Pagination'
 
 import AudienceModal, { type Audience } from './AudienceModal'
+import AutomationConnectionField from './AutomationConnectionField'
 import CampaignCopyEditor from './CampaignCopyEditor'
+import SendConfirmDialog from './SendConfirmDialog'
 import styles from './marketing.module.css'
 
 type Segment = {
@@ -228,6 +230,12 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
   const [audienceError, setAudienceError] = useState<string | null>(null)
   const [audiencePage, setAudiencePage] = useState(1)
   const [audiencePageSize, setAudiencePageSize] = useState(25)
+
+  // Sending is irreversible. Verify the live audience before allowing the final click.
+  const [sendConfirmation, setSendConfirmation] = useState<Campaign | null>(null)
+  const [sendAudienceSize, setSendAudienceSize] = useState<number | null>(null)
+  const [sendAudienceLoading, setSendAudienceLoading] = useState(false)
+  const [sendAudienceError, setSendAudienceError] = useState<string | null>(null)
 
   // Segment draft
   const [segmentName, setSegmentName] = useState('')
@@ -539,6 +547,29 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
     }
   }
 
+  const requestSendConfirmation = async (campaign: Campaign) => {
+    setSendConfirmation(campaign)
+    setSendAudienceSize(null)
+    setSendAudienceError(null)
+    setSendAudienceLoading(true)
+
+    try {
+      const response = await fetch(`/api/campaigns/${campaign.id}/preflight`)
+      if (!response.ok) throw new Error(await readError(response))
+
+      const body = await response.json()
+      if (typeof body?.total !== 'number') throw new Error('Could not verify campaign audience.')
+
+      setSendAudienceSize(body.total)
+    } catch (requestError) {
+      setSendAudienceError(
+        requestError instanceof Error ? requestError.message : 'Could not verify campaign audience.'
+      )
+    } finally {
+      setSendAudienceLoading(false)
+    }
+  }
+
   const act = async (
     campaign: Campaign,
     action: 'draft' | 'review' | 'approve' | 'send' | 'reopen'
@@ -634,6 +665,14 @@ You will approve it again before anything leaves, and EmailOctopus only delivers
     } finally {
       setBusy(null)
     }
+  }
+
+  const confirmSend = () => {
+    const campaign = sendConfirmation
+    if (!campaign) return
+
+    setSendConfirmation(null)
+    void act(campaign, 'send')
   }
 
   return (
@@ -846,16 +885,7 @@ You will approve it again before anything leaves, and EmailOctopus only delivers
             )}
           </label>
 
-          <label className={styles.field}>
-            <span className={styles.label}>EmailOctopus automation ID</span>
-            <input
-              className={styles.input}
-              value={automationId}
-              onChange={(event) => setAutomationId(event.target.value)}
-              placeholder="Required before approval"
-              data-testid="campaign-automation"
-            />
-          </label>
+          <AutomationConnectionField value={automationId} onChange={setAutomationId} testId="campaign-automation" />
         </div>
 
         <button
@@ -882,7 +912,7 @@ You will approve it again before anything leaves, and EmailOctopus only delivers
                 <span className={styles.itemName}>{campaign.name}</span>
                 <span className={styles.itemMeta}>
                   {campaign.segment?.name ?? 'No segment'}
-                  {!campaign.provider_automation_id && ' · no automation ID'}
+                  {!campaign.provider_automation_id && ' · template not connected'}
                 </span>
               </div>
 
@@ -969,7 +999,7 @@ You will approve it again before anything leaves, and EmailOctopus only delivers
                   <button
                     type="button"
                     className={styles.dangerBtn}
-                    onClick={() => act(campaign, 'send')}
+                    onClick={() => void requestSendConfirmation(campaign)}
                     disabled={busy !== null}
                     data-testid={`send-${campaign.id}`}
                   >
@@ -1001,7 +1031,7 @@ You will approve it again before anything leaves, and EmailOctopus only delivers
                     <button
                       type="button"
                       className={styles.dangerBtn}
-                      onClick={() => act(campaign, 'send')}
+                      onClick={() => void requestSendConfirmation(campaign)}
                       disabled={busy !== null}
                       data-testid={`retry-${campaign.id}`}
                     >
@@ -1034,21 +1064,16 @@ You will approve it again before anything leaves, and EmailOctopus only delivers
                       ))}
                     </select>
                   </label>
-                  <label className={styles.field}>
-                    <span className={styles.label}>EmailOctopus automation ID</span>
-                    <input
-                      className={styles.input}
-                      value={edit.automationId}
-                      onChange={(event) =>
-                        setCampaignEdits((current) => ({
-                          ...current,
-                          [campaign.id]: { ...edit, automationId: event.target.value },
-                        }))
-                      }
-                      placeholder="Required before approval"
-                      data-testid={`edit-automation-${campaign.id}`}
-                    />
-                  </label>
+                  <AutomationConnectionField
+                    value={edit.automationId}
+                    onChange={(value) =>
+                      setCampaignEdits((current) => ({
+                        ...current,
+                        [campaign.id]: { ...edit, automationId: value },
+                      }))
+                    }
+                    testId={`edit-automation-${campaign.id}`}
+                  />
                   <button
                     type="button"
                     className={styles.secondaryBtn}
@@ -1122,6 +1147,20 @@ You will approve it again before anything leaves, and EmailOctopus only delivers
             setAudiencePage(1)
           }}
           onClose={() => setAudienceFor(null)}
+        />
+      )}
+
+      {sendConfirmation && (
+        <SendConfirmDialog
+          campaignName={sendConfirmation.name}
+          audienceLabel={sendConfirmation.segment?.name ?? 'Selected segment'}
+          audienceSize={sendAudienceSize}
+          loading={sendAudienceLoading}
+          error={sendAudienceError}
+          onConfirm={confirmSend}
+          onClose={() => {
+            if (!sendAudienceLoading) setSendConfirmation(null)
+          }}
         />
       )}
     </div>

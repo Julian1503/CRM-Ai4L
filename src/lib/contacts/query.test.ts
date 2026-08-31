@@ -189,9 +189,9 @@ describe('buildSearchOrExpression', () => {
   ])('neutralises a %s in the search term', (_label, term) => {
     const expression = buildSearchOrExpression(term)
 
-    // Whatever the payload, exactly three ilike conditions must be produced.
+    // Whatever the payload, each searchable contact field gets one ilike condition.
     expect(expression).not.toBeNull()
-    expect(expression!.match(/ilike\./g)).toHaveLength(3)
+    expect(expression!.match(/ilike\./g)).toHaveLength(6)
   })
 
   it('returns null for an empty term', () => {

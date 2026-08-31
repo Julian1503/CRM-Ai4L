@@ -186,6 +186,15 @@
   display: none;
 }
 
+.mobileSecondary {
+  display: flex;
+}
+
+.moreButton,
+.mobileMoreMenu {
+  display: none;
+}
+
 .desktopLabel {
   display: inline-block;
   vertical-align: middle;
@@ -263,6 +272,53 @@
     text-align: center;
     flex: 1;
     border: 1px solid transparent;
+  }
+
+  .mobileSecondary {
+    display: none;
+  }
+
+  .moreButton {
+    display: flex;
+  }
+
+  .mobileMoreMenu {
+    position: fixed;
+    right: 16px;
+    bottom: 82px;
+    left: 16px;
+    z-index: 110;
+    display: grid;
+    gap: 4px;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-card);
+    box-shadow: var(--shadow-lg);
+  }
+
+  .mobileMoreMenu button {
+    width: 100%;
+    min-height: 42px;
+    padding: 8px 12px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-primary);
+    font: inherit;
+    text-align: left;
+  }
+
+  .mobileMoreMenu button:hover,
+  .mobileMoreMenu button:focus-visible,
+  .mobileMoreMenu .moreMenuActive {
+    background: var(--info-bg);
+    outline: none;
+  }
+
+  .mobileMoreMenu form {
+    border-top: 1px solid var(--border);
+    padding-top: 4px;
   }
 
   .activeItem {
