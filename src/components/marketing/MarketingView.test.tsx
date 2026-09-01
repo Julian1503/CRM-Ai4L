@@ -1011,4 +1011,84 @@ describe('MarketingView', () => {
       expect(screen.getByTestId('generate-copy')).toBeEnabled()
     })
   })
+  describe('email templates', () => {
+    const templates = [
+      {
+        id: 't1',
+        name: 'August free courses',
+        description: null,
+        provider_automation_id: 'auto-1',
+      },
+    ]
+
+    it('offers registered templates by name when creating a campaign', async () => {
+      // EmailOctopus cannot list its automations, so the picker can only be filled
+      // from the registry.
+      routeFetch({ ...defaultHandlers, 'GET /api/templates': jsonResponse({ templates }) })
+
+      render(<MarketingView jobTypes={jobTypes} />)
+
+      expect(
+        await screen.findByRole('option', { name: 'August free courses' })
+      ).toBeInTheDocument()
+    })
+
+    it('names the automation on a campaign row instead of showing a bare id', async () => {
+      routeFetch({ ...defaultHandlers, 'GET /api/templates': jsonResponse({ templates }) })
+
+      render(<MarketingView jobTypes={jobTypes} />)
+
+      // Once on the campaign's meta line, and once as an option in each picker — the
+      // meta line is the one that replaces a bare UUID with something readable.
+      await waitFor(() =>
+        expect(
+          screen.getByText(/NSW leads · August free courses/)
+        ).toBeInTheDocument()
+      )
+    })
+
+    it('checks the automation ids of the whole page at once', async () => {
+      render(<MarketingView jobTypes={jobTypes} />)
+
+      await waitFor(() => {
+        const call = mockFetch.mock.calls.find(
+          (entry) => entry[0] === '/api/integrations/emailoctopus/automations'
+        )
+        expect(JSON.parse(call![1].body)).toEqual({ automationIds: ['auto-1'] })
+      })
+    })
+
+    it('warns on a campaign whose automation EmailOctopus does not have', async () => {
+      // The failure this catches: without it, the campaign looks fine until its send
+      // fails for every recipient with the reason buried in the ledger.
+      routeFetch({
+        ...defaultHandlers,
+        'POST /api/integrations/emailoctopus/automations': jsonResponse({
+          results: { 'auto-1': { status: 'invalid', error: 'Journey not found.' } },
+        }),
+      })
+
+      render(<MarketingView jobTypes={jobTypes} />)
+
+      expect(await screen.findByTestId('automation-warning-camp-1')).toHaveTextContent(
+        /Every recipient would fail/i
+      )
+    })
+
+    it('does not warn when the check could not be completed', async () => {
+      // A rate-limited or credential-less check says nothing about the id, and a row
+      // that cried wolf would train an operator to ignore it.
+      routeFetch({
+        ...defaultHandlers,
+        'POST /api/integrations/emailoctopus/automations': jsonResponse({
+          results: { 'auto-1': { status: 'unknown', error: 'Slow down.' } },
+        }),
+      })
+
+      render(<MarketingView jobTypes={jobTypes} />)
+
+      await screen.findByText('August offer')
+      expect(screen.queryByTestId('automation-warning-camp-1')).toBeNull()
+    })
+  })
 })

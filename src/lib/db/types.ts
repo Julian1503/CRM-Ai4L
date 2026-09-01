@@ -1,6 +1,6 @@
 // Database types for the CRM schema.
 //
-// Hand-written to match supabase/migrations as of 20260825030000. Regenerate from the
+// Hand-written to match supabase/migrations as of 20260827000000. Regenerate from the
 // live schema once the migration is applied:
 //
 //   npm run db:types
@@ -8,6 +8,8 @@
 // which runs: supabase gen types typescript --project-id <ref> --schema public
 //
 // Excluded from coverage (see jest.config.ts) — types only, no runtime behaviour.
+
+import type { TemplateSlot } from '@/lib/marketing/templates'
 
 export type ContactStatus = 'lead' | 'prospect' | 'customer' | 'archived'
 
@@ -86,6 +88,8 @@ export type CampaignRow = {
   /** EmailOctopus automation with the "Started via API" trigger. */
   provider_automation_id: string | null
   merge_fields: Record<string, string>
+  /** The named template this campaign's copy was written for; null means the built-in one. */
+  template_id: string | null
   subject: string | null
   notes: string | null
   approved_at: string | null
@@ -97,6 +101,27 @@ export type CampaignRow = {
    * so a second send builds its own ledger instead of overwriting the first one's.
    */
   send_run: number
+  created_at: string
+  updated_at: string
+}
+
+/**
+ * A named provider template — the registry that gives an EmailOctopus automation id a
+ * name an operator can recognise. See `src/lib/marketing/templates.ts` for why the
+ * names cannot come from EmailOctopus itself.
+ */
+export type CampaignTemplateRow = {
+  id: string
+  name: string
+  description: string | null
+  provider: string
+  /** EmailOctopus automation with the "Started via API" trigger. */
+  provider_automation_id: string | null
+  /** The merge-field contract the automation's template references. */
+  slots: TemplateSlot[]
+  brief: string | null
+  /** Retired from the pickers, but kept: sent campaigns still reference it. */
+  archived_at: string | null
   created_at: string
   updated_at: string
 }
@@ -272,6 +297,7 @@ export interface Database {
       segments: TableDef<SegmentRow>
       campaigns: TableDef<CampaignRow>
       campaign_sends: TableDef<CampaignSendRow>
+      campaign_templates: TableDef<CampaignTemplateRow>
       bookings: TableDef<BookingRow>
     }
     Views: {

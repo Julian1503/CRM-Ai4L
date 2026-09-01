@@ -45,6 +45,7 @@ import {
 import { importContacts } from '@/lib/contacts/import';
 import FilterBar, { type StatusFilter } from '@/components/contacts/FilterBar';
 import MarketingView from '@/components/marketing/MarketingView';
+import EmailTemplateRegistry from '@/components/marketing/EmailTemplateRegistry';
 import ArchiveView from '@/components/contacts/ArchiveView';
 import BookingsView from '@/components/bookings/BookingsView';
 import OperationsPanel from '@/components/operations/OperationsPanel';
@@ -1565,6 +1566,12 @@ export default function App() {
                   />
                 </div>
               </div>
+            </div>
+
+            {/* Named automations. EmailOctopus publishes no endpoint that lists them,
+                so this registry is the only place a name can come from. */}
+            <div style={{ marginTop: '32px' }}>
+              <EmailTemplateRegistry />
             </div>
           </>
         )}

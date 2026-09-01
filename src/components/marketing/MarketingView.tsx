@@ -8,7 +8,10 @@ import type { FacetCounts, SegmentFacets } from '@/lib/marketing/facets'
 import Pagination from '@/components/ui/Pagination'
 
 import AudienceModal, { type Audience } from './AudienceModal'
-import AutomationConnectionField from './AutomationConnectionField'
+import AutomationConnectionField, {
+  type AutomationStatus,
+  type TemplateOption,
+} from './AutomationConnectionField'
 import CampaignCopyEditor from './CampaignCopyEditor'
 import SendConfirmDialog from './SendConfirmDialog'
 import styles from './marketing.module.css'
@@ -195,6 +198,28 @@ function formatDuration(ms: number): string {
  */
 const SEGMENT_PICKER_LIMIT = 200
 
+/**
+ * How many automation ids one health check may ask about.
+ *
+ * Matches the API route's own cap. Each id costs a provider round trip, and campaigns
+ * commonly share an automation, so a page of rows is far fewer than 25 in practice.
+ */
+const AUTOMATION_CHECK_LIMIT = 25
+
+/**
+ * The registered name for an automation id, or a shortened id when there is none.
+ *
+ * A bare `b690d44a-a0dd-11f1-9fa9-7381a1ee33bd` on a campaign row tells an operator
+ * nothing about which email it sends, which is the whole reason the registry exists.
+ */
+function templateName(templates: TemplateOption[], automationId: string): string {
+  const match = templates.find(
+    (template) => template.provider_automation_id === automationId
+  )
+
+  return match ? match.name : `Unnamed automation ${automationId.slice(0, 8)}`
+}
+
 async function readError(response: Response): Promise<string> {
   const body = await response.json().catch(() => ({}))
   return body.error || `Request failed (HTTP ${response.status})`
@@ -258,9 +283,81 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
   const [campaignName, setCampaignName] = useState('')
   const [campaignSegment, setCampaignSegment] = useState('')
   const [automationId, setAutomationId] = useState('')
+
+  // The named registry over automation ids, and what EmailOctopus says about each one.
+  // Both exist because the provider has no endpoint that lists automations: a name can
+  // only come from `campaign_templates`, and an id can only be checked by probing.
+  const [templates, setTemplates] = useState<TemplateOption[]>([])
+  const [automationChecks, setAutomationChecks] = useState<Record<string, AutomationStatus>>({})
   const [campaignEdits, setCampaignEdits] = useState<
     Record<string, { segmentId: string; automationId: string }>
   >({})
+
+  /**
+   * Asks EmailOctopus whether each automation id still exists.
+   *
+   * Without this a wrong id is invisible until the send: every recipient fails, one
+   * request at a time, and the reason lands in the ledger rather than on screen. The
+   * check is safe to run on a whole page of campaigns — it queues a contact that cannot
+   * exist, so it identifies the automation without sending anything.
+   */
+  const checkAutomations = useCallback(async (ids: string[]) => {
+    const wanted = [...new Set(ids.map((id) => id.trim()).filter((id) => id !== ''))]
+
+    if (wanted.length === 0) return
+
+    setAutomationChecks((current) => ({
+      ...current,
+      ...Object.fromEntries(wanted.map((id) => [id, { status: 'checking' } as AutomationStatus])),
+    }))
+
+    try {
+      const response = await fetch('/api/integrations/emailoctopus/automations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ automationIds: wanted.slice(0, AUTOMATION_CHECK_LIMIT) }),
+      })
+
+      const body = await response.json().catch(() => ({}))
+
+      if (!response.ok) {
+        // Credentials missing, or the endpoint itself failed. Reported against each id
+        // as `unknown`, never as `invalid` — an operator must not be sent to fix an id
+        // that was correct.
+        const error = typeof body?.error === 'string' ? body.error : 'The check failed.'
+
+        setAutomationChecks((current) => ({
+          ...current,
+          ...Object.fromEntries(wanted.map((id) => [id, { status: 'unknown', error }])),
+        }))
+        return
+      }
+
+      const results = (body?.results ?? {}) as Record<string, AutomationStatus>
+
+      setAutomationChecks((current) => ({
+        ...current,
+        // Anything the server did not answer for stays as it was rather than becoming
+        // a stuck 'checking'.
+        ...Object.fromEntries(
+          wanted.map((id) => [
+            id,
+            results[id] ?? { status: 'unknown', error: 'No answer for this ID.' },
+          ])
+        ),
+      }))
+    } catch {
+      setAutomationChecks((current) => ({
+        ...current,
+        ...Object.fromEntries(
+          wanted.map((id) => [
+            id,
+            { status: 'unknown', error: 'EmailOctopus could not be reached.' } as AutomationStatus,
+          ])
+        ),
+      }))
+    }
+  }, [])
 
   /**
    * Reads the ledger for campaigns that are sending or have failed.
@@ -300,11 +397,13 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
 
   const load = useCallback(async () => {
     try {
-      const [segmentsResponse, campaignsResponse, pickerResponse] = await Promise.all([
-        fetch(`/api/segments?page=${segmentsPage}&pageSize=${segmentsPageSize}`),
-        fetch(`/api/campaigns?page=${campaignsPage}&pageSize=${campaignsPageSize}`),
-        fetch(`/api/segments?pageSize=${SEGMENT_PICKER_LIMIT}`),
-      ])
+      const [segmentsResponse, campaignsResponse, pickerResponse, templatesResponse] =
+        await Promise.all([
+          fetch(`/api/segments?page=${segmentsPage}&pageSize=${segmentsPageSize}`),
+          fetch(`/api/campaigns?page=${campaignsPage}&pageSize=${campaignsPageSize}`),
+          fetch(`/api/segments?pageSize=${SEGMENT_PICKER_LIMIT}`),
+          fetch('/api/templates'),
+        ])
 
       if (segmentsResponse.ok) {
         const body = await segmentsResponse.json()
@@ -317,6 +416,11 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
 
         setCampaigns(loaded)
         setCampaignsTotal(body.total ?? 0)
+        // Health check for the whole page at once, so a dead automation shows up
+        // before someone approves the campaign rather than during its send.
+        void checkAutomations(
+          loaded.map((item) => item.provider_automation_id ?? '')
+        )
         // Only for the campaigns that have something to report — a draft has no ledger,
         // and a request per row would be a page of requests for nothing.
         void loadSendReports(loaded.filter((item) => REPORTED_STATUSES.has(item.status)))
@@ -326,10 +430,21 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
         setPickableSegments(body.segments ?? [])
         setPickableTruncated((body.total ?? 0) > SEGMENT_PICKER_LIMIT)
       }
+      if (templatesResponse.ok) {
+        const body = await templatesResponse.json()
+        setTemplates(body.templates ?? [])
+      }
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Could not load marketing data.')
     }
-  }, [segmentsPage, segmentsPageSize, campaignsPage, campaignsPageSize, loadSendReports])
+  }, [
+    segmentsPage,
+    segmentsPageSize,
+    campaignsPage,
+    campaignsPageSize,
+    loadSendReports,
+    checkAutomations,
+  ])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -416,6 +531,19 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
 
     return () => clearTimeout(timer)
   }, [definition])
+
+  // Checks the automation id on the draft campaign as it is chosen or typed. Debounced
+  // for the same reason as the preview above: the manual field is a text box, and a
+  // provider round trip per keystroke would be both slow and rate-limited.
+  useEffect(() => {
+    const id = automationId.trim()
+
+    if (id === '') return
+
+    const timer = setTimeout(() => void checkAutomations([id]), 500)
+
+    return () => clearTimeout(timer)
+  }, [automationId, checkAutomations])
 
   const reviewingCampaign = campaigns.find((item) => item.id === reviewingId)
   const reviewingSegment = pickableSegments.find(
@@ -885,7 +1013,13 @@ You will approve it again before anything leaves, and EmailOctopus only delivers
             )}
           </label>
 
-          <AutomationConnectionField value={automationId} onChange={setAutomationId} testId="campaign-automation" />
+          <AutomationConnectionField
+            value={automationId}
+            onChange={setAutomationId}
+            templates={templates}
+            check={automationChecks[automationId.trim()]}
+            testId="campaign-automation"
+          />
         </div>
 
         <button
@@ -912,8 +1046,23 @@ You will approve it again before anything leaves, and EmailOctopus only delivers
                 <span className={styles.itemName}>{campaign.name}</span>
                 <span className={styles.itemMeta}>
                   {campaign.segment?.name ?? 'No segment'}
-                  {!campaign.provider_automation_id && ' · template not connected'}
+                  {campaign.provider_automation_id
+                    ? ` · ${templateName(templates, campaign.provider_automation_id)}`
+                    : ' · template not connected'}
                 </span>
+                {/* Only a definite "EmailOctopus does not have this" is worth a
+                    warning. A check that could not complete says nothing useful, and
+                    a row that cried wolf would train an operator to ignore it. */}
+                {automationChecks[campaign.provider_automation_id ?? '']?.status ===
+                  'invalid' && (
+                  <span
+                    className={styles.checkFailed}
+                    data-testid={`automation-warning-${campaign.id}`}
+                  >
+                    EmailOctopus does not have this automation. Every recipient would
+                    fail — reconnect the template before sending.
+                  </span>
+                )}
               </div>
 
               <span className={`${styles.status} ${styles[`status_${campaign.status}`]}`}>
@@ -1072,6 +1221,8 @@ You will approve it again before anything leaves, and EmailOctopus only delivers
                         [campaign.id]: { ...edit, automationId: value },
                       }))
                     }
+                    templates={templates}
+                    check={automationChecks[edit.automationId.trim()]}
                     testId={`edit-automation-${campaign.id}`}
                   />
                   <button

@@ -10,6 +10,7 @@ import {
   serverError,
 } from '@/lib/api/responses'
 import { isSendable } from '@/lib/marketing/campaignStatus'
+import { loadEmailOctopusCredentials } from '@/lib/marketing/providers/credentials'
 import { createEmailOctopusProvider } from '@/lib/marketing/providers/emailOctopus'
 import { executeCampaignSends, prepareCampaignSends } from '@/lib/marketing/send'
 import { resolveSegmentMembers } from '@/lib/marketing/segments'
@@ -78,22 +79,13 @@ export async function POST(
     }
 
     // Provider credentials live server-side; they are never accepted from the client.
-    const { data: credentials, error: credentialsError } = await db
-      .from('credentials')
-      .select('key, value')
+    const credentials = await loadEmailOctopusCredentials(db)
 
-    if (credentialsError) throw new Error(credentialsError.message)
-
-    const byKey = Object.fromEntries(
-      (credentials ?? []).map((row) => [row.key, row.value])
-    ) as Record<string, string>
-
-    const apiKey = byKey.emailoctopus_api_key?.trim()
-    const listId = byKey.emailoctopus_list_id?.trim()
-
-    if (!apiKey || !listId) {
+    if (!credentials) {
       return conflict('EmailOctopus credentials are not configured in Settings.')
     }
+
+    const { apiKey, listId } = credentials
 
     // A retry only requeues ledger rows that definitively failed. Sent rows remain
     // immutable, so an operator can recover without emailing successful recipients

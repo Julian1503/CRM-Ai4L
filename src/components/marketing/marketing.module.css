@@ -922,3 +922,28 @@
     transition: none;
   }
 }
+
+/* A failed automation check is not a hint — it is the difference between a campaign
+   that sends and one that fails for every recipient. Given the weight of an error. */
+.checkFailed {
+  margin: 0;
+  color: var(--danger, var(--warning));
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.checkOk {
+  margin: 0;
+  color: var(--success);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.templateActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+}

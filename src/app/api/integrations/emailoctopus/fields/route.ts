@@ -7,6 +7,7 @@ import {
   RESERVED_MERGE_FIELDS,
   findMissingMergeFields,
 } from '@/lib/marketing/mergeFields'
+import { loadEmailOctopusCredentials } from '@/lib/marketing/providers/credentials'
 import { createMergeField, listMergeTags } from '@/lib/marketing/providers/emailOctopus'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 
@@ -31,22 +32,8 @@ const LABELS: Record<string, string> = {
   [BOOKING_URL_MERGE_FIELD]: 'Booking link',
 }
 
-type Credentials = { apiKey: string; listId: string }
-
-async function loadCredentials(): Promise<Credentials | null> {
-  const db = await createSupabaseServerClient()
-  const { data, error } = await db.from('credentials').select('key, value')
-
-  if (error) throw new Error(error.message)
-
-  const byKey = Object.fromEntries(
-    (data ?? []).map((row) => [row.key, row.value])
-  ) as Record<string, string>
-
-  const apiKey = byKey.emailoctopus_api_key?.trim()
-  const listId = byKey.emailoctopus_list_id?.trim()
-
-  return apiKey && listId ? { apiKey, listId } : null
+async function loadCredentials() {
+  return loadEmailOctopusCredentials(await createSupabaseServerClient())
 }
 
 export async function GET(): Promise<NextResponse> {

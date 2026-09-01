@@ -10,6 +10,42 @@
   color: var(--text-secondary);
 }
 
+.toolbar {
+  display: flex;
+  align-items: end;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.searchLabel {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.searchInput {
+  width: min(24rem, 100%);
+  padding: 0.5rem 0.6875rem;
+  color: var(--text-primary);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.restoreSelectedBtn {
+  padding: 0.5rem 0.75rem;
+  color: var(--text-primary);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.restoreSelectedBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+
 .empty {
   margin: 0;
   padding: var(--space-xl);

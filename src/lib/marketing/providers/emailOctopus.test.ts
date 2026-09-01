@@ -7,8 +7,10 @@
  */
 import {
   EMAILOCTOPUS_CAPABILITIES,
+  automationProbeEmail,
   createEmailOctopusProvider,
   emailOctopusContactId,
+  verifyAutomation,
 } from './emailOctopus'
 
 function response(
@@ -212,5 +214,117 @@ describe('emailOctopusContactId', () => {
       emailOctopusContactId('otto@example.com')
     )
     expect(emailOctopusContactId('otto@example.com')).toMatch(/^[0-9a-f]{32}$/)
+  })
+})
+
+describe('verifyAutomation', () => {
+  // The two 404 bodies below are verbatim from the live API on 2026-08-31, probed with
+  // a real automation id and a made-up one. The whole check rests on them differing.
+  const JOURNEY_404 = {
+    title: 'An error occurred.',
+    detail: 'Journey not found.',
+    status: 404,
+  }
+  const CONTACT_404 = {
+    title: 'An error occurred.',
+    detail: 'Contact not found.',
+    status: 404,
+  }
+
+  function check(fetchImpl: jest.Mock, automationId = 'auto-1') {
+    return verifyAutomation({
+      apiKey: 'eo-key',
+      automationId,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      probeEmail: 'probe@invalid.invalid',
+    })
+  }
+
+  it('reads "Contact not found" as proof the automation exists', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue(response(404, CONTACT_404))
+
+    expect(await check(fetchImpl)).toEqual({ status: 'valid' })
+  })
+
+  it('reads "Journey not found" as an automation id EmailOctopus does not have', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue(response(404, JOURNEY_404))
+
+    expect(await check(fetchImpl)).toEqual({
+      status: 'invalid',
+      error: 'Journey not found.',
+    })
+  })
+
+  it('probes with a contact that cannot exist, so checking never sends an email', async () => {
+    // The load-bearing safety property: this is a real `queue` request, and a probe
+    // address that resolved to a contact on the list would start the automation for
+    // them. Verifying an id must never be a send.
+    const fetchImpl = jest.fn().mockResolvedValue(response(404, CONTACT_404))
+
+    await check(fetchImpl)
+
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('https://api.emailoctopus.com/automations/auto-1/queue')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body)).toEqual({
+      contact_id: emailOctopusContactId('probe@invalid.invalid'),
+    })
+  })
+
+  it('generates a reserved-domain probe address when none is supplied', async () => {
+    // `.invalid` is reserved by RFC 2606 and can never be a deliverable subscriber.
+    const first = automationProbeEmail()
+
+    expect(first).toMatch(/@invalid\.invalid$/)
+    expect(first).not.toBe(automationProbeEmail())
+  })
+
+  it('does not call the API for a blank id', async () => {
+    const fetchImpl = jest.fn()
+
+    expect(await check(fetchImpl, '   ')).toEqual({
+      status: 'invalid',
+      error: 'No automation id.',
+    })
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('separates a bad key from a bad automation id', async () => {
+    // Both would otherwise read as "this automation does not exist", sending an
+    // operator to change a setting that was correct.
+    const fetchImpl = jest
+      .fn()
+      .mockResolvedValue(response(401, { detail: 'Invalid API key.' }))
+
+    expect(await check(fetchImpl)).toEqual({
+      status: 'unauthorised',
+      error: 'Invalid API key.',
+    })
+  })
+
+  it('reports a rate-limited check as unknown rather than invalid', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue(response(429, { detail: 'Slow down.' }))
+
+    expect(await check(fetchImpl)).toEqual({ status: 'unknown', error: 'Slow down.' })
+  })
+
+  it('reports an unrecognised 404 as unknown rather than guessing', async () => {
+    const fetchImpl = jest
+      .fn()
+      .mockResolvedValue(response(404, { detail: 'List not found.' }))
+
+    expect(await check(fetchImpl)).toEqual({ status: 'unknown', error: 'List not found.' })
+  })
+
+  it('survives a network failure without throwing at the caller', async () => {
+    const fetchImpl = jest.fn().mockRejectedValue(new Error('socket hang up'))
+
+    expect(await check(fetchImpl)).toEqual({ status: 'unknown', error: 'socket hang up' })
+  })
+
+  it('treats a 2xx as valid, since the automation was certainly found', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue(response(200))
+
+    expect(await check(fetchImpl)).toEqual({ status: 'valid' })
   })
 })

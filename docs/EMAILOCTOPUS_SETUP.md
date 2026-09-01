@@ -76,9 +76,34 @@ fixed layout — copy that overruns breaks it rather than wrapping.
 4. Point the call-to-action button's href at **`{{BookingUrl}}`**. This is the single most
    important step — it is what connects a campaign to the consultation funnel. Without it
    the email sends, looks correct, and goes nowhere.
-5. Copy the automation's id and paste it into the campaign's **EmailOctopus automation
-   ID** field in the CRM. A campaign cannot be approved without one; the check is in
-   `checkApprovable`, and the database refuses the transition independently.
+5. Copy the automation's id and register it under **Integrations → Email templates** in
+   the CRM, giving it a name. Campaigns then pick that name; a campaign cannot be
+   approved without an automation id, the check is in `checkApprovable`, and the
+   database refuses the transition independently.
+
+### Why names live in the CRM
+
+`GET /automations` is a 404 (see the constraints at the top), so nothing can populate a
+picker from EmailOctopus. `campaign_templates` holds the name against the id, and
+`AutomationConnectionField` still accepts a pasted id for an automation created minutes
+ago that nobody has registered yet.
+
+### Checking an id
+
+**Integrations → Email templates** checks each registered id, and the Campaigns screen
+checks every id on the page. The check is `verifyAutomation`, which queues a contact that
+cannot exist — an address on the reserved `.invalid` domain — and reads which half of the
+request the provider failed to resolve:
+
+| Answer to `POST /automations/{id}/queue` | Meaning |
+| --- | --- |
+| 404 `Journey not found.` | EmailOctopus has no automation with this id |
+| 404 `Contact not found.` | the automation exists (the probe contact never does) |
+
+Both observed against the live API on 2026-08-31. Because the probe address can never be
+a subscriber, checking an id never queues a real send. Anything else — a 429, a rejected
+key, an unreachable host — is reported as *unknown* rather than invalid: "we could not
+ask" and "EmailOctopus does not have this" lead to opposite actions.
 
 ### "Allow contacts to repeat"
 

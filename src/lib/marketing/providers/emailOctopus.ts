@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 
 import { EMAILOCTOPUS_LIMIT } from '../rateLimiter'
 
@@ -273,4 +273,114 @@ export async function createMergeField(config: {
   )
 
   return response.ok ? { ok: true } : { ok: false, error: await readError(response) }
+}
+
+/**
+ * The result of checking whether an automation id is one EmailOctopus recognises.
+ *
+ * `unknown` is deliberately distinct from `invalid`: a rate-limited or unreadable
+ * answer must never render as "this automation does not exist", because an operator
+ * would then go and change a setting that was correct.
+ */
+export type AutomationCheck =
+  | { status: 'valid' }
+  | { status: 'invalid'; error: string }
+  | { status: 'unauthorised'; error: string }
+  | { status: 'unknown'; error: string }
+
+/**
+ * The address used to probe an automation without sending anything.
+ *
+ * `.invalid` is reserved by RFC 2606 and can never be a real subscriber, and the random
+ * component makes a collision with a contact someone typed by hand impossible in
+ * practice. Both matter: the probe below is a real `queue` request, and if the address
+ * resolved to a contact on the list, checking an id would *send that contact an email*.
+ */
+export function automationProbeEmail(): string {
+  return `crm-automation-probe-${randomUUID()}@invalid.invalid`
+}
+
+/**
+ * Whether EmailOctopus recognises an automation id.
+ *
+ * There is no read endpoint for automations — verified against the live API on
+ * 2026-08-31: `GET /automations`, `GET /automations?limit=n` and
+ * `GET /lists/{id}/automations` all answer 404, and the v2 documentation lists
+ * `POST /automations/{id}/queue` as the only automation endpoint. So an id pasted into
+ * the CRM could not be checked at all, and a wrong one first surfaced as every
+ * recipient failing mid-send.
+ *
+ * The check exploits the fact that `queue` resolves the automation *before* the
+ * contact, and says which one it could not find:
+ *
+ *     unknown automation + any contact   -> 404 "Journey not found."
+ *     known automation   + no contact    -> 404 "Contact not found."
+ *
+ * Both observed live against real ids on 2026-08-31. Queueing a contact that cannot
+ * exist therefore identifies the automation without queueing a send — see
+ * `automationProbeEmail` for why the address is safe.
+ */
+export async function verifyAutomation(config: {
+  apiKey: string
+  automationId: string
+  fetchImpl?: Fetcher
+  /** Injectable for tests. Must be an address that can never be on the list. */
+  probeEmail?: string
+}): Promise<AutomationCheck> {
+  const automationId = config.automationId.trim()
+
+  if (automationId === '') {
+    return { status: 'invalid', error: 'No automation id.' }
+  }
+
+  const doFetch = config.fetchImpl ?? fetch
+  const probe = config.probeEmail ?? automationProbeEmail()
+
+  let response: Response
+
+  try {
+    response = await doFetch(
+      `${API_BASE}/automations/${encodeURIComponent(automationId)}/queue`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${config.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ contact_id: emailOctopusContactId(probe) }),
+      }
+    )
+  } catch (error) {
+    return {
+      status: 'unknown',
+      error: error instanceof Error ? error.message : 'EmailOctopus could not be reached.',
+    }
+  }
+
+  // Should not happen: the probe contact cannot exist, so `queue` has nothing to start.
+  // Treated as valid rather than as an error because a 2xx means the automation was
+  // certainly found.
+  if (response.ok) {
+    return { status: 'valid' }
+  }
+
+  const detail = await readError(response)
+
+  if (response.status === 401 || response.status === 403) {
+    return { status: 'unauthorised', error: detail }
+  }
+
+  if (response.status === 404) {
+    // EmailOctopus calls an automation a "journey" internally; this is the wording the
+    // live API returns, not a guess.
+    if (/journey/i.test(detail)) {
+      return { status: 'invalid', error: detail }
+    }
+
+    if (/contact/i.test(detail)) {
+      return { status: 'valid' }
+    }
+  }
+
+  return { status: 'unknown', error: detail }
 }

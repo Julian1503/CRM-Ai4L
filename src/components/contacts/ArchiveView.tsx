@@ -37,6 +37,8 @@ export default function ArchiveView() {
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(50)
+  const [search, setSearch] = useState('')
+  const [selected, setSelected] = useState<Set<string>>(new Set())
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [restoringId, setRestoringId] = useState<string | null>(null)
@@ -49,9 +51,9 @@ export default function ArchiveView() {
       // The page has to be requested explicitly: /api/contacts always bounds its result
       // set, so omitting it silently pinned this view to the first page while still
       // reporting the full archive count.
-      const response = await fetch(
-        `/api/contacts?includeArchived=true&page=${page}&pageSize=${pageSize}`
-      )
+      const params = new URLSearchParams({ includeArchived: 'true', page: String(page), pageSize: String(pageSize) })
+      if (search.trim()) params.set('q', search.trim())
+      const response = await fetch(`/api/contacts?${params.toString()}`)
 
       if (!response.ok) {
         const body = await response.json().catch(() => ({}))
@@ -61,12 +63,13 @@ export default function ArchiveView() {
       const body = await response.json()
       setContacts(body.contacts ?? [])
       setTotal(body.total ?? 0)
+      setSelected(new Set())
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Could not load archived contacts.')
     } finally {
       setIsLoading(false)
     }
-  }, [page, pageSize])
+  }, [page, pageSize, search])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -101,6 +104,29 @@ export default function ArchiveView() {
     }
   }
 
+  const restoreSelected = async () => {
+    const targets = contacts.filter((contact) => selected.has(contact.id))
+    if (targets.length === 0) return
+    if (!window.confirm(`Restore ${targets.length} archived contact${targets.length === 1 ? '' : 's'}?`)) return
+
+    setRestoringId('bulk')
+    setError(null)
+    try {
+      for (const contact of targets) {
+        const response = await fetch(`/api/contacts/${contact.id}`, { method: 'POST' })
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}))
+          throw new Error(body.error || `Could not restore ${contact.email}.`)
+        }
+      }
+      await load()
+    } catch (restoreError) {
+      setError(restoreError instanceof Error ? restoreError.message : 'Could not restore selected contacts.')
+    } finally {
+      setRestoringId(null)
+    }
+  }
+
   return (
     <div className={styles.layout}>
       {error && (
@@ -115,6 +141,30 @@ export default function ArchiveView() {
           : `${total} archived contact${total === 1 ? '' : 's'}. Archived records are kept and can be restored.`}
       </p>
 
+      <div className={styles.toolbar}>
+        <label className={styles.searchLabel} htmlFor="archive-search">Search archived contacts</label>
+        <input
+          id="archive-search"
+          className={styles.searchInput}
+          type="search"
+          value={search}
+          placeholder="Name, email or organisation"
+          onChange={(event) => {
+            setSearch(event.target.value)
+            setPage(1)
+          }}
+        />
+        <button
+          type="button"
+          className={styles.restoreSelectedBtn}
+          onClick={() => void restoreSelected()}
+          disabled={selected.size === 0 || restoringId !== null}
+          data-testid="restore-selected"
+        >
+          Restore selected{selected.size > 0 ? ` (${selected.size})` : ''}
+        </button>
+      </div>
+
       {!isLoading && contacts.length === 0 && !error && (
         <p className={styles.empty} data-testid="archive-empty">
           Nothing archived. Contacts you archive from the contact drawer appear here.
@@ -126,6 +176,9 @@ export default function ArchiveView() {
           <caption className={styles.srOnly}>Archived contacts, with an option to restore each</caption>
           <thead>
             <tr>
+              <th scope="col" className={styles.th}>
+                <span className={styles.srOnly}>Select</span>
+              </th>
               <th scope="col" className={styles.th}>Name</th>
               <th scope="col" className={styles.th}>Email</th>
               <th scope="col" className={styles.th}>Organisation</th>
@@ -138,6 +191,19 @@ export default function ArchiveView() {
           <tbody>
             {contacts.map((contact) => (
               <tr key={contact.id} className={styles.row}>
+                <td className={styles.td}>
+                  <input
+                    type="checkbox"
+                    aria-label={`Select ${contact.first_name} ${contact.last_name}`}
+                    checked={selected.has(contact.id)}
+                    onChange={() => setSelected((current) => {
+                      const next = new Set(current)
+                      if (next.has(contact.id)) next.delete(contact.id)
+                      else next.add(contact.id)
+                      return next
+                    })}
+                  />
+                </td>
                 <td className={styles.td}>
                   <span className={styles.name}>
                     {contact.first_name} {contact.last_name}
