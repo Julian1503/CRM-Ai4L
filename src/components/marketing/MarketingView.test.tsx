@@ -777,6 +777,15 @@ describe('MarketingView', () => {
       render(<MarketingView jobTypes={jobTypes} />)
       fireEvent.click(await screen.findByTestId('retry-camp-1'))
 
+      // A retry sends email, so it goes through the same confirmation as a first send.
+      const confirmButton = await screen.findByTestId('confirm-send')
+      await waitFor(() => expect(confirmButton).toBeEnabled())
+      expect(mockFetch).not.toHaveBeenCalledWith(
+        '/api/campaigns/camp-1/send',
+        expect.objectContaining({ method: 'POST' })
+      )
+      fireEvent.click(confirmButton)
+
       await waitFor(() =>
         expect(mockFetch).toHaveBeenCalledWith(
           '/api/campaigns/camp-1/send',
