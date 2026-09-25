@@ -7,16 +7,20 @@ import {
   escapeLikePattern,
   parseContactFilters,
   SEARCH_ORGANISATION_CAP,
+  parseContactIds,
+  MAX_SELECTED_IDS,
 } from './query'
 
 describe('parseContactFilters', () => {
   it('returns safe defaults for an empty query string', () => {
     expect(parseContactFilters({})).toEqual({
       q: null,
+      ids: null,
       jobTypeId: null,
       state: null,
       status: null,
       subscribed: null,
+      subscribedToPrograms: null,
       includeArchived: false,
       sort: 'name',
       dir: 'asc',
@@ -266,5 +270,51 @@ describe('buildSearchOrExpression — organisation', () => {
 
   it('still returns null for an empty term even with organisations supplied', () => {
     expect(buildSearchOrExpression('   ', ['org-1'])).toBeNull()
+  })
+})
+
+describe('parseContactIds', () => {
+  it('reports no selection when the caller named none', () => {
+    // Distinct from an empty selection: null means "use the filters".
+    expect(parseContactIds(null)).toBeNull()
+  })
+
+  it('reads a comma-separated selection', () => {
+    expect(parseContactIds('a1, b2 ,c3')).toEqual(['a1', 'b2', 'c3'])
+  })
+
+  it('collapses duplicates so a repeated id cannot inflate the request', () => {
+    expect(parseContactIds('a1,a1,b2')).toEqual(['a1', 'b2'])
+  })
+
+  it('drops ids that are not a plain id shape', () => {
+    // These would otherwise be interpolated into the PostgREST `in.(...)` grammar.
+    expect(parseContactIds('a1,b2.eq.x,"c3",d4')).toEqual(['a1', 'd4'])
+  })
+
+  it('returns an empty selection rather than null when every id is malformed', () => {
+    // Falling back to null here would export the whole filtered set instead of nothing.
+    expect(parseContactIds('..,,%%')).toEqual([])
+    expect(parseContactIds('')).toEqual([])
+  })
+
+  it('reads one id past the cap so an over-long selection is detectable', () => {
+    const ids = Array.from({ length: MAX_SELECTED_IDS + 50 }, (_, i) => `id-${i}`)
+
+    expect(parseContactIds(ids.join(','))).toHaveLength(MAX_SELECTED_IDS + 1)
+  })
+})
+
+describe('parseContactFilters ids', () => {
+  it('parses an explicit selection from the query string', () => {
+    expect(parseContactFilters({ ids: 'a1,b2' }).ids).toEqual(['a1', 'b2'])
+  })
+
+  it('treats an empty ids param as an empty selection, not an absent one', () => {
+    expect(parseContactFilters({ ids: '' }).ids).toEqual([])
+  })
+
+  it('leaves ids null when the param is absent', () => {
+    expect(parseContactFilters({ q: 'ada' }).ids).toBeNull()
   })
 })

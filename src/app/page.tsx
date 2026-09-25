@@ -75,6 +75,7 @@ type DbContact = {
   status?: ContactStatus | null;
   is_customer: boolean | null;
   subscribed_to_newsletter: boolean | null;
+  subscribed_to_programs: boolean | null;
   job_type_id: string | null;
   organisation: { name: string } | null;
 };
@@ -114,6 +115,7 @@ function formatContactFromDatabase(contact: DbContact, contactServices: string[]
       ? contact.status === 'customer'
       : Boolean(contact.is_customer),
     subscribedToNewsletter: Boolean(contact.subscribed_to_newsletter),
+    subscribedToPrograms: Boolean(contact.subscribed_to_programs),
     jobTypeId: contact.job_type_id || null,
     organisation: contact.organisation || null,
     servicesBought: contactServices,
@@ -187,6 +189,7 @@ const CRM_FIELDS: { key: CrmFieldKey; label: string; description: string }[] = [
   { key: 'position', label: 'Position / Title', description: 'Job position' },
   { key: 'isCustomer', label: 'Is Customer?', description: 'True/False flag' },
   { key: 'subscribedToNewsletter', label: 'Subscribed to Newsletter?', description: 'Sync subscription state' },
+  { key: 'subscribedToPrograms', label: 'Subscribed to Courses?', description: 'Course and training consent' },
 ];
 
 export default function App() {
@@ -230,11 +233,27 @@ export default function App() {
   const [contactsPage, setContactsPage] = useState(1);
   const [contactsPageSize, setContactsPageSize] = useState(50);
   const [contactsTotal, setContactsTotal] = useState(0);
+
+  /**
+   * Rows the user has ticked for a partial export.
+   *
+   * Held as ids rather than contacts because only one page is in memory at a time — a
+   * selection has to survive paging, and the export resolves the ids server-side anyway.
+   */
+  const [selectedContactIds, setSelectedContactIds] = useState<ReadonlySet<string>>(
+    () => new Set<string>()
+  );
   const [isContactsLoading, setIsContactsLoading] = useState(true);
 
   // Counted in the database rather than over the loaded rows: with the list paginated,
   // counting what is in memory would report the size of the current page.
-  const [stats, setStats] = useState({ total: 0, customers: 0, prospects: 0, subscribers: 0 });
+  const [stats, setStats] = useState({
+    total: 0,
+    customers: 0,
+    prospects: 0,
+    subscribers: 0,
+    programSubscribers: 0,
+  });
 
   const [isDatabaseConnected, setIsDatabaseConnected] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
@@ -282,7 +301,8 @@ export default function App() {
     if (statusFilter === 'lead') params.set('status', 'lead');
     if (statusFilter === 'customer') params.set('status', 'customer');
     if (statusFilter === 'prospect') params.set('status', 'prospect');
-    if (statusFilter === 'subscribed') params.set('subscribed', 'true');
+    if (statusFilter === 'newsletter') params.set('subscribed', 'true');
+    if (statusFilter === 'programs') params.set('programs', 'true');
     params.set('sort', sortKey);
     params.set('dir', sortDir);
     return params.toString();
@@ -359,17 +379,20 @@ export default function App() {
    */
   const loadStats = React.useCallback(async () => {
     if (!hasSupabaseConfig) {
-      setStats({ total: 0, customers: 0, prospects: 0, subscribers: 0 });
+      setStats({ total: 0, customers: 0, prospects: 0, subscribers: 0, programSubscribers: 0 });
       return;
     }
 
     try {
       const db = getSupabaseClient();
 
-      const [totalResult, customerResult, subscriberResult] = await Promise.all([
+      const [totalResult, customerResult, subscriberResult, programResult] = await Promise.all([
         db.from('active_contacts').select('id', { count: 'exact', head: true }),
         db.from('active_contacts').select('id', { count: 'exact', head: true }).eq('is_customer', true),
         db.from('active_contacts').select('id', { count: 'exact', head: true }).eq('subscribed_to_newsletter', true),
+        // Counted rather than derived from the newsletter figure: the two consents
+        // overlap but neither contains the other.
+        db.from('active_contacts').select('id', { count: 'exact', head: true }).eq('subscribed_to_programs', true),
       ]);
 
       const total = totalResult.count ?? 0;
@@ -382,6 +405,7 @@ export default function App() {
         // customer", so a third query could disagree with the first two.
         prospects: Math.max(0, total - customers),
         subscribers: subscriberResult.count ?? 0,
+        programSubscribers: programResult.count ?? 0,
       });
     } catch (error) {
       console.error('Failed to load contact counts', error);
@@ -565,11 +589,22 @@ export default function App() {
         `${result.inserted} added`,
         `${result.updated} updated`,
         result.skipped > 0 ? `${result.skipped} skipped` : null,
+        // Named rather than folded into "skipped": these rows were understood and
+        // deliberately held back, and somebody has to go and look at them.
+        result.archived_collisions > 0
+          ? `${result.archived_collisions} already archived`
+          : null,
       ]
         .filter(Boolean)
         .join(', ');
 
-      alert(`Import complete: ${summary}.`);
+      alert(
+        result.archived_collisions > 0
+          ? `Import complete: ${summary}.
+
+${result.archived_collisions} row(s) match a contact in the archive and were not imported — importing them would create a duplicate and restore email consent they had withdrawn. Restore them from Archive if they should come back.`
+          : `Import complete: ${summary}.`
+      );
 
       // Reset view variables
       setImportFile(null);
@@ -616,6 +651,7 @@ export default function App() {
     customers: customersCount,
     prospects: prospectsCount,
     subscribers: newsletterSubscribersCount,
+    programSubscribers: programSubscribersCount,
   } = stats;
 
   // Sorting Handler
@@ -625,26 +661,60 @@ export default function App() {
     setContactsPage(1);
   };
 
+  // Selection handlers. New sets rather than mutation, so React sees the change.
+  const clearContactSelection = useCallback(() => {
+    setSelectedContactIds((prev) => (prev.size === 0 ? prev : new Set<string>()));
+  }, []);
+
+  const handleToggleContact = useCallback((id: string, selected: boolean) => {
+    setSelectedContactIds((prev) => {
+      const next = new Set(prev);
+      if (selected) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
+
+  const handleTogglePage = useCallback((ids: string[], selected: boolean) => {
+    setSelectedContactIds((prev) => {
+      const next = new Set(prev);
+      ids.forEach((id) => (selected ? next.add(id) : next.delete(id)));
+      return next;
+    });
+  }, []);
+
+  // Ordered for the export form; the Set is what the table renders from.
+  const selectedContactIdList = React.useMemo(
+    () => [...selectedContactIds],
+    [selectedContactIds]
+  );
+
   // Filter handlers. Each returns to page 1: a filter applied while on page 7 would
-  // otherwise request a page the narrowed result set may not have.
+  // otherwise request a page the narrowed result set may not have. Each also drops the
+  // selection, because the export applies the active filters — a row ticked under the
+  // old filters would silently not be exported under the new ones.
   const handleSearchChange = (value: string) => {
     setSearchQuery(value);
     setContactsPage(1);
+    clearContactSelection();
   };
 
   const handleStatusChange = (value: StatusFilter) => {
     setStatusFilter(value);
     setContactsPage(1);
+    clearContactSelection();
   };
 
   const handleJobTypeChange = (value: string) => {
     setJobTypeFilter(value);
     setContactsPage(1);
+    clearContactSelection();
   };
 
   const handleStateChange = (value: string) => {
     setStateFilter(value);
     setContactsPage(1);
+    clearContactSelection();
   };
 
   // Save / Update / Insert Contact Handler
@@ -700,6 +770,7 @@ export default function App() {
         status,
         is_customer: status === 'customer',
         subscribed_to_newsletter: Boolean(data.subscribedToNewsletter),
+        subscribed_to_programs: Boolean(data.subscribedToPrograms),
       };
 
       let contactId = data.id || null;
@@ -748,6 +819,7 @@ export default function App() {
                 firstName: data.firstName || '',
                 lastName: data.lastName || '',
                 subscribedToNewsletter: data.subscribedToNewsletter,
+                subscribedToPrograms: data.subscribedToPrograms,
               },
             ],
           }),
@@ -981,6 +1053,7 @@ export default function App() {
                   status: 'prospect',
                   isCustomer: false,
                   subscribedToNewsletter: false,
+                  subscribedToPrograms: false,
                   organisation: null,
                 })}
               >
@@ -998,6 +1071,7 @@ export default function App() {
               customers={customersCount}
               prospects={prospectsCount}
               newsletterSubscribers={newsletterSubscribersCount}
+              programSubscribers={programSubscribersCount}
             />
 
             <FilterBar
@@ -1012,6 +1086,8 @@ export default function App() {
               onStateChange={handleStateChange}
               exportQuery={exportQuery}
               resultCount={contactsTotal}
+              selectedIds={selectedContactIdList}
+              onClearSelection={clearContactSelection}
             />
 
             {/* Contacts Table layout */}
@@ -1022,6 +1098,9 @@ export default function App() {
               sortKey={sortKey}
               sortDir={sortDir}
               isLoading={isContactsLoading}
+              selectedIds={selectedContactIds}
+              onToggleRow={handleToggleContact}
+              onTogglePage={handleTogglePage}
             />
 
             <Pagination

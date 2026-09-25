@@ -1,6 +1,6 @@
 // Database types for the CRM schema.
 //
-// Hand-written to match supabase/migrations as of 20260827000000. Regenerate from the
+// Hand-written to match supabase/migrations as of 20260901000000. Regenerate from the
 // live schema once the migration is applied:
 //
 //   npm run db:types
@@ -12,6 +12,23 @@
 import type { TemplateSlot } from '@/lib/marketing/templates'
 
 export type ContactStatus = 'lead' | 'prospect' | 'customer' | 'archived'
+
+/**
+ * Why a contact is archived.
+ *
+ * `opted_out` is set by the database when a contact loses every consent, and is the
+ * only reason the same rule will undo. A `manual` archive is a person's decision and no
+ * external signup can reverse it — see 20260901000000_dual_consent.sql.
+ */
+export type ArchiveReason = 'manual' | 'opted_out'
+
+/**
+ * The two kinds of email a contact consents to separately.
+ *
+ * Also what a campaign spends: the segment gate forces the consent column matching the
+ * campaign's stream, so a course invitation cannot reach a newsletter-only contact.
+ */
+export type ConsentStream = 'newsletter' | 'programs'
 
 export type CampaignStatus =
   | 'draft'
@@ -90,6 +107,8 @@ export type CampaignRow = {
   merge_fields: Record<string, string>
   /** The named template this campaign's copy was written for; null means the built-in one. */
   template_id: string | null
+  /** Copied from the template at creation and frozen, so a sent campaign stays explicable. */
+  consent_stream: ConsentStream
   subject: string | null
   notes: string | null
   approved_at: string | null
@@ -119,6 +138,8 @@ export type CampaignTemplateRow = {
   provider_automation_id: string | null
   /** The merge-field contract the automation's template references. */
   slots: TemplateSlot[]
+  /** Which consent a campaign built on this template spends. */
+  consent_stream: ConsentStream
   brief: string | null
   /** Retired from the pickers, but kept: sent campaigns still reference it. */
   archived_at: string | null
@@ -161,7 +182,11 @@ export type ContactRow = {
   is_customer: boolean
   status: ContactStatus
   subscribed_to_newsletter: boolean
+  /** Courses, trainings and programmes. Independent of the newsletter. */
+  subscribed_to_programs: boolean
   deleted_at: string | null
+  /** Null while active; set by the database whenever `deleted_at` is. */
+  archive_reason: ArchiveReason | null
   /** newsletter | import | manual. Null for rows predating the column. */
   source: string | null
   created_at: string
@@ -221,6 +246,12 @@ export type ImportContactsResult = {
   inserted: number
   updated: number
   skipped: number
+  /**
+   * Rows held back because the address belongs to an archived contact and to no live
+   * one. Importing them would create a duplicate live record and hand back the consent
+   * that archived them, so they wait for a person to merge or restore.
+   */
+  archived_collisions: number
   total: number
 }
 
@@ -242,7 +273,31 @@ export type ImportContactPayloadRow = {
   organisation_name?: string | null
   job_type_name?: string | null
   is_customer?: boolean
+  /**
+   * Omitted when the spreadsheet has no column for it — which is not the same as
+   * `false`. The RPC grants consent to a *new* contact and never raises an existing
+   * one's, so a re-import cannot re-subscribe somebody who opted out.
+   */
   subscribed_to_newsletter?: boolean
+  subscribed_to_programs?: boolean
+}
+
+/**
+ * One entry in the append-only consent ledger.
+ *
+ * Written only by the `contacts_record_consent_events` trigger; there is no insert
+ * policy, so nothing that goes through PostgREST can add, edit or remove a row.
+ */
+export type ContactConsentEventRow = {
+  id: string
+  contact_id: string
+  stream: ConsentStream
+  granted: boolean
+  /** Where the change came from: preference_center, newsletter_webhook, import, … */
+  source: string
+  /** Request context — IP, user agent, provider event id. Shape varies by source. */
+  evidence: Record<string, unknown> | null
+  occurred_at: string
 }
 
 // `Relationships` is required by postgrest-js's GenericTable/GenericView constraint.
@@ -286,6 +341,7 @@ export interface Database {
   public: {
     Tables: {
       contacts: TableDef<ContactRow, Partial<ContactRow>, Partial<ContactRow>, ContactRelationships>
+      contact_consent_events: TableDef<ContactConsentEventRow>
       organisations: TableDef<OrganisationRow>
       job_types: TableDef<JobTypeRow>
       services: TableDef<ServiceRow>
@@ -318,6 +374,17 @@ export interface Database {
         Args: { payload: ImportContactPayloadRow[] }
         Returns: ImportContactsResult
       }
+      apply_contact_consent: {
+        Args: {
+          p_contact_id: string
+          /** Null leaves this stream untouched. */
+          p_newsletter: boolean | null
+          p_programs: boolean | null
+          p_source: string
+          p_evidence?: Record<string, unknown> | null
+        }
+        Returns: undefined
+      }
       get_operations_summary: {
         Args: Record<string, never>
         Returns: import('@/lib/operations/types').OperationsSummary
@@ -327,6 +394,7 @@ export interface Database {
       contact_status: ContactStatus
       campaign_status: CampaignStatus
       booking_status: BookingStatus
+      consent_stream: ConsentStream
       integration_delivery_status: IntegrationDeliveryStatus
     }
   }

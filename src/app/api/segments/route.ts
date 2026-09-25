@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 
 import { badRequest, ok, readJsonBody, requireSessionOr401, serverError } from '@/lib/api/responses'
 import { buildPageMeta, getPageRange, readPageParams } from '@/lib/pagination'
+import { readConsentStream } from '@/lib/marketing/consentStream'
 import {
   filtersToSegmentDefinition,
   resolveSegmentMembers,
@@ -53,9 +54,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return badRequest('A segment name is required.')
   }
 
+  // A segment stores no consent gate of its own — filtersToSegmentDefinition keeps only
+  // the descriptive filters, and the gate is re-applied from the campaign's stream every
+  // time the segment resolves. The stream here only decides which audience the member
+  // count below describes.
+  const stream = readConsentStream(body.stream)
+
   // Round-tripping through the parser strips anything unrecognised and forces the
-  // subscribed-only / no-archived invariants, so only a sane definition is ever stored.
-  const definition = filtersToSegmentDefinition(segmentDefinitionToFilters(body.definition))
+  // consent / no-archived invariants, so only a sane definition is ever stored.
+  const definition = filtersToSegmentDefinition(segmentDefinitionToFilters(body.definition, stream))
 
   try {
     const db = await createSupabaseServerClient()
@@ -82,7 +89,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       throw new Error(error.message)
     }
 
-    const members = await resolveSegmentMembers(db, definition)
+    const members = await resolveSegmentMembers(db, definition, stream)
 
     return ok({ segment: data, memberCount: members.total, truncated: members.truncated })
   } catch (error) {

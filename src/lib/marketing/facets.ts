@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { ContactFilters } from '@/lib/contacts/query'
 import { applyContactFilters, findOrganisationIdsMatching } from '@/lib/contacts/repository'
-import type { ContactStatus, Database } from '@/lib/db/types'
+import type { ConsentStream, ContactStatus, Database } from '@/lib/db/types'
 
 import { SEGMENT_MEMBER_CAP, segmentDefinitionToFilters } from './segments'
 
@@ -105,9 +105,10 @@ export type ResolvedSegmentFacets = SegmentFacets & {
  */
 export async function resolveSegmentFacets(
   db: SupabaseClient<Database>,
-  definition: unknown
+  definition: unknown,
+  stream: ConsentStream
 ): Promise<ResolvedSegmentFacets> {
-  const filters = segmentDefinitionToFilters(definition)
+  const filters = segmentDefinitionToFilters(definition, stream)
 
   // Same organisation expansion as the member query, or a segment saved from a search
   // would count a different audience than it sends to.

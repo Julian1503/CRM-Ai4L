@@ -6,6 +6,8 @@ import { NextRequest } from 'next/server'
 import {
   BOOKING_URL_MERGE_FIELD,
   CAMPAIGN_COPY_FIELDS,
+  PREFERENCES_URL_MERGE_FIELD,
+  RESERVED_MERGE_FIELDS,
 } from '@/lib/marketing/mergeFields'
 import { createDbMock, createQueryBuilderMock } from '@/test/supabaseMock'
 
@@ -30,7 +32,9 @@ const ALL_TAGS = [
   'FirstName',
   'LastName',
   ...CAMPAIGN_COPY_FIELDS.map((field) => field.tag),
-  BOOKING_URL_MERGE_FIELD,
+  // Derived from RESERVED_MERGE_FIELDS rather than listed, so a field added to the
+  // contract is required here too instead of silently going unchecked.
+  ...RESERVED_MERGE_FIELDS,
 ]
 
 function withCredentials(
@@ -87,6 +91,9 @@ describe('/api/integrations/emailoctopus/fields', () => {
       expect(body.ready).toBe(false)
       expect(body.missing).toContain(BOOKING_URL_MERGE_FIELD)
       expect(body.missing).toContain('Headline')
+      // A list without this field leaves every email without a working unsubscribe,
+      // and EmailOctopus reports no error for a merge tag it does not know.
+      expect(body.missing).toContain(PREFERENCES_URL_MERGE_FIELD)
     })
 
     it('refuses when EmailOctopus is not configured', async () => {

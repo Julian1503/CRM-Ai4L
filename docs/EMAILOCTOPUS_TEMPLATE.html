@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{Headline}}</title>
+    <style>
+      @media only screen and (max-width: 620px) {
+        .email-shell { width: 100% !important; }
+        .email-pad { padding: 28px 20px !important; }
+        .headline { font-size: 30px !important; line-height: 1.15 !important; }
+        .benefit-cell { display: block !important; width: 100% !important; padding: 0 0 12px !important; }
+      }
+    </style>
+  </head>
+  <body style="margin:0; padding:0; background:#f3f6f8; color:#17212b; font-family:Arial,Helvetica,sans-serif;">
+    <!-- Hidden preheader shown beside the subject in many inboxes. -->
+    <div style="display:none; max-height:0; overflow:hidden; opacity:0; color:transparent;">
+      {{Preheader}}
+    </div>
+
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f3f6f8;">
+      <tr>
+        <td align="center" style="padding:24px 12px;">
+          <table role="presentation" class="email-shell" width="600" cellspacing="0" cellpadding="0" border="0" style="width:600px; max-width:600px; background:#ffffff; border:1px solid #d9e1e6;">
+            <tr>
+              <td style="padding:22px 32px; background:#17212b;">
+                <span style="font-size:18px; line-height:24px; font-weight:700; color:#ffffff; letter-spacing:.2px;">Ai4L<span style="color:#f29a38;">.</span></span>
+              </td>
+            </tr>
+
+            <tr>
+              <td class="email-pad" style="padding:42px 48px 36px;">
+                <h1 class="headline" style="margin:0 0 20px; color:#17212b; font-size:38px; line-height:1.12; font-weight:700; letter-spacing:-.4px;">
+                  {{Headline}}
+                </h1>
+
+                <p style="margin:0 0 28px; color:#4d5d68; font-size:17px; line-height:1.6;">
+                  {{Intro}}
+                </p>
+
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:0 0 30px;">
+                  <tr>
+                    <td class="benefit-cell" width="33.33%" valign="top" style="padding:0 10px 0 0;">
+                      <div style="margin-bottom:8px; color:#01acdb; font-size:20px; line-height:24px; font-weight:700;">01</div>
+                      <p style="margin:0; color:#34434e; font-size:14px; line-height:1.5;">{{Benefit1}}</p>
+                    </td>
+                    <td class="benefit-cell" width="33.33%" valign="top" style="padding:0 5px;">
+                      <div style="margin-bottom:8px; color:#01acdb; font-size:20px; line-height:24px; font-weight:700;">02</div>
+                      <p style="margin:0; color:#34434e; font-size:14px; line-height:1.5;">{{Benefit2}}</p>
+                    </td>
+                    <td class="benefit-cell" width="33.33%" valign="top" style="padding:0 0 0 10px;">
+                      <div style="margin-bottom:8px; color:#01acdb; font-size:20px; line-height:24px; font-weight:700;">03</div>
+                      <p style="margin:0; color:#34434e; font-size:14px; line-height:1.5;">{{Benefit3}}</p>
+                    </td>
+                  </tr>
+                </table>
+
+                <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+                  <tr>
+                    <td style="border-radius:4px; background:#01acdb;">
+                      <a href="{{BookingUrl}}" style="display:inline-block; padding:15px 22px; border:1px solid #01acdb; border-radius:4px; color:#ffffff; font-size:15px; line-height:20px; font-weight:700; text-decoration:none;">
+                        {{CtaLabel}}
+                      </a>
+                    </td>
+                  </tr>
+                </table>
+
+                <p style="margin:30px 0 0; color:#6d7b84; font-size:12px; line-height:1.55;">
+                  This consultation is obligation-free. The booking link is personal to you.
+                </p>
+              </td>
+            </tr>
+
+            <tr>
+              <td style="padding:22px 32px; border-top:1px solid #e4eaee; background:#f8fafb;">
+                <p style="margin:0 0 10px; color:#6d7b84; font-size:12px; line-height:1.5;">
+                  You are receiving this because you subscribed to updates from Ai4L.
+                </p>
+                <p style="margin:0; color:#6d7b84; font-size:12px; line-height:1.5;">
+                  <a href="{{PrefsUrl}}" style="color:#16748c; text-decoration:underline;">Manage email preferences</a>
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

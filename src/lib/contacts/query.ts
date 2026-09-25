@@ -5,6 +5,7 @@ import {
   type ParamInput,
   getPageRange as getRange,
   readPageParams,
+  readParam,
   readTrimmed,
 } from '@/lib/pagination'
 
@@ -21,7 +22,14 @@ import {
  *    `x,status.eq.archived` would otherwise widen the result set.
  */
 
-export const CONTACT_SORT_KEYS = ['name', 'organisation', 'status', 'newsletter', 'created'] as const
+export const CONTACT_SORT_KEYS = [
+  'name',
+  'organisation',
+  'status',
+  'newsletter',
+  'programs',
+  'created',
+] as const
 export type ContactSortKey = (typeof CONTACT_SORT_KEYS)[number]
 
 const CONTACT_STATUSES: ContactStatus[] = ['lead', 'prospect', 'customer', 'archived']
@@ -34,6 +42,7 @@ export const SORT_COLUMNS: Record<ContactSortKey, string> = {
   organisation: 'organisation_id',
   status: 'status',
   newsletter: 'subscribed_to_newsletter',
+  programs: 'subscribed_to_programs',
   created: 'created_at',
 }
 
@@ -56,10 +65,22 @@ const SEARCH_COLUMNS = [
 
 export type ContactFilters = {
   q: string | null
+  /**
+   * An explicit selection of contact ids, or null when the caller named none.
+   *
+   * `null` and `[]` mean different things and must not be conflated: null is "no
+   * selection, use the filters", while an empty array is "a selection that resolved to
+   * nothing" and must export nothing. Collapsing the two would turn a selection of
+   * three rows into an export of the whole filtered table.
+   */
+  ids: string[] | null
   jobTypeId: string | null
   state: string | null
   status: ContactStatus | null
+  /** Newsletter consent. Named `subscribed` since before there was a second stream. */
   subscribed: boolean | null
+  /** Course and training consent. Independent of `subscribed`. */
+  subscribedToPrograms: boolean | null
   includeArchived: boolean
   sort: ContactSortKey
   dir: 'asc' | 'desc'
@@ -77,6 +98,57 @@ function readBoolean(input: ParamInput, key: string): boolean | null {
   return null
 }
 
+/**
+ * Upper bound on how many contacts one request may name explicitly.
+ *
+ * Ids travel to PostgREST inside an `id=in.(...)` filter, which lives in the URL — so
+ * an unbounded list is a request that fails on length. Reads are chunked below that
+ * limit (see EXPORT_ID_CHUNK_SIZE); this cap bounds the whole selection.
+ */
+export const MAX_SELECTED_IDS = 2_000
+
+/**
+ * Shape an id must have to be interpolated into a PostgREST filter.
+ *
+ * Ids come from our own rows, but they arrive back over the wire, so anything that is
+ * not a plain id shape is dropped rather than trusted — the same rule
+ * `buildSearchOrExpression` applies to organisation ids.
+ */
+const CONTACT_ID_PATTERN = /^[0-9a-zA-Z-]{1,64}$/
+
+/**
+ * Parses an explicit contact selection from a comma-separated `ids` value.
+ *
+ * Returns null when the caller named no selection at all, and an array otherwise —
+ * possibly empty, when every id was malformed. Duplicates are collapsed so a repeated
+ * id cannot inflate the request.
+ *
+ * Deliberately does not truncate at MAX_SELECTED_IDS: silently dropping ids would export
+ * fewer rows than the user selected without saying so. It stops one past the cap, which
+ * bounds the work here while leaving the caller able to see the list is over the limit
+ * and refuse.
+ */
+export function parseContactIds(value: string | null): string[] | null {
+  if (value === null) return null
+
+  const trimmed = value.trim()
+  if (trimmed === '') return []
+
+  const ids = new Set<string>()
+
+  for (const part of trimmed.split(',')) {
+    const id = part.trim()
+
+    if (id !== '' && CONTACT_ID_PATTERN.test(id)) {
+      ids.add(id)
+
+      if (ids.size > MAX_SELECTED_IDS) break
+    }
+  }
+
+  return [...ids]
+}
+
 export function parseContactFilters(input: ParamInput): ContactFilters {
   const status = readTrimmed(input, 'status') as ContactStatus | null
   const sort = readTrimmed(input, 'sort') as ContactSortKey | null
@@ -85,12 +157,16 @@ export function parseContactFilters(input: ParamInput): ContactFilters {
 
   return {
     q: readTrimmed(input, 'q'),
+    // readTrimmed collapses an empty value to null, which would read as "no selection".
+    // The raw param is used so `ids=` stays distinguishable from an absent `ids`.
+    ids: parseContactIds(readParam(input, 'ids')),
     jobTypeId: readTrimmed(input, 'jobTypeId'),
     // State codes are canonical uppercase (NSW, VIC), so normalise rather than
     // forcing the caller to match case.
     state: state ? state.toUpperCase() : null,
     status: status && CONTACT_STATUSES.includes(status) ? status : null,
     subscribed: readBoolean(input, 'subscribed'),
+    subscribedToPrograms: readBoolean(input, 'programs'),
     includeArchived: readBoolean(input, 'includeArchived') ?? false,
     sort: sort && CONTACT_SORT_KEYS.includes(sort) ? sort : 'name',
     dir: dir === 'desc' ? 'desc' : 'asc',
@@ -174,10 +250,14 @@ export function contactFiltersToSearchParams(filters: ContactFilters): URLSearch
   const params = new URLSearchParams()
 
   if (filters.q) params.set('q', filters.q)
+  if (filters.ids !== null) params.set('ids', filters.ids.join(','))
   if (filters.jobTypeId) params.set('jobTypeId', filters.jobTypeId)
   if (filters.state) params.set('state', filters.state)
   if (filters.status) params.set('status', filters.status)
   if (filters.subscribed !== null) params.set('subscribed', String(filters.subscribed))
+  if (filters.subscribedToPrograms !== null) {
+    params.set('programs', String(filters.subscribedToPrograms))
+  }
   if (filters.includeArchived) params.set('includeArchived', 'true')
   if (filters.sort !== 'name') params.set('sort', filters.sort)
   if (filters.dir !== 'asc') params.set('dir', filters.dir)

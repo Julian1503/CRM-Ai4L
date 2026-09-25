@@ -62,11 +62,31 @@ describe('toImportPayload', () => {
     expect(row).not.toHaveProperty('state')
   })
 
-  it('always sends the boolean flags, since they are authoritative on import', () => {
+  it('always sends is_customer, since the spreadsheet is authoritative for it', () => {
     const [row] = toImportPayload([validRow()])
 
     expect(row.is_customer).toBe(false)
-    expect(row.subscribed_to_newsletter).toBe(true)
+  })
+
+  it('omits a consent the spreadsheet had no column for', () => {
+    // The RPC reads an absent key as "say nothing": grant it to a new contact, leave an
+    // existing one's alone. Sending `false` instead would make a re-import of the same
+    // file look like every contact in it had just withdrawn consent.
+    const [row] = toImportPayload([
+      validRow({ subscribedToNewsletter: undefined, subscribedToPrograms: undefined }),
+    ])
+
+    expect(row).not.toHaveProperty('subscribed_to_newsletter')
+    expect(row).not.toHaveProperty('subscribed_to_programs')
+  })
+
+  it('sends a consent the spreadsheet did carry, including a withdrawal', () => {
+    const [row] = toImportPayload([
+      validRow({ subscribedToNewsletter: false, subscribedToPrograms: true }),
+    ])
+
+    expect(row.subscribed_to_newsletter).toBe(false)
+    expect(row.subscribed_to_programs).toBe(true)
   })
 
   it('folds a spelled-out state into the code the segment filter uses', () => {
@@ -115,7 +135,13 @@ describe('importContacts', () => {
     const result = await importContacts(db as never, [{ isValid: false, errors: ['bad'] }])
 
     expect(db.rpc).not.toHaveBeenCalled()
-    expect(result).toEqual({ inserted: 0, updated: 0, skipped: 1, total: 1 })
+    expect(result).toEqual({
+      inserted: 0,
+      updated: 0,
+      skipped: 1,
+      archived_collisions: 0,
+      total: 1,
+    })
   })
 
   it('surfaces a descriptive error when the RPC fails', async () => {

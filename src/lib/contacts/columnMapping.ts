@@ -33,6 +33,7 @@ export const CRM_FIELD_KEYS = [
   'position',
   'isCustomer',
   'subscribedToNewsletter',
+  'subscribedToPrograms',
 ] as const
 
 export type CrmFieldKey = (typeof CRM_FIELD_KEYS)[number]
@@ -254,6 +255,25 @@ const FIELD_RULES: FieldRule[] = [
     contains: ['is customer', 'is client'],
     exclude: ['id', 'number', 'name', 'since', 'email', 'count'],
   },
+  // Ahead of the newsletter rule on purpose. Both fuzzy-match `subscrib`, and the
+  // contains pass takes the first rule that claims a header -- so `Subscribed to
+  // programs` has to be offered to this one before the newsletter can take it.
+  {
+    field: 'subscribedToPrograms',
+    exact: [
+      'programs',
+      'courses',
+      'training',
+      'trainings',
+      'subscribed to programs',
+      'subscribed to courses',
+      'courses and training',
+      'course opt in',
+    ],
+    contains: ['program', 'course', 'training'],
+    // A course *name* or count is not a consent flag.
+    exclude: ['name', 'title', 'count', 'date', 'id'],
+  },
   {
     field: 'subscribedToNewsletter',
     exact: [
@@ -266,6 +286,7 @@ const FIELD_RULES: FieldRule[] = [
       'opt in',
     ],
     contains: ['newsletter', 'subscrib', 'opt in'],
+    exclude: ['program', 'course', 'training'],
   },
 ]
 

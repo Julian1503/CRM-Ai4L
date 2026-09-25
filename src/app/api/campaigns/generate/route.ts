@@ -70,7 +70,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     const { data: campaign, error: loadError } = await db
       .from('campaigns')
-      .select('id, name, status, notes, segment_id, segment:segments(name, description, definition)')
+      .select('id, name, status, notes, segment_id, consent_stream, segment:segments(name, description, definition)')
       .eq('id', campaignId)
       .maybeSingle()
 
@@ -93,13 +93,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return conflict('Select a segment before generating copy — it defines the audience.')
     }
 
-    const audience = await resolveSegmentMembers(db, segment.definition)
+    const audience = await resolveSegmentMembers(db, segment.definition, campaign.consent_stream)
 
     if (audience.total === 0) {
       return conflict('This segment currently matches no contacts, so there is no audience to write for.')
     }
 
-    const filters = segmentDefinitionToFilters(segment.definition)
+    const filters = segmentDefinitionToFilters(segment.definition, campaign.consent_stream)
 
     // Resolve the job type to its name. The segment stores a UUID, and handing the
     // model a UUID is worse than handing it nothing — it is noise that looks like

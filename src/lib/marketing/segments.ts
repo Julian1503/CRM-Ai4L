@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 import { parseContactFilters, type ContactFilters } from '@/lib/contacts/query'
 import { applyContactFilters, findOrganisationIdsMatching } from '@/lib/contacts/repository'
-import type { ContactRow, Database } from '@/lib/db/types'
+import type { ConsentStream, ContactRow, Database } from '@/lib/db/types'
 
 /**
  * Segments — stored filter definitions used to build campaign audiences.
@@ -32,12 +32,23 @@ type SegmentDefinition = Record<string, unknown>
  * Two invariants are forced regardless of what the stored JSON says, because a row can
  * be hand-edited or arrive from an older migration:
  *
- * - `subscribed` is always true. Marketing to contacts who never opted in is the
- *   Australian Spam Act exposure recorded in PLAN.md; a segment must not be able to
- *   express it.
+ * - The consent for `stream` is always required. Marketing to contacts who never opted
+ *   in is the Australian Spam Act exposure recorded in PLAN.md; a segment must not be
+ *   able to express it.
  * - `includeArchived` is always false. Archived contacts are archived.
+ *
+ * The stream comes from the *campaign*, not from the definition. A segment describes
+ * people ("NSW electricians"); which permission is being spent on them is a property of
+ * what is being sent, and storing it in the definition would let a hand-edited row pick
+ * its own gate — the one thing this function exists to prevent.
+ *
+ * Only the campaign's own stream is required. The other is left unfiltered rather than
+ * excluded: a contact who takes both is a legitimate recipient of either.
  */
-export function segmentDefinitionToFilters(definition: unknown): ContactFilters {
+export function segmentDefinitionToFilters(
+  definition: unknown,
+  stream: ConsentStream
+): ContactFilters {
   const source: SegmentDefinition =
     typeof definition === 'object' && definition !== null && !Array.isArray(definition)
       ? (definition as SegmentDefinition)
@@ -58,7 +69,8 @@ export function segmentDefinitionToFilters(definition: unknown): ContactFilters 
 
   return {
     ...filters,
-    subscribed: true,
+    subscribed: stream === 'newsletter' ? true : null,
+    subscribedToPrograms: stream === 'programs' ? true : null,
     includeArchived: false,
     page: 1,
     pageSize: Math.min(filters.pageSize, SEGMENT_MEMBER_CAP),
@@ -97,10 +109,11 @@ export type SegmentPage = SegmentMembers & { page: number; pageSize: number }
 export async function resolveSegmentPage(
   db: SupabaseClient<Database>,
   definition: unknown,
+  stream: ConsentStream,
   params: { page: number; pageSize: number }
 ): Promise<SegmentPage> {
   const filters = {
-    ...segmentDefinitionToFilters(definition),
+    ...segmentDefinitionToFilters(definition, stream),
     page: Math.max(1, params.page),
     pageSize: Math.max(1, Math.min(params.pageSize, SEGMENT_MEMBER_CAP)),
   }
@@ -144,10 +157,11 @@ export async function resolveSegmentPage(
  */
 export async function resolveSegmentMembers(
   db: SupabaseClient<Database>,
-  definition: unknown
+  definition: unknown,
+  stream: ConsentStream
 ): Promise<SegmentMembers> {
   const filters = {
-    ...segmentDefinitionToFilters(definition),
+    ...segmentDefinitionToFilters(definition, stream),
     pageSize: SEGMENT_MEMBER_CAP,
     page: 1,
   }

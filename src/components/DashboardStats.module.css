@@ -103,6 +103,18 @@
   box-shadow: 0 0 15px rgba(1, 172, 219, 0.15);
 }
 
+/* Violet: the one hue in this row not already spoken for. Written literally rather
+   than promoted to a token, since a single card is not yet a semantic colour. */
+.programsIcon {
+  background-color: rgba(139, 92, 246, 0.08);
+  border-color: rgba(139, 92, 246, 0.2);
+  color: #8b5cf6;
+  box-shadow: 0 0 10px rgba(139, 92, 246, 0.05);
+}
+.cardShell:hover .programsIcon {
+  box-shadow: 0 0 15px rgba(139, 92, 246, 0.15);
+}
+
 .newsletterIcon {
   background-color: rgba(249, 137, 8, 0.08);
   border-color: rgba(249, 137, 8, 0.2);

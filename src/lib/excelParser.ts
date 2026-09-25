@@ -25,7 +25,15 @@ export interface MappedContactRow {
     department?: string;
     position?: string;
     isCustomer: boolean;
-    subscribedToNewsletter: boolean;
+    /**
+     * Undefined when the spreadsheet has no column for this consent — which is not the
+     * same as `false`, and the import RPC reads the difference. Absent says nothing
+     * about consent and leaves an existing contact's alone; `false` withdraws it.
+     * Collapsing the two is how a re-import used to re-subscribe people who had
+     * unsubscribed since the last one.
+     */
+    subscribedToNewsletter?: boolean;
+    subscribedToPrograms?: boolean;
   };
 }
 
@@ -171,9 +179,12 @@ export function mapAndValidateRows(
     const position = getValue('position') || undefined;
     
     const isCustomer = parseBoolean(mapping.isCustomer ? row[mapping.isCustomer] : false);
-    const subscribedToNewsletter = parseBoolean(
-      mapping.subscribedToNewsletter ? row[mapping.subscribedToNewsletter] : false
-    );
+    const subscribedToNewsletter = mapping.subscribedToNewsletter
+      ? parseBoolean(row[mapping.subscribedToNewsletter])
+      : undefined;
+    const subscribedToPrograms = mapping.subscribedToPrograms
+      ? parseBoolean(row[mapping.subscribedToPrograms])
+      : undefined;
 
     // Validation checks
     if (!firstName || (!lastName && !mapping.fullName)) {
@@ -210,6 +221,7 @@ export function mapAndValidateRows(
             position,
             isCustomer,
             subscribedToNewsletter,
+            subscribedToPrograms,
           }
         : undefined,
     };

@@ -21,7 +21,9 @@ const row = {
   is_customer: true,
   status: 'customer',
   subscribed_to_newsletter: true,
+  subscribed_to_programs: false,
   deleted_at: null,
+  archive_reason: null,
   created_at: '2026-01-01T00:00:00.000Z',
   organisation: { name: 'Analytical Engines' },
   job_type: { name: 'Electrician' },
@@ -56,6 +58,9 @@ describe('toExportRows', () => {
     const [flat] = toExportRows([row as never])
 
     expect(flat.subscribed_to_newsletter).toBe('Yes')
+    // Rendered independently: the two consents are separate permissions, and an export
+    // that collapsed them would hand the client a file they cannot act on.
+    expect(flat.subscribed_to_programs).toBe('No')
   })
 })
 

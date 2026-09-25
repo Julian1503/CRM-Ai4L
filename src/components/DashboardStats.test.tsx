@@ -9,6 +9,7 @@ function renderStats(overrides: Partial<React.ComponentProps<typeof DashboardSta
       customers={120}
       prospects={5082}
       newsletterSubscribers={5082}
+      programSubscribers={5150}
       {...overrides}
     />
   )
@@ -44,7 +45,13 @@ describe('DashboardStats', () => {
 
   describe('derived percentages', () => {
     it('reports conversion, lead and subscriber share', () => {
-      renderStats({ totalContacts: 200, customers: 50, prospects: 150, newsletterSubscribers: 100 })
+      renderStats({
+        totalContacts: 200,
+        customers: 50,
+        prospects: 150,
+        newsletterSubscribers: 100,
+        programSubscribers: 150,
+      })
 
       expect(screen.getByText('25% conversion rate')).toBeInTheDocument()
       expect(screen.getByText('75% active leads')).toBeInTheDocument()
@@ -54,7 +61,13 @@ describe('DashboardStats', () => {
     it('shows 0% rather than NaN on an empty database', () => {
       // The first thing a new deployment renders. A NaN here is the classic
       // divide-by-zero that reaches production because nobody tested day one.
-      renderStats({ totalContacts: 0, customers: 0, prospects: 0, newsletterSubscribers: 0 })
+      renderStats({
+        totalContacts: 0,
+        customers: 0,
+        prospects: 0,
+        newsletterSubscribers: 0,
+        programSubscribers: 0,
+      })
 
       expect(screen.getByText('0% conversion rate')).toBeInTheDocument()
       expect(screen.getByText('0% active leads')).toBeInTheDocument()

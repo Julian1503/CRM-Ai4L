@@ -217,7 +217,7 @@ describe('POST emailoctopus webhook', () => {
     it('creates a contact for a brand-new subscriber', async () => {
       // The whole point of scope 3.2. The previous handler updated zero rows and
       // still returned 200, so new signups vanished.
-      const { contacts } = setupDb({ existing: null })
+      const { contacts, db } = setupDb({ existing: null })
 
       const response = await POST(request(subscribePayload))
 
@@ -227,9 +227,14 @@ describe('POST emailoctopus webhook', () => {
       const insert = contacts.argsFor('insert') as [Record<string, unknown>]
       expect(insert[0]).toMatchObject({
         email: 'grace@example.com',
-        subscribed_to_newsletter: true,
         source: 'newsletter',
       })
+
+      // Consent arrives through the attributed RPC rather than inline on the insert.
+      expect(db.rpc).toHaveBeenCalledWith(
+        'apply_contact_consent',
+        expect.objectContaining({ p_newsletter: true, p_source: 'newsletter_webhook' })
+      )
     })
 
     it('updates an existing contact instead of duplicating them', async () => {
@@ -242,7 +247,7 @@ describe('POST emailoctopus webhook', () => {
     })
 
     it('unsubscribes on contact.deleted without removing the CRM record', async () => {
-      const { contacts } = setupDb({ existing: { id: 'c1' } })
+      const { contacts, db } = setupDb({ existing: { id: 'c1' } })
 
       await POST(
         request([
@@ -250,8 +255,12 @@ describe('POST emailoctopus webhook', () => {
         ])
       )
 
-      const update = contacts.argsFor('update') as [Record<string, unknown>]
-      expect(update[0].subscribed_to_newsletter).toBe(false)
+      // Removal from the provider's list withdraws both consents — it is the reader
+      // asking to stop being emailed, not to stop one stream of it.
+      expect(db.rpc).toHaveBeenCalledWith(
+        'apply_contact_consent',
+        expect.objectContaining({ p_newsletter: false, p_programs: false })
+      )
       expect(contacts.allFor('delete')).toHaveLength(0)
     })
 
@@ -274,12 +283,12 @@ describe('POST emailoctopus webhook', () => {
   describe('batched deliveries', () => {
     it('applies every event in a delivery', async () => {
       // EmailOctopus buffers events for about a minute and sends up to 1000 at once.
-      const { contacts } = setupDb({
+      // One lookup per event now: the consent write goes through the RPC rather than
+      // through this builder, so the queue no longer interleaves update responses.
+      const { db } = setupDb({
         contacts: [
           { data: { id: 'c1', deleted_at: null }, error: null },
-          { data: null, error: null },
           { data: { id: 'c2', deleted_at: null }, error: null },
-          { data: null, error: null },
         ],
       })
 
@@ -296,7 +305,7 @@ describe('POST emailoctopus webhook', () => {
       )
 
       await expect(response.json()).resolves.toMatchObject({ updated: 2, received: 2 })
-      expect(contacts.allFor('update')).toHaveLength(2)
+      expect(db.rpc).toHaveBeenCalledTimes(2)
     })
 
     it('logs a batch with a single insert rather than one per event', async () => {

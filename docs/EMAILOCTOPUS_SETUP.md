@@ -46,6 +46,49 @@ in it, and nothing in the send ledger, the provider reports, or the CRM shows a 
 | `Benefit3` | Benefit 3 | 110 | A third |
 | `CtaLabel` | Call-to-action button label | 28 | The button text |
 | `BookingUrl` | Booking link | — | **Set per recipient at send time. Never type a value here.** |
+| `PrefsUrl` | Email preferences link | — | **Set by the sync. Never type a value here.** |
+| `Newsletter` | Subscribed to newsletter | — | `yes` / `no`. Set by the sync. |
+| `Courses` | Subscribed to courses | — | `yes` / `no`. Set by the sync. |
+
+### The three consent fields, and why they exist
+
+A list has **one** subscription status per contact, and since dual consent it means
+"may we email this person at all" — it is `subscribed` if they accepted *either* stream.
+It has to be: a contact marked `unsubscribed` cannot be queued into an automation, so
+reading it as the newsletter flag alone would make course email unsendable to anyone who
+declined the newsletter.
+
+That leaves two things the status cannot say, and both travel as fields:
+
+- **`Newsletter` / `Courses`** record which consent the contact actually holds.
+  **If you send a newsletter from the EmailOctopus dashboard, segment it on
+  `Newsletter = yes`.** Sending to the whole list reaches people who only ever agreed to
+  hear about courses. Nothing in the CRM can enforce this — campaigns sent *through* the
+  CRM are gated on the campaign's own stream, but a broadcast composed in EmailOctopus
+  never passes through this codebase.
+- **`PrefsUrl`** is the contact's permanent preference-centre link. It is written by the
+  sync rather than at send time because, unlike `BookingUrl`, it never changes — which is
+  what lets a dashboard-composed newsletter carry a working unsubscribe too.
+
+Put all four links in the template footer by appending a path to `{{PrefsUrl}}`:
+
+```html
+<a href="{{PrefsUrl}}">Email preferences</a> ·
+<a href="{{PrefsUrl}}/newsletter">Stop the newsletter</a> ·
+<a href="{{PrefsUrl}}/programs">Stop course emails</a> ·
+<a href="{{PrefsUrl}}/all">Unsubscribe from everything</a>
+```
+
+**Check this renders before the first send.** The merge tag is substituted inline, so a
+suffix after it should work exactly as it does for `{{BookingUrl}}` inside an `href` —
+but it has not been confirmed against a real EmailOctopus template. Send yourself a test
+and click each link. If the suffix does not survive substitution, the fallback is four
+separate fields written by the sync instead of one.
+
+None of these links act on click: they open a page with the change pre-selected and a
+button. That is deliberate — Outlook Safe Links and similar gateways fetch every URL in
+an email before the reader sees it, and a link that unsubscribed on load would empty a
+share of the list on the first send.
 
 **Status: created on the "New Start" list on 2026-08-20.** To check or repair them from
 the app, `GET /api/integrations/emailoctopus/fields` reports what is missing and `POST`
@@ -160,10 +203,18 @@ come back through Stripe and Calendly, which we control.
 
 Australian **Spam Act 2003** applies to every campaign sent from here.
 
-- Segments force `subscribed_to_newsletter = true` and exclude archived contacts. This is
+- Consent is per stream. `contacts` carries `subscribed_to_newsletter` and
+  `subscribed_to_programs` (courses and training), and each campaign records which of the
+  two it spends in `campaigns.consent_stream`, frozen at creation from its template.
+- Segments force the consent matching that stream and exclude archived contacts. This is
   not a UI default — it is applied in `segmentDefinitionToFilters` regardless of what the
   stored segment definition says, so a hand-edited row cannot express a send to people who
-  never opted in.
+  never opted in, and a course campaign cannot reach the newsletter's audience.
+- Losing every consent archives the contact, and the reverse restores them. Both are
+  database triggers, not application code, because five paths write consent and only the
+  database sees all five. Every change is recorded in `contact_consent_events` with its
+  source — which is the evidence the Spam Act actually asks for, and what a boolean alone
+  cannot provide.
 - Generated copy is instructed not to claim the reader requested the message, and not to
   reference a relationship that has not been established.
 - Sender identification and a working unsubscribe link are **the template's

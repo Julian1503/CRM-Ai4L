@@ -185,11 +185,16 @@ describe('findMissingMergeFields', () => {
     expect(findMissingMergeFields(tags)).toEqual([])
   })
 
-  test('names the booking link when only the copy fields were created', () => {
+  test('names every reserved field when only the copy fields were created', () => {
+    // The reserved fields are the ones nothing in the email can do without: the booking
+    // link the campaign exists to deliver, the preference link that makes it lawful to
+    // send, and the consent state a natively-sent newsletter segments on. All three are
+    // set by this system, never by the copywriter.
     const missing = findMissingMergeFields(
       CAMPAIGN_COPY_FIELDS.map((field) => field.tag)
     )
 
-    expect(missing).toEqual([BOOKING_URL_MERGE_FIELD])
+    expect(missing).toEqual([...RESERVED_MERGE_FIELDS])
+    expect(missing).toContain(BOOKING_URL_MERGE_FIELD)
   })
 })

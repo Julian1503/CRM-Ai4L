@@ -17,6 +17,8 @@ export interface ContactInput {
   isCustomer: boolean;
   servicesBought: string[];
   subscribedToNewsletter: boolean;
+  /** Courses, trainings and programmes. A separate permission, not a shade of the same one. */
+  subscribedToPrograms: boolean;
 }
 
 export interface ValidationResult {
@@ -74,6 +76,7 @@ export function validateContact(input: Record<string, unknown>): ValidationResul
     isCustomer,
     servicesBought,
     subscribedToNewsletter: !!input.subscribedToNewsletter,
+    subscribedToPrograms: !!input.subscribedToPrograms,
   };
 
   const isValid = Object.keys(errors).length === 0;

@@ -103,6 +103,10 @@ export function createDbMock(
 
   return {
     from: jest.fn((table: string) => resolve(table)),
-    rpc: jest.fn(),
+    // Resolves like a successful PostgREST call by default. A bare `jest.fn()` returns
+    // undefined, and every caller destructures `{ data, error }` off the result — so an
+    // un-stubbed rpc used to fail as a TypeError rather than as the assertion the test
+    // was actually making.
+    rpc: jest.fn(async () => ({ data: null, error: null })),
   }
 }

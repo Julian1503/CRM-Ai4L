@@ -40,7 +40,9 @@ export function buildContactRow(overrides: Partial<ContactRow> = {}): ContactRow
     is_customer: false,
     status: 'prospect' as ContactStatus,
     subscribed_to_newsletter: false,
+    subscribed_to_programs: false,
     deleted_at: null,
+    archive_reason: null,
     source: null,
     created_at: '2026-01-01T00:00:00.000Z',
     ...overrides,
@@ -51,6 +53,9 @@ export function buildArchivedContactRow(overrides: Partial<ContactRow> = {}): Co
   return buildContactRow({
     status: 'archived',
     deleted_at: '2026-06-01T00:00:00.000Z',
+    // The database never leaves an archived row without one; defaulting to the
+    // operator's own decision keeps a fixture from implying an unsubscribe.
+    archive_reason: 'manual',
     ...overrides,
   })
 }

@@ -26,6 +26,15 @@ export type SyncOptions = {
   maxAttempts?: number
   /** Injectable for tests; defaults to a real timer. */
   sleep?: (ms: number) => Promise<void>
+  /**
+   * Custom fields to write alongside the name, merged into the list's own field set.
+   *
+   * This is how anything the provider's status cannot express reaches a template: which
+   * of the two consents the contact holds, and their preference-centre link. A field
+   * the list does not define is ignored by EmailOctopus without an error, which is why
+   * /api/integrations/emailoctopus/fields exists to report the missing ones.
+   */
+  fields?: Record<string, string>
 }
 
 const DEFAULT_MAX_ATTEMPTS = 3
@@ -96,6 +105,7 @@ export async function syncContactToEmailOctopus(
     fields: {
       FirstName: firstName,
       LastName: lastName,
+      ...options.fields,
     },
     status: STATUS_MAP[status],
   })

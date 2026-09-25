@@ -198,7 +198,7 @@ describe('applyNewsletterEvent', () => {
   }
 
   it('updates an existing active contact', async () => {
-    const { builder, db } = dbReturning(
+    const { db } = dbReturning(
       { data: { id: 'c1', deleted_at: null }, error: null },
       { data: null, error: null }
     )
@@ -206,8 +206,17 @@ describe('applyNewsletterEvent', () => {
     const result = await applyNewsletterEvent(db as never, event)
 
     expect(result.action).toBe('updated')
-    const update = builder.argsFor('update') as [Record<string, unknown>]
-    expect(update[0].subscribed_to_newsletter).toBe(true)
+    expect(db.rpc).toHaveBeenCalledWith(
+      'apply_contact_consent',
+      expect.objectContaining({
+        p_contact_id: 'c1',
+        p_newsletter: true,
+        // A newsletter signup says nothing about courses, so that consent is left as it
+        // is rather than granted.
+        p_programs: null,
+        p_source: 'newsletter_webhook',
+      })
+    )
   })
 
   it('creates a new lead when nobody matches — the core of the requirement', async () => {
@@ -227,10 +236,21 @@ describe('applyNewsletterEvent', () => {
       email: 'grace@example.com',
       first_name: 'Grace',
       last_name: 'Hopper',
-      subscribed_to_newsletter: true,
       status: 'lead',
       source: 'newsletter',
     })
+
+    // Consent is granted in a second, attributed step rather than inlined into the
+    // insert: a signup is the strongest evidence of consent the system holds, and the
+    // ledger records who said so only when it goes through the RPC.
+    expect(db.rpc).toHaveBeenCalledWith(
+      'apply_contact_consent',
+      expect.objectContaining({
+        p_contact_id: 'c-new',
+        p_newsletter: true,
+        p_source: 'newsletter_webhook',
+      })
+    )
   })
 
   it('does not create a contact for an unsubscribe of someone unknown', async () => {
@@ -258,20 +278,34 @@ describe('applyNewsletterEvent', () => {
 
     expect(result.action).toBe('created')
     expect(result.archivedMatchExists).toBe(true)
-    const update = builder.allFor('update')
-    expect(update).toHaveLength(0)
+    expect(builder.allFor('update')).toHaveLength(0)
+    // The archived row is left alone; only the new lead gets consent.
+    expect(db.rpc).toHaveBeenCalledWith(
+      'apply_contact_consent',
+      expect.objectContaining({ p_contact_id: 'c-new' })
+    )
   })
 
   it('records the unsubscribe against an existing contact', async () => {
-    const { builder, db } = dbReturning(
+    const { db } = dbReturning(
       { data: { id: 'c1', deleted_at: null }, error: null },
       { data: null, error: null }
     )
 
     await applyNewsletterEvent(db as never, { ...event, type: 'unsubscribed' })
 
-    const update = builder.argsFor('update') as [Record<string, unknown>]
-    expect(update[0].subscribed_to_newsletter).toBe(false)
+    // Both consents, not just the newsletter. The provider's unsubscribe is list-level:
+    // the reader asked to stop being emailed, and leaving programme consent standing
+    // would keep sending them course invitations from the list they just left.
+    expect(db.rpc).toHaveBeenCalledWith(
+      'apply_contact_consent',
+      expect.objectContaining({
+        p_contact_id: 'c1',
+        p_newsletter: false,
+        p_programs: false,
+        p_source: 'newsletter_webhook',
+      })
+    )
   })
 
   it('does not downgrade the status of an existing customer', async () => {
@@ -282,9 +316,13 @@ describe('applyNewsletterEvent', () => {
 
     await applyNewsletterEvent(db as never, event)
 
-    // A newsletter signup must not turn a paying customer back into a lead.
-    const update = builder.argsFor('update') as [Record<string, unknown>]
-    expect(update[0]).not.toHaveProperty('status')
+    // A newsletter signup must not turn a paying customer back into a lead. The consent
+    // RPC touches the two consent columns and nothing else, so status cannot move.
+    expect(builder.allFor('update')).toHaveLength(0)
+    expect(db.rpc).toHaveBeenCalledWith(
+      'apply_contact_consent',
+      expect.not.objectContaining({ status: expect.anything() })
+    )
   })
 
   it('surfaces a lookup failure instead of pretending it succeeded', async () => {

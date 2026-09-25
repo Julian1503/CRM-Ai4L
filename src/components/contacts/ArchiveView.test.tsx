@@ -13,7 +13,21 @@ const archived = [
     email: 'ada@example.com',
     state: 'NSW',
     deleted_at: '2026-06-01T00:00:00.000Z',
+    archive_reason: 'manual',
     organisation: { name: 'Analytical Engines' },
+  },
+]
+
+const optedOut = [
+  {
+    id: 'c2',
+    first_name: 'Grace',
+    last_name: 'Hopper',
+    email: 'grace@example.com',
+    state: 'VIC',
+    deleted_at: '2026-07-01T00:00:00.000Z',
+    archive_reason: 'opted_out',
+    organisation: null,
   },
 ]
 
@@ -120,6 +134,53 @@ describe('ArchiveView', () => {
         '/api/contacts?includeArchived=true&page=1&pageSize=50'
       )
     )
+  })
+
+  it('says why each contact is in the archive', async () => {
+    // "Archived here" and "opted out" mean different things for the Restore button
+    // beside them, and only one of the two is reversible by restoring.
+    render(<ArchiveView />)
+
+    expect(await screen.findByText('Archived here')).toBeInTheDocument()
+  })
+
+  it('warns before restoring somebody who opted out of every email', async () => {
+    const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(false)
+
+    routeFetch({
+      'GET /api/contacts?includeArchived=true': jsonResponse({ contacts: optedOut, total: 1 }),
+      'POST /api/contacts/c2': jsonResponse({ ok: true }),
+    })
+
+    render(<ArchiveView />)
+    expect(await screen.findByText('Opted out of all email')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('restore-c2'))
+
+    expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('not their consent'))
+    // Declining the warning must not restore anybody.
+    expect(mockFetch).not.toHaveBeenCalledWith('/api/contacts/c2', { method: 'POST' })
+
+    confirmSpy.mockRestore()
+  })
+
+  it('restores a manually archived contact without a consent warning', async () => {
+    const confirmSpy = jest.spyOn(window, 'confirm')
+
+    routeFetch({
+      ...listHandler,
+      'POST /api/contacts/c1': jsonResponse({ ok: true }),
+    })
+
+    render(<ArchiveView />)
+    fireEvent.click(await screen.findByTestId('restore-c1'))
+
+    await waitFor(() =>
+      expect(mockFetch).toHaveBeenCalledWith('/api/contacts/c1', { method: 'POST' })
+    )
+    expect(confirmSpy).not.toHaveBeenCalled()
+
+    confirmSpy.mockRestore()
   })
 
   it('lists archived contacts with the date they were archived', async () => {

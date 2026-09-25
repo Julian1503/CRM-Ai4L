@@ -75,6 +75,38 @@ describe('excelParser - mapAndValidateRows', () => {
     });
   });
 
+  it('leaves a consent undefined when the spreadsheet has no column for it', () => {
+    // Undefined and false are different answers: the import RPC grants consent to a new
+    // contact on the first and withdraws it on the second. Reading an unmapped column
+    // as `false` is what let a re-import silently unsubscribe, then re-subscribe, a
+    // whole spreadsheet.
+    const results = mapAndValidateRows(
+      [{ 'Full Name': 'No Consent Column', 'Email Address': 'no@column.test' }],
+      { fullName: 'Full Name', email: 'Email Address' }
+    );
+
+    expect(results[0].isValid).toBe(true);
+    expect(results[0].data?.subscribedToNewsletter).toBeUndefined();
+    expect(results[0].data?.subscribedToPrograms).toBeUndefined();
+  });
+
+  it('reads a mapped consent column, including an explicit no', () => {
+    const results = mapAndValidateRows(
+      [
+        {
+          'Full Name': 'Opted Out',
+          'Email Address': 'opted@out.test',
+          'Sync Newsletter': 'No',
+          Courses: 'Yes',
+        },
+      ],
+      { ...mapping, subscribedToPrograms: 'Courses' }
+    );
+
+    expect(results[0].data?.subscribedToNewsletter).toBe(false);
+    expect(results[0].data?.subscribedToPrograms).toBe(true);
+  });
+
   it('should automatically split full name into first and last name', () => {
     const rawRows = [
       { 'Full Name': 'SingleName', 'Email Address': 'test@test.com' },

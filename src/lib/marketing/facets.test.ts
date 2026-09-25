@@ -19,7 +19,8 @@ const ROWS: FacetRow[] = [
   { state: null, job_type_id: null, status: 'lead' },
 ]
 
-const filtersFor = (definition: Record<string, string>) => segmentDefinitionToFilters(definition)
+const filtersFor = (definition: Record<string, string>) =>
+  segmentDefinitionToFilters(definition, 'newsletter')
 
 describe('computeSegmentFacets', () => {
   it('counts every option when nothing is selected', () => {
@@ -85,7 +86,7 @@ describe('resolveSegmentFacets', () => {
   it('counts through the active_contacts view', async () => {
     const { db } = setup()
 
-    await resolveSegmentFacets(db as never, {})
+    await resolveSegmentFacets(db as never, {}, 'newsletter')
 
     expect(db.from).toHaveBeenCalledWith('active_contacts')
   })
@@ -93,7 +94,7 @@ describe('resolveSegmentFacets', () => {
   it('reads only the three columns the builder filters on', async () => {
     const { builder, db } = setup()
 
-    await resolveSegmentFacets(db as never, {})
+    await resolveSegmentFacets(db as never, {}, 'newsletter')
 
     expect(builder.argsFor('select')?.[0]).toBe('state, job_type_id, status')
   })
@@ -103,7 +104,7 @@ describe('resolveSegmentFacets', () => {
     // would return exactly the rows the counts must look past.
     const { builder, db } = setup()
 
-    await resolveSegmentFacets(db as never, { state: 'NSW', status: 'lead', jobTypeId: 'elec' })
+    await resolveSegmentFacets(db as never, { state: 'NSW', status: 'lead', jobTypeId: 'elec' }, 'newsletter')
 
     const columns = builder.allFor('eq').map((call) => call.args[0])
     expect(columns).toContain('subscribed_to_newsletter')
@@ -115,7 +116,7 @@ describe('resolveSegmentFacets', () => {
   it('counts against the filters the definition asked for', async () => {
     const { db } = setup()
 
-    const facets = await resolveSegmentFacets(db as never, { state: 'NSW' })
+    const facets = await resolveSegmentFacets(db as never, { state: 'NSW' }, 'newsletter')
 
     expect(facets.jobType).toEqual({ '': 5, elec: 3, plumb: 2 })
   })
@@ -123,7 +124,7 @@ describe('resolveSegmentFacets', () => {
   it('caps the rows it reads', async () => {
     const { builder, db } = setup()
 
-    await resolveSegmentFacets(db as never, {})
+    await resolveSegmentFacets(db as never, {}, 'newsletter')
 
     expect((builder.argsFor('range') as [number, number])[1]).toBe(SEGMENT_MEMBER_CAP - 1)
   })
@@ -132,18 +133,18 @@ describe('resolveSegmentFacets', () => {
     // Past the cap the numbers describe the first N contacts, not the audience.
     const { db } = setup(ROWS, SEGMENT_MEMBER_CAP + 1)
 
-    expect((await resolveSegmentFacets(db as never, {})).truncated).toBe(true)
+    expect((await resolveSegmentFacets(db as never, {}, 'newsletter')).truncated).toBe(true)
   })
 
   it('is not truncated when the audience fits', async () => {
     const { db } = setup()
 
-    expect((await resolveSegmentFacets(db as never, {})).truncated).toBe(false)
+    expect((await resolveSegmentFacets(db as never, {}, 'newsletter')).truncated).toBe(false)
   })
 
   it('surfaces a query failure', async () => {
     const builder = createQueryBuilderMock({ data: null, error: { message: 'boom' }, count: null })
 
-    await expect(resolveSegmentFacets(createDbMock(builder) as never, {})).rejects.toThrow(/boom/)
+    await expect(resolveSegmentFacets(createDbMock(builder) as never, {}, 'newsletter')).rejects.toThrow(/boom/)
   })
 })

@@ -109,6 +109,29 @@ payment → scheduling flow stops at the point the missing one is needed.
 | `CALENDLY_WEBHOOK_SECRET` | **Secret** | Bookings stay at `paid` forever — nothing marks them scheduled |
 | `NEXT_PUBLIC_CALENDLY_SCHEDULING_URL` | Public | Nowhere to send a paid customer to book a time |
 | `EMAILOCTOPUS_WEBHOOK_SECRET` | **Secret** | Newsletter subscribe/unsubscribe events are rejected with 401 |
+| `PREFERENCES_SECRET` | **Secret** | Preference links cannot be signed: `PrefsUrl` is left off the contact and every email ships without a working unsubscribe |
+
+#### `PREFERENCES_SECRET` signs every unsubscribe link, and rotating it breaks the old ones
+
+Generate one, once, and keep it:
+
+```bash
+node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"
+```
+
+The signature is what stops somebody editing the contact id inside their own preference
+link and unsubscribing the rest of the database one id at a time. It is deterministic on
+purpose — the same contact always gets the same URL, so the sync can store it on the
+EmailOctopus contact and every template, including newsletters sent from their dashboard,
+carries the same working link.
+
+Rotating the secret **invalidates every link already in somebody's inbox**. The token
+format carries a `v1.` prefix so a future rotation can verify both, but until that is
+built, treat rotation as a deliberate migration and not a routine hygiene step. If it
+leaks, rotate anyway: a forged link changes consent, which is worse.
+
+Without it the sync still runs and still pushes consent state; it just omits the link
+field, and `GET /api/integrations/emailoctopus/fields` reports `PrefsUrl` as missing.
 
 ### Optional — the app degrades cleanly
 

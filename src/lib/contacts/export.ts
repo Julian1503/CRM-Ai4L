@@ -44,7 +44,8 @@ const FULL_COLUMNS: CsvColumn[] = [
   { key: 'postcode', header: 'Postcode' },
   { key: 'country', header: 'Country' },
   { key: 'status', header: 'Status' },
-  { key: 'subscribed_to_newsletter', header: 'Subscribed' },
+  { key: 'subscribed_to_newsletter', header: 'Newsletter' },
+  { key: 'subscribed_to_programs', header: 'Courses & training' },
   { key: 'created_at', header: 'Created' },
 ]
 
@@ -66,6 +67,7 @@ export function toExportRows(rows: JoinedContactRow[]): Record<string, unknown>[
     organisation: row.organisation?.name ?? '',
     job_type: row.job_type?.name ?? '',
     subscribed_to_newsletter: row.subscribed_to_newsletter ? 'Yes' : 'No',
+    subscribed_to_programs: row.subscribed_to_programs ? 'Yes' : 'No',
   }))
 }
 

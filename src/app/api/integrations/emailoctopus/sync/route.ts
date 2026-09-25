@@ -2,6 +2,11 @@ import { NextResponse, type NextRequest } from 'next/server'
 
 import { getSession } from '@/lib/auth/dal'
 import { syncContactToEmailOctopus, type SubscriptionStatus } from '@/lib/emailOctopus'
+import {
+  CONSENT_STATE_MERGE_FIELDS,
+  PREFERENCES_URL_MERGE_FIELD,
+} from '@/lib/marketing/mergeFields'
+import { preferencesUrl } from '@/lib/preferences/token'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 
 export const runtime = 'nodejs'
@@ -14,10 +19,41 @@ export const SYNC_CHUNK_SIZE = 50
 const NO_STORE = { 'Cache-Control': 'private, no-store' }
 
 type SyncContact = {
+  /** Needed to sign the preference link. Absent for a contact posted from the client. */
+  id?: string
   email: string
   firstName?: string
   lastName?: string
   subscribedToNewsletter?: boolean
+  subscribedToPrograms?: boolean
+}
+
+const [NEWSLETTER_FIELD, COURSES_FIELD] = CONSENT_STATE_MERGE_FIELDS
+
+/**
+ * The custom fields written with every contact.
+ *
+ * Two jobs the list status cannot do. `Newsletter` / `Courses` record *which* consent
+ * the contact holds, so a newsletter sent from the EmailOctopus dashboard can be
+ * segmented on it rather than going to everyone we are allowed to email. `PrefsUrl` is
+ * their permanent preference-centre link, stored on the contact so that any template —
+ * including ones this codebase never sees — can carry a working unsubscribe.
+ *
+ * The link is omitted rather than faked when it cannot be signed. A field holding a
+ * broken URL is worse than an absent one: the absent field shows up in the setup
+ * checker, the broken link only shows up as a reader who could not unsubscribe.
+ */
+function contactFields(contact: SyncContact, origin: string | null): Record<string, string> {
+  const fields: Record<string, string> = {
+    [NEWSLETTER_FIELD]: contact.subscribedToNewsletter ? 'yes' : 'no',
+    [COURSES_FIELD]: contact.subscribedToPrograms ? 'yes' : 'no',
+  }
+
+  if (contact.id && origin) {
+    fields[PREFERENCES_URL_MERGE_FIELD] = preferencesUrl(origin, contact.id)
+  }
+
+  return fields
 }
 
 type SyncPayload = {
@@ -55,7 +91,7 @@ async function fetchSyncContactChunk(offset: number): Promise<{
   const db = await createSupabaseServerClient()
   const { data, error } = await db
     .from('active_contacts')
-    .select('email, first_name, last_name, subscribed_to_newsletter')
+    .select('id, email, first_name, last_name, subscribed_to_newsletter, subscribed_to_programs')
     .order('created_at', { ascending: true })
     // Fetch one sentinel row beyond the chunk to prove whether more work remains.
     .range(offset, offset + SYNC_CHUNK_SIZE)
@@ -68,15 +104,37 @@ async function fetchSyncContactChunk(offset: number): Promise<{
   const contacts = rows.slice(0, SYNC_CHUNK_SIZE).flatMap((row) =>
     typeof row.email === 'string' && row.email.trim() !== ''
       ? [{
+          id: row.id,
           email: row.email,
           firstName: row.first_name ?? '',
           lastName: row.last_name ?? '',
           subscribedToNewsletter: Boolean(row.subscribed_to_newsletter),
+          subscribedToPrograms: Boolean(row.subscribed_to_programs),
         }]
       : []
   )
 
   return { contacts, hasMore: rows.length > SYNC_CHUNK_SIZE }
+}
+
+/**
+ * Where preference links should point, or null when they cannot be signed.
+ *
+ * A missing PREFERENCES_SECRET is a deployment fault. It is logged once and the field
+ * is skipped, rather than aborting a sync that is otherwise correct — the contacts
+ * still need their consent state pushed, and the setup checker reports the gap.
+ */
+function readPreferencesOrigin(request: NextRequest): string | null {
+  try {
+    // Signing a throwaway id is the cheapest way to ask "is the secret configured"
+    // without duplicating that knowledge here.
+    preferencesUrl('https://example.invalid', '00000000-0000-4000-8000-000000000000')
+  } catch (error) {
+    console.error('Preference links are not configured, syncing without them:', error)
+    return null
+  }
+
+  return process.env.NEXT_PUBLIC_APP_URL?.trim() || request.nextUrl.origin
 }
 
 /**
@@ -121,14 +179,28 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const chunk = syncAll
       ? await fetchSyncContactChunk(offset)
       : { contacts: requested.filter(isSyncContact), hasMore: false }
+
+    // Same resolution the booking links use, so both kinds of link in an email point at
+    // the same deployment. Null when the preference link cannot be signed at all — a
+    // missing secret is a deployment fault, and it must not stop the sync, only leave
+    // the field out until it is fixed.
+    const origin = readPreferencesOrigin(request)
     const contacts = chunk.contacts
     const errors: Array<{ email: string; error: string }> = []
     let syncedCount = 0
 
     for (const contact of contacts) {
-      const status: SubscriptionStatus = contact.subscribedToNewsletter
-        ? 'SUBSCRIBED'
-        : 'UNSUBSCRIBED'
+      // The provider's list status is a single switch, so it answers the broader
+      // question: may we email this person at all? A contact who takes courses but not
+      // the newsletter must stay SUBSCRIBED here, or EmailOctopus refuses to queue the
+      // course automation for them and the second consent is unusable.
+      //
+      // The two consents are told apart on our side, where the campaign's own stream
+      // gates the audience — see segmentDefinitionToFilters.
+      const status: SubscriptionStatus =
+        contact.subscribedToNewsletter || contact.subscribedToPrograms
+          ? 'SUBSCRIBED'
+          : 'UNSUBSCRIBED'
 
       try {
         await syncContactToEmailOctopus(
@@ -137,7 +209,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           contact.email,
           contact.firstName || '',
           contact.lastName || '',
-          status
+          status,
+          { fields: contactFields(contact, origin) }
         )
         syncedCount += 1
       } catch (error: unknown) {

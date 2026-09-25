@@ -23,6 +23,23 @@ import { normaliseAuState } from './states'
  * the previous per-organisation lookup-then-insert loop (an N+1 with a race window).
  */
 
+/**
+ * Adds a consent flag only when the spreadsheet actually carried one.
+ *
+ * An absent key is what tells the RPC to leave an existing contact's consent alone and
+ * to grant it to a new one. Sending `false` for an unmapped column — which is what this
+ * function used to do — is an assertion the spreadsheet never made.
+ */
+function setConsentIfPresent(
+  target: Record<string, unknown>,
+  key: string,
+  value: boolean | undefined
+): void {
+  if (typeof value === 'boolean') {
+    target[key] = value
+  }
+}
+
 /** Adds `key` to `target` only when `value` has content, so the RPC's COALESCE keeps existing data. */
 function setIfPresent(
   target: Record<string, unknown>,
@@ -45,10 +62,13 @@ export function toImportPayload(rows: MappedContactRow[]): ImportContactPayloadR
         email: data.email.trim(),
         first_name: data.firstName.trim(),
         last_name: data.lastName.trim(),
-        // Always sent: on import the spreadsheet is authoritative for these flags.
+        // Always sent: on import the spreadsheet is authoritative for the lifecycle
+        // flag. Consent is not — see setConsentIfPresent.
         is_customer: Boolean(data.isCustomer),
-        subscribed_to_newsletter: Boolean(data.subscribedToNewsletter),
       }
+
+      setConsentIfPresent(payload, 'subscribed_to_newsletter', data.subscribedToNewsletter)
+      setConsentIfPresent(payload, 'subscribed_to_programs', data.subscribedToPrograms)
 
       setIfPresent(payload, 'preferred_name', data.preferredName)
       setIfPresent(payload, 'mobile_number', data.mobileNumber)
@@ -82,7 +102,13 @@ export async function importContacts(
 
   if (payload.length === 0) {
     // Nothing usable — report it without a pointless round trip.
-    return { inserted: 0, updated: 0, skipped: rows.length, total: rows.length }
+    return {
+      inserted: 0,
+      updated: 0,
+      skipped: rows.length,
+      archived_collisions: 0,
+      total: rows.length,
+    }
   }
 
   const { data, error } = await db.rpc('import_contacts', { payload })

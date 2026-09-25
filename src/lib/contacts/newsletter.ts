@@ -61,7 +61,7 @@ function readRecord(value: unknown): Record<string, unknown> {
 }
 
 /**
- * Works out what an event means for `subscribed_to_newsletter`.
+ * Works out what an event means for the contact's consent.
  *
  * @returns null when the event carries no usable subscription state.
  */
@@ -195,6 +195,18 @@ export type ApplyResult = {
 /**
  * Applies a subscribe/unsubscribe event to the contact database.
  *
+ * Which consents an event moves is asymmetric, and that asymmetry is the whole point of
+ * having two:
+ *
+ * - **Unsubscribing withdraws both.** EmailOctopus unsubscribes are list-level — the
+ *   link in the footer of any email removes the contact from the list entirely. The
+ *   reader clicked "stop emailing me", not "stop the newsletter", and treating it as
+ *   the narrower request would keep sending them course invitations from the same list
+ *   they just left. Losing both is also what archives them, which is the intended end.
+ * - **Subscribing grants only the newsletter.** The signup form on the website is a
+ *   newsletter form. Programme consent is left exactly as it was, because inventing it
+ *   from a newsletter signup is claiming consent the contact never gave.
+ *
  * Deliberately does **not** restore an archived contact. An external form must not be
  * able to un-archive records the client archived on purpose; instead a fresh lead is
  * created and the collision is reported so a human can merge them. The partial unique
@@ -218,13 +230,25 @@ export async function applyNewsletterEvent(
   }
 
   if (active) {
-    const { error: updateError } = await db
-      .from('contacts')
-      .update({ subscribed_to_newsletter: subscribed })
-      .eq('id', active.id)
+    // Through the RPC rather than a plain update: it is the only path that can label
+    // the resulting ledger entries, and a provider unsubscribe is the single most
+    // important thing in that ledger to be able to attribute.
+    const { error: consentError } = await db.rpc('apply_contact_consent', {
+      p_contact_id: active.id,
+      p_newsletter: subscribed,
+      // Null leaves programme consent alone on a subscribe; false withdraws it
+      // alongside the newsletter on an unsubscribe. See the doc comment.
+      p_programs: subscribed ? null : false,
+      p_source: 'newsletter_webhook',
+      p_evidence: {
+        provider_type: event.providerType,
+        provider_event_id: event.id,
+        occurred_at: event.occurredAt,
+      },
+    })
 
-    if (updateError) {
-      throw new Error(`Newsletter update failed: ${updateError.message}`)
+    if (consentError) {
+      throw new Error(`Newsletter update failed: ${consentError.message}`)
     }
 
     // Status is intentionally left alone: a newsletter signup must not demote a
@@ -250,13 +274,18 @@ export async function applyNewsletterEvent(
     return { action: 'noop', contactId: null, archivedMatchExists }
   }
 
+  // Created without consent, then granted it through the RPC. One statement would be
+  // simpler and would record the grant as `unknown`: a signup is the strongest evidence
+  // of consent this system ever holds, and an unattributed entry is the one shape it
+  // must not take.
   const { data: created, error: insertError } = await db
     .from('contacts')
     .insert({
       email: event.email,
       first_name: event.firstName || 'Unknown',
       last_name: event.lastName || 'Subscriber',
-      subscribed_to_newsletter: true,
+      subscribed_to_newsletter: false,
+      subscribed_to_programs: false,
       status: 'lead',
       is_customer: false,
       source: 'newsletter',
@@ -266,6 +295,24 @@ export async function applyNewsletterEvent(
 
   if (insertError) {
     throw new Error(`Newsletter insert failed: ${insertError.message}`)
+  }
+
+  if (created?.id) {
+    const { error: consentError } = await db.rpc('apply_contact_consent', {
+      p_contact_id: created.id,
+      p_newsletter: true,
+      p_programs: null,
+      p_source: 'newsletter_webhook',
+      p_evidence: {
+        provider_type: event.providerType,
+        provider_event_id: event.id,
+        occurred_at: event.occurredAt,
+      },
+    })
+
+    if (consentError) {
+      throw new Error(`Newsletter consent failed: ${consentError.message}`)
+    }
   }
 
   return {

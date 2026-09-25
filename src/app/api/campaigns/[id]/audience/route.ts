@@ -60,7 +60,7 @@ export async function GET(
 
     const { data: campaign, error: loadError } = await db
       .from('campaigns')
-      .select('id, name, segment_id, send_run, segment:segments(name, definition)')
+      .select('id, name, segment_id, send_run, consent_stream, segment:segments(name, definition)')
       .eq('id', id)
       .maybeSingle()
 
@@ -125,7 +125,12 @@ export async function GET(
       })
     }
 
-    const page = await resolveSegmentPage(db, segment.definition, pageParams)
+    const page = await resolveSegmentPage(
+      db,
+      segment.definition,
+      campaign.consent_stream,
+      pageParams
+    )
 
     return ok({
       source: 'segment',

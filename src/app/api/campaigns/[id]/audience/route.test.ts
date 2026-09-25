@@ -24,6 +24,7 @@ const campaignRow = {
   name: 'August offer',
   segment_id: 'seg-1',
   send_run: 1,
+  consent_stream: 'newsletter' as const,
   segment: { name: 'NSW leads', definition: { state: 'NSW' } },
 }
 
@@ -159,10 +160,14 @@ describe('GET /api/campaigns/[id]/audience', () => {
 
     await audience('?page=3&pageSize=50')
 
-    expect(mockResolveSegmentPage).toHaveBeenCalledWith(expect.anything(), { state: 'NSW' }, {
-      page: 3,
-      pageSize: 50,
-    })
+    // The campaign's own stream is passed through: the audience shown has to be the
+    // audience the send would reach, gated on the same consent.
+    expect(mockResolveSegmentPage).toHaveBeenCalledWith(
+      expect.anything(),
+      { state: 'NSW' },
+      'newsletter',
+      { page: 3, pageSize: 50 }
+    )
   })
 
   it('answers with an empty audience when no segment is chosen', async () => {

@@ -21,6 +21,7 @@ const contact: TableContact = {
   notes: '',
   isCustomer: true,
   subscribedToNewsletter: false,
+  subscribedToPrograms: true,
   organisation: { name: 'Analytical Engines' },
   servicesBought: ['svc-1'],
 }
@@ -386,6 +387,26 @@ describe('ContactDrawer', () => {
       expect(
         screen.getByRole('checkbox', { name: /Subscribed to Newsletter/i })
       ).toBeInTheDocument()
+    })
+
+    it('exposes the course consent separately from the newsletter', () => {
+      setup()
+
+      expect(
+        screen.getByRole('checkbox', { name: /Subscribed to Courses/i })
+      ).toBeInTheDocument()
+    })
+
+    it('warns that clearing both consents will archive the contact', async () => {
+      // The archive is a database rule. Without this note the contact simply vanishes
+      // from the list on save, with nothing on screen explaining where they went.
+      setup()
+
+      expect(screen.queryByText(/moves this contact to the archive/i)).not.toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole('checkbox', { name: /Subscribed to Courses/i }))
+
+      expect(await screen.findByText(/moves this contact to the archive/i)).toBeInTheDocument()
     })
 
     it('turns a customer back into a prospect', async () => {

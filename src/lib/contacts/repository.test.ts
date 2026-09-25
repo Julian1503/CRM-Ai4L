@@ -2,7 +2,8 @@ import { createDbMock, createQueryBuilderMock } from '@/test/supabaseMock'
 
 import { parseContactFilters } from './query'
 import { applyContactFilters, archiveContact, contactSource, restoreContact,
-  findOrganisationIdsMatching, fetchContactsForExport, ContactExportLimitError,
+  findOrganisationIdsMatching, fetchContactsForExport, fetchSelectedContactsForExport,
+  sortSelectedRows, ContactExportLimitError,
 } from './repository'
 
 describe('contactSource', () => {
@@ -29,6 +30,30 @@ describe('applyContactFilters', () => {
 
     expect(builder.allFor('eq')).toHaveLength(0)
     expect(builder.allFor('or')).toHaveLength(0)
+  })
+
+  it('narrows to an explicit selection of ids', () => {
+    expect(apply({ ids: 'c1,c2' }).allFor('in')).toContainEqual({
+      method: 'in',
+      args: ['id', ['c1', 'c2']],
+    })
+  })
+
+  it('applies no id filter when the caller named no selection', () => {
+    expect(apply({}).allFor('in')).toHaveLength(0)
+  })
+
+  it('matches nothing when a selection resolved to no valid id', () => {
+    // The dangerous alternative is falling back to the filters and exporting everything.
+    expect(apply({ ids: '' }).allFor('in')).toContainEqual({ method: 'in', args: ['id', []] })
+  })
+
+  it('keeps the other filters alongside a selection', () => {
+    // A selected row that no longer matches the view must not be exported.
+    const builder = apply({ ids: 'c1', status: 'customer' })
+
+    expect(builder.allFor('in')).toHaveLength(1)
+    expect(builder.allFor('eq')).toContainEqual({ method: 'eq', args: ['status', 'customer'] })
   })
 
   it('filters by job type', () => {
@@ -209,6 +234,112 @@ describe('fetchContactsForExport', () => {
         2
       )
     ).rejects.toThrow(/stopped after 2 of 3/i)
+  })
+})
+
+describe('sortSelectedRows', () => {
+  const rows = [
+    { id: 'c2', last_name: 'Byron', first_name: 'Ada', organisation: { name: 'Zeta' } },
+    { id: 'c1', last_name: 'Adams', first_name: 'Zoe', organisation: { name: 'Alpha' } },
+  ]
+
+  it('orders by name ascending', () => {
+    expect(sortSelectedRows(rows as never, 'name', 'asc').map((row) => row.id)).toEqual([
+      'c1',
+      'c2',
+    ])
+  })
+
+  it('reverses for a descending sort', () => {
+    expect(sortSelectedRows(rows as never, 'name', 'desc').map((row) => row.id)).toEqual([
+      'c2',
+      'c1',
+    ])
+  })
+
+  it('orders by organisation name rather than the id the database sorts on', () => {
+    expect(
+      sortSelectedRows(rows as never, 'organisation', 'asc').map((row) => row.id)
+    ).toEqual(['c1', 'c2'])
+  })
+
+  it('leaves the caller array untouched', () => {
+    const original = [...rows]
+    sortSelectedRows(rows as never, 'name', 'desc')
+
+    expect(rows).toEqual(original)
+  })
+})
+
+describe('fetchSelectedContactsForExport', () => {
+  const filters = parseContactFilters({})
+
+  it('requests the ids in bounded chunks', async () => {
+    const pages = [
+      createQueryBuilderMock({ data: [{ id: 'c1' }, { id: 'c2' }], error: null, count: 2 }),
+      createQueryBuilderMock({ data: [{ id: 'c3' }], error: null, count: 1 }),
+    ]
+    let index = 0
+    const db = createDbMock(() => pages[Math.min(index++, pages.length - 1)])
+
+    const result = await fetchSelectedContactsForExport(
+      db as never,
+      filters,
+      ['c1', 'c2', 'c3'],
+      10,
+      2
+    )
+
+    expect(result.rows.map((row) => row.id)).toEqual(['c1', 'c2', 'c3'])
+    expect(result.total).toBe(3)
+    expect(pages[0].argsFor('in')).toEqual(['id', ['c1', 'c2']])
+    expect(pages[1].argsFor('in')).toEqual(['id', ['c3']])
+  })
+
+  it('accepts fewer rows than ids, because a selected row may have been filtered out', async () => {
+    const builder = createQueryBuilderMock({ data: [{ id: 'c1' }], error: null, count: 1 })
+
+    const result = await fetchSelectedContactsForExport(
+      createDbMock(builder) as never,
+      filters,
+      ['c1', 'c2'],
+      10
+    )
+
+    expect(result.rows.map((row) => row.id)).toEqual(['c1'])
+  })
+
+  it('queries nothing for an empty selection', async () => {
+    const db = createDbMock(createQueryBuilderMock())
+
+    const result = await fetchSelectedContactsForExport(db as never, filters, [], 10)
+
+    expect(result).toEqual({ rows: [], total: 0 })
+    expect(db.from).not.toHaveBeenCalled()
+  })
+
+  it('refuses a selection above the safe limit', async () => {
+    await expect(
+      fetchSelectedContactsForExport(
+        createDbMock(createQueryBuilderMock()) as never,
+        filters,
+        ['c1', 'c2', 'c3'],
+        2
+      )
+    ).rejects.toBeInstanceOf(ContactExportLimitError)
+  })
+
+  it('is the path fetchContactsForExport takes when a selection is present', async () => {
+    const builder = createQueryBuilderMock({ data: [{ id: 'c1' }], error: null, count: 1 })
+
+    const result = await fetchContactsForExport(
+      createDbMock(builder) as never,
+      parseContactFilters({ ids: 'c1' }),
+      10
+    )
+
+    expect(result.rows.map((row) => row.id)).toEqual(['c1'])
+    expect(builder.argsFor('in')).toEqual(['id', ['c1']])
   })
 })
 

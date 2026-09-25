@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react'
 
 import Pagination from '@/components/ui/Pagination'
+import type { ArchiveReason } from '@/lib/db/types'
 
 import styles from './ArchiveView.module.css'
 
@@ -13,7 +14,20 @@ type ArchivedContact = {
   email: string
   state: string | null
   deleted_at: string | null
+  archive_reason: ArchiveReason | null
   organisation?: { name: string } | null
+}
+
+/**
+ * Why the contact is in here, in the operator's words.
+ *
+ * The distinction is not cosmetic. A contact who withdrew every consent is archived by
+ * the database, and restoring them does not give the consent back — so "Restore" means
+ * something different for each of the two, and the button alone cannot say which.
+ */
+const ARCHIVE_REASON_LABELS: Record<ArchiveReason, string> = {
+  manual: 'Archived here',
+  opted_out: 'Opted out of all email',
 }
 
 function formatDate(value: string | null): string {
@@ -77,6 +91,20 @@ export default function ArchiveView() {
   }, [load])
 
   const restore = async (contact: ArchivedContact) => {
+    // Restoring brings the record back; it does not restore consent, and the contact
+    // stays unemailable until they opt in again. Said once, before the click, rather
+    // than left for the operator to discover from an empty campaign audience.
+    if (
+      contact.archive_reason === 'opted_out' &&
+      !window.confirm(
+        `${contact.first_name} ${contact.last_name} opted out of every kind of email. ` +
+          'Restoring brings the record back but not their consent — they will not receive ' +
+          'campaigns until they opt in again. Restore anyway?'
+      )
+    ) {
+      return
+    }
+
     setRestoringId(contact.id)
     setError(null)
 
@@ -107,7 +135,18 @@ export default function ArchiveView() {
   const restoreSelected = async () => {
     const targets = contacts.filter((contact) => selected.has(contact.id))
     if (targets.length === 0) return
-    if (!window.confirm(`Restore ${targets.length} archived contact${targets.length === 1 ? '' : 's'}?`)) return
+    const optedOut = targets.filter((contact) => contact.archive_reason === 'opted_out').length
+    const warning = optedOut > 0
+      ? ` ${optedOut} of them opted out of every kind of email; restoring does not give that consent back.`
+      : ''
+
+    if (
+      !window.confirm(
+        `Restore ${targets.length} archived contact${targets.length === 1 ? '' : 's'}?${warning}`
+      )
+    ) {
+      return
+    }
 
     setRestoringId('bulk')
     setError(null)
@@ -183,6 +222,7 @@ export default function ArchiveView() {
               <th scope="col" className={styles.th}>Email</th>
               <th scope="col" className={styles.th}>Organisation</th>
               <th scope="col" className={styles.th}>Archived</th>
+              <th scope="col" className={styles.th}>Reason</th>
               <th scope="col" className={styles.th}>
                 <span className={styles.srOnly}>Actions</span>
               </th>
@@ -212,6 +252,11 @@ export default function ArchiveView() {
                 <td className={styles.td}>{contact.email}</td>
                 <td className={styles.td}>{contact.organisation?.name ?? '—'}</td>
                 <td className={styles.td}>{formatDate(contact.deleted_at)}</td>
+                <td className={styles.td}>
+                  {contact.archive_reason
+                    ? ARCHIVE_REASON_LABELS[contact.archive_reason]
+                    : 'Archived here'}
+                </td>
                 <td className={`${styles.td} ${styles.actionCell}`}>
                   <button
                     type="button"

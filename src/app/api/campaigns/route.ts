@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server'
 import type { NextResponse } from 'next/server'
 
 import { badRequest, ok, readJsonBody, requireSessionOr401, serverError } from '@/lib/api/responses'
+import { readConsentStream } from '@/lib/marketing/consentStream'
 import { buildPageMeta, getPageRange, readPageParams } from '@/lib/pagination'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 
@@ -81,6 +82,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             : null,
         subject: typeof body.subject === 'string' ? body.subject.trim() : null,
         notes: typeof body.notes === 'string' ? body.notes.trim() : null,
+        // Frozen on the campaign rather than read from its template at send time: a
+        // template that is later re-pointed must not change who a campaign was allowed
+        // to reach. Unrecognised values fall back to the newsletter.
+        consent_stream: readConsentStream(body.consentStream),
         merge_fields: mergeFields,
       })
       .select('*')

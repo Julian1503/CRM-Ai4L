@@ -172,7 +172,11 @@
   white-space: nowrap;
 }
 
+/* Shared by the filtered-view links and the selection form's submit buttons, so the
+   two export paths are visually indistinguishable. */
 .exportBtn {
+  font-family: inherit;
+  cursor: pointer;
   padding: 0.4375rem 0.75rem;
   font-size: 0.8125rem;
   font-weight: 600;
@@ -187,7 +191,12 @@
     border-color var(--duration-fast, 150ms) ease;
 }
 
-.exportBtn:hover {
+.exportBtn:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.exportBtn:hover:not(:disabled) {
   color: var(--primary);
   border-color: var(--primary);
 }

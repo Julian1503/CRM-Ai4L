@@ -10,6 +10,9 @@ import type { ContactStatus } from '@/lib/db/types';
 
 type ActiveContactStatus = Exclude<ContactStatus, 'archived'>;
 
+/** Shared empty set, so an unselectable table does not allocate one per render. */
+const EMPTY_SELECTION: ReadonlySet<string> = new Set<string>();
+
 export interface TableContact {
   id: string;
   firstName: string;
@@ -29,6 +32,7 @@ export interface TableContact {
   status?: ActiveContactStatus;
   isCustomer: boolean;
   subscribedToNewsletter: boolean;
+  subscribedToPrograms: boolean;
   /** FK to job_types; drives the job-type filter and segmentation. */
   jobTypeId?: string | null;
   organisation?: { name: string } | null;
@@ -43,6 +47,17 @@ interface ContactTableProps {
   sortKey: string;
   sortDir: 'asc' | 'desc';
   isLoading?: boolean;
+  /**
+   * Ids currently ticked, including ones on other pages.
+   *
+   * Row selection is opt-in: the checkbox column appears only when `onToggleRow` is
+   * supplied, so a screen that has nothing to do with a selection does not grow a column
+   * of controls that lead nowhere.
+   */
+  selectedIds?: ReadonlySet<string>;
+  onToggleRow?: (id: string, selected: boolean) => void;
+  /** Ticks or clears every row on the current page. */
+  onTogglePage?: (ids: string[], selected: boolean) => void;
 }
 
 export default function ContactTable({
@@ -52,8 +67,29 @@ export default function ContactTable({
   sortKey,
   sortDir,
   isLoading = false,
+  selectedIds,
+  onToggleRow,
+  onTogglePage,
 }: ContactTableProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const selectAllRef = useRef<HTMLInputElement>(null);
+
+  const isSelectable = typeof onToggleRow === 'function';
+  const selection = selectedIds ?? EMPTY_SELECTION;
+  const pageIds = contacts.map((contact) => contact.id);
+  const selectedOnPage = pageIds.filter((id) => selection.has(id)).length;
+  const isPageFullySelected = pageIds.length > 0 && selectedOnPage === pageIds.length;
+  const isPagePartiallySelected = selectedOnPage > 0 && !isPageFullySelected;
+  // Name, organisation, position, status, newsletter, courses (+ the checkbox column).
+  const columnCount = isSelectable ? 7 : 6;
+
+  // `indeterminate` has no HTML attribute — it exists only on the DOM node, so a
+  // "some rows on this page are ticked" header checkbox has to be set imperatively.
+  React.useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = isPagePartiallySelected;
+    }
+  }, [isPagePartiallySelected]);
 
   useGSAP(() => {
     if (prefersReducedMotion()) return;
@@ -99,6 +135,22 @@ export default function ContactTable({
         <table className={styles.table}>
           <thead className={styles.thead}>
             <tr>
+              {isSelectable && (
+                <th className={`${styles.th} ${styles.checkboxCell}`} role="columnheader">
+                  <input
+                    ref={selectAllRef}
+                    type="checkbox"
+                    className={styles.checkbox}
+                    data-testid="select-all-contacts"
+                    aria-label={
+                      isPageFullySelected ? 'Clear selection on this page' : 'Select all on this page'
+                    }
+                    checked={isPageFullySelected}
+                    disabled={isLoading || pageIds.length === 0}
+                    onChange={(event) => onTogglePage?.(pageIds, event.target.checked)}
+                  />
+                </th>
+              )}
               <th 
                 className={`${styles.th} ${styles.sortable}`} 
                 onClick={() => onSort('name')}
@@ -140,12 +192,27 @@ export default function ContactTable({
               >
                 Newsletter {renderSortIndicator('newsletter')}
               </th>
+              <th 
+                className={`${styles.th} ${styles.sortable}`} 
+                onClick={() => onSort('programs')}
+                onKeyDown={(e) => handleKeyDown(e, 'programs')}
+                tabIndex={0}
+                role="columnheader"
+                aria-sort={getAriaSort('programs')}
+              >
+                Courses {renderSortIndicator('programs')}
+              </th>
             </tr>
           </thead>
           <tbody>
             {isLoading ? (
               Array.from({ length: 3 }).map((_, idx) => (
                 <tr key={`skeleton-${idx}`} className={styles.trSkeleton}>
+                  {isSelectable && (
+                    <td className={`${styles.td} ${styles.checkboxCell}`}>
+                      <span className="skeleton" style={{ width: '16px', height: '16px', display: 'block' }} />
+                    </td>
+                  )}
                   <td className={styles.td}>
                     <div className={styles.nameCell}>
                       <span className="skeleton" style={{ width: '120px', height: '14px', marginBottom: '6px' }} />
@@ -168,6 +235,7 @@ export default function ContactTable({
               ))
             ) : contacts.map((contact) => {
               const status = getContactStatus(contact);
+              const isRowSelected = selection.has(contact.id);
               const statusClass =
                 status === 'customer'
                   ? styles.statusCustomer
@@ -178,9 +246,27 @@ export default function ContactTable({
               return (
               <tr 
                 key={contact.id} 
-                className={styles.tr} 
+                className={`${styles.tr} ${isRowSelected ? styles.trSelected : ''}`}
+                data-selected={isRowSelected ? 'true' : undefined}
                 onClick={() => onSelectContact(contact)}
               >
+                {isSelectable && (
+                  // Stops at the cell: ticking a row is a different intent from opening
+                  // it, and the row's own click handler opens the drawer.
+                  <td
+                    className={`${styles.td} ${styles.checkboxCell}`}
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <input
+                      type="checkbox"
+                      className={styles.checkbox}
+                      data-testid={`select-contact-${contact.id}`}
+                      aria-label={`Select ${contact.firstName} ${contact.lastName}`}
+                      checked={isRowSelected}
+                      onChange={(event) => onToggleRow?.(contact.id, event.target.checked)}
+                    />
+                  </td>
+                )}
                 <td className={styles.td}>
                   <div className={styles.nameCell}>
                     <span className={styles.fullName}>
@@ -208,12 +294,18 @@ export default function ContactTable({
                     {contact.subscribedToNewsletter ? 'Subscribed' : 'Unsubscribed'}
                   </span>
                 </td>
+                <td className={styles.td}>
+                  <span className={`${styles.statusPill} ${contact.subscribedToPrograms ? styles.statusSubscribed : styles.statusUnsubscribed}`}>
+                    <span className={styles.pulseDot} />
+                    {contact.subscribedToPrograms ? 'Subscribed' : 'Unsubscribed'}
+                  </span>
+                </td>
               </tr>
               );
             })}
             {!isLoading && contacts.length === 0 && (
               <tr>
-                <td colSpan={5} className={styles.td} style={{ padding: '0' }}>
+                <td colSpan={columnCount} className={styles.td} style={{ padding: '0' }}>
                   <div className={styles.emptyStateContainer}>
                     <div className={styles.emptyIconWrapper}>
                       <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">

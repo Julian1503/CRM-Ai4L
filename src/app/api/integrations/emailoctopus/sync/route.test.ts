@@ -136,13 +136,50 @@ describe('POST /api/integrations/emailoctopus/sync', () => {
     expect(mockSync).not.toHaveBeenCalled()
   })
 
+  it('keeps a courses-only contact subscribed on the provider list', async () => {
+    // The list status is one switch and answers "may we email this person at all". Read
+    // as the newsletter flag alone, it would push a contact who takes courses but not
+    // the newsletter as UNSUBSCRIBED — and EmailOctopus then refuses to queue the course
+    // automation for them, making the second consent unusable.
+    const response = await post({
+      apiKey: 'eo-key',
+      listId: 'list-1',
+      contacts: [
+        {
+          email: 'courses@example.com',
+          firstName: 'C',
+          lastName: 'Only',
+          subscribedToNewsletter: false,
+          subscribedToPrograms: true,
+        },
+      ],
+    })
+
+    expect(response.status).toBe(200)
+    expect(mockSync).toHaveBeenCalledWith(
+      'eo-key',
+      'list-1',
+      'courses@example.com',
+      'C',
+      'Only',
+      'SUBSCRIBED',
+      // Which consent they actually hold cannot be carried by the list status, so it
+      // travels as fields — that is what a natively-sent newsletter segments on.
+      expect.objectContaining({ fields: { Newsletter: 'no', Courses: 'yes' } })
+    )
+  })
+
   it('syncs each contact with the right subscription status', async () => {
     const response = await post(validPayload)
 
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toMatchObject({ syncedCount: 2, errorsCount: 0 })
-    expect(mockSync).toHaveBeenNthCalledWith(1, 'eo-key', 'list-1', 'a@example.com', 'A', 'One', 'SUBSCRIBED')
-    expect(mockSync).toHaveBeenNthCalledWith(2, 'eo-key', 'list-1', 'b@example.com', 'B', 'Two', 'UNSUBSCRIBED')
+    expect(mockSync).toHaveBeenNthCalledWith(
+      1, 'eo-key', 'list-1', 'a@example.com', 'A', 'One', 'SUBSCRIBED', expect.anything()
+    )
+    expect(mockSync).toHaveBeenNthCalledWith(
+      2, 'eo-key', 'list-1', 'b@example.com', 'B', 'Two', 'UNSUBSCRIBED', expect.anything()
+    )
   })
 
   it.each([

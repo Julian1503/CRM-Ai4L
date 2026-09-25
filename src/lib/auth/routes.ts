@@ -14,8 +14,20 @@
  * no CRM account and never will. They are not unprotected — the booking token is the
  * credential (unguessable, single-use, expiring), checked on every request. See
  * src/lib/booking/token.ts.
+ *
+ * `/preferences` and `/api/preferences` are public for the same reason and then some:
+ * the whole point is that somebody who wants no further email can act without an
+ * account, and a login wall in front of an unsubscribe link is a Spam Act problem. The
+ * signed token is the credential — see src/lib/preferences/token.ts.
  */
-export const PUBLIC_PATHS = ['/login', '/auth/callback', '/book', '/api/booking'] as const
+export const PUBLIC_PATHS = [
+  '/login',
+  '/auth/callback',
+  '/book',
+  '/api/booking',
+  '/preferences',
+  '/api/preferences',
+] as const
 
 /**
  * Third-party webhook endpoints. These carry no session cookie, so the proxy must let

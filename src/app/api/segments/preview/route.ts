@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server'
 import { badRequest, ok, readJsonBody, requireSessionOr401, serverError } from '@/lib/api/responses'
 import { resolveSegmentFacets } from '@/lib/marketing/facets'
 import { estimateDrainMs } from '@/lib/marketing/rateLimiter'
+import { readConsentStream } from '@/lib/marketing/consentStream'
 import { resolveSegmentMembers, segmentDefinitionToFilters } from '@/lib/marketing/segments'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 
@@ -32,12 +33,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   try {
     const db = await createSupabaseServerClient()
-    const filters = segmentDefinitionToFilters(body.definition)
+    // A segment carries no stream of its own — the campaign it is used by does. The
+    // builder says which one it is previewing for; without an answer this counts the
+    // newsletter audience, which is the narrower of the two.
+    const stream = readConsentStream(body.stream)
+    const filters = segmentDefinitionToFilters(body.definition, stream)
     // Independent reads of the same audience; serialising them would double the
     // latency of a preview that fires on every dropdown change.
     const [members, facets] = await Promise.all([
-      resolveSegmentMembers(db, body.definition),
-      resolveSegmentFacets(db, body.definition),
+      resolveSegmentMembers(db, body.definition, stream),
+      resolveSegmentFacets(db, body.definition, stream),
     ])
 
     return ok({
@@ -47,11 +52,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       facets,
       // Echoed back so the UI can show what was actually applied, including the
       // invariants the definition cannot override.
+      stream,
       appliedFilters: {
         state: filters.state,
         status: filters.status,
         jobTypeId: filters.jobTypeId,
-        subscribedOnly: filters.subscribed === true,
+        subscribedOnly: filters.subscribed === true || filters.subscribedToPrograms === true,
       },
       sample: members.members.slice(0, 5),
     })

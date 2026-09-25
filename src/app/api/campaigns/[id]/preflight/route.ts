@@ -25,7 +25,7 @@ export async function GET(
     const db = await createSupabaseServerClient()
     const { data: campaign, error } = await db
       .from('campaigns')
-      .select('id, status, segment_id, provider_automation_id, segment:segments(definition)')
+      .select('id, status, segment_id, provider_automation_id, consent_stream, segment:segments(definition)')
       .eq('id', id)
       .maybeSingle()
 
@@ -50,7 +50,7 @@ export async function GET(
     const segment = campaign.segment as unknown as { definition: Record<string, unknown> } | null
     if (!segment) return conflict('The campaign audience no longer exists.')
 
-    const members = await resolveSegmentMembers(db, segment.definition)
+    const members = await resolveSegmentMembers(db, segment.definition, campaign.consent_stream)
     return ok({ ready: members.total > 0, total: members.total, truncated: members.truncated })
   } catch (error) {
     return serverError(error, 'Could not run campaign preflight.')

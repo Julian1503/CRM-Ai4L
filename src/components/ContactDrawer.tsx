@@ -204,6 +204,7 @@ export default function ContactDrawer({
           : (contact.isCustomer ?? false),
         servicesBought: contact.servicesBought || [],
         subscribedToNewsletter: contact.subscribedToNewsletter ?? false,
+        subscribedToPrograms: contact.subscribedToPrograms ?? false,
       });
       setValidationErrors({});
       setSaveError(null);
@@ -615,6 +616,28 @@ export default function ContactDrawer({
               />
               <span className={styles.label}>Subscribed to Newsletter (Sync to EmailOctopus)</span>
             </label>
+
+            <label className={styles.checkboxContainer}>
+              <input
+                type="checkbox"
+                className={styles.checkbox}
+                checked={formData.subscribedToPrograms || false}
+                onChange={(e) =>
+                  handleInputChange('subscribedToPrograms', e.target.checked)
+                }
+              />
+              <span className={styles.label}>Subscribed to Courses &amp; training</span>
+            </label>
+
+            {!formData.subscribedToNewsletter && !formData.subscribedToPrograms && (
+              // Saying so here is the whole reason this note exists: the archive is a
+              // database rule, and without a warning the contact simply disappears from
+              // the list on save with nothing on screen explaining why.
+              <span className={styles.hint} role="status">
+                With neither consent, saving moves this contact to the archive. Granting
+                either one back brings them out again.
+              </span>
+            )}
           </div>
 
           {/* Section 5: Notes */}

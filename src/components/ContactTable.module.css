@@ -87,6 +87,43 @@
   white-space: nowrap;
 }
 
+/* Selection column — narrow, so it reads as a control gutter rather than a data column */
+.checkboxCell {
+  width: 1%;
+  padding-right: 0;
+  white-space: nowrap;
+}
+
+.checkbox {
+  width: 16px;
+  height: 16px;
+  display: block;
+  cursor: pointer;
+  accent-color: var(--primary);
+  border-radius: 3px;
+}
+
+.checkbox:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.checkbox:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* A selected row keeps its accent while the pointer is elsewhere, so a selection made
+   several pages ago is still visible on return. */
+.trSelected {
+  background-color: rgba(1, 172, 219, 0.08);
+  box-shadow: inset 2px 0 0 var(--primary);
+}
+
+.trSelected:hover {
+  background-color: rgba(1, 172, 219, 0.12);
+}
+
 .nameCell {
   display: flex;
   flex-direction: column;

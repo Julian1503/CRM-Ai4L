@@ -36,6 +36,33 @@
  */
 export const BOOKING_URL_MERGE_FIELD = 'BookingUrl'
 
+/**
+ * Merge field carrying each contact's preference-centre link.
+ *
+ * Written by the sync rather than at send time, because unlike the booking link it is
+ * the same URL forever (see src/lib/preferences/token.ts). That matters: a newsletter
+ * the client sends from the EmailOctopus dashboard never passes through this codebase,
+ * and it still has to carry a working unsubscribe. Storing the link as an ordinary
+ * contact field is what makes every email — ours or theirs — able to reference it.
+ *
+ * The template builds the per-stream links from it by appending a path:
+ * `{{PrefsUrl}}`, `{{PrefsUrl}}/newsletter`, `{{PrefsUrl}}/programs`, `{{PrefsUrl}}/all`.
+ */
+export const PREFERENCES_URL_MERGE_FIELD = 'PrefsUrl'
+
+/**
+ * The consent state, mirrored onto the provider as `yes`/`no` fields.
+ *
+ * EmailOctopus has one subscription status per list, and it now means "may we email
+ * this person at all" — it is set from either consent (see the sync route). Which of
+ * the two they actually hold cannot be expressed by that status, so it travels as
+ * fields, and a newsletter sent natively from the EmailOctopus dashboard must be
+ * segmented on `Newsletter = yes`. Sending it to the whole list would reach people who
+ * only ever agreed to hear about courses. Nothing in this codebase can enforce that —
+ * it is written down in docs/EMAILOCTOPUS_SETUP.md because it is the client's step.
+ */
+export const CONSENT_STATE_MERGE_FIELDS = ['Newsletter', 'Courses'] as const
+
 export type CampaignCopyField = {
   /** The provider merge tag. Referenced in the template as `{{Tag}}`. */
   readonly tag: string
@@ -119,7 +146,13 @@ export const CAMPAIGN_COPY_FIELDS: readonly CampaignCopyField[] = [
  * the button works, and it goes nowhere. Enforced in `validateCampaignCopy`, not just
  * omitted from the schema, because the schema is a request and the validator is a gate.
  */
-export const RESERVED_MERGE_FIELDS: readonly string[] = [BOOKING_URL_MERGE_FIELD]
+export const RESERVED_MERGE_FIELDS: readonly string[] = [
+  BOOKING_URL_MERGE_FIELD,
+  // Set by the sync from the contact's own record. A generated value here would put a
+  // forged unsubscribe link, or a false statement of consent, into every email.
+  PREFERENCES_URL_MERGE_FIELD,
+  ...CONSENT_STATE_MERGE_FIELDS,
+]
 
 export type CampaignCopy = Record<string, string>
 

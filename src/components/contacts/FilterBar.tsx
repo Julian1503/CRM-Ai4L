@@ -2,11 +2,12 @@
 
 import React from 'react'
 
+import { MAX_SELECTED_IDS } from '@/lib/contacts/query'
 import { AU_STATES } from '@/lib/contacts/states'
 
 import styles from './FilterBar.module.css'
 
-export type StatusFilter = 'all' | 'lead' | 'prospect' | 'customer' | 'subscribed'
+export type StatusFilter = 'all' | 'lead' | 'prospect' | 'customer' | 'newsletter' | 'programs'
 
 export type JobTypeOption = { id: string; name: string }
 
@@ -24,6 +25,14 @@ interface FilterBarProps {
   exportQuery: string
   /** Number of contacts currently matching, shown so an export has a known size. */
   resultCount: number
+  /**
+   * Contacts the user has ticked in the table, across pages.
+   *
+   * A non-empty selection replaces "export the filtered view" with "export these rows".
+   * They are posted rather than linked because a few hundred ids do not fit in a URL.
+   */
+  selectedIds?: readonly string[]
+  onClearSelection?: () => void
 }
 
 const STATUS_TABS: { value: StatusFilter; label: string }[] = [
@@ -31,7 +40,10 @@ const STATUS_TABS: { value: StatusFilter; label: string }[] = [
   { value: 'lead', label: 'Leads' },
   { value: 'customer', label: 'Customers' },
   { value: 'prospect', label: 'Prospects' },
-  { value: 'subscribed', label: 'Subscribed' },
+  // Two tabs rather than one "Subscribed": the consents are independent, and a single
+  // tab could only ever answer for one of them while looking like it answered for both.
+  { value: 'newsletter', label: 'Newsletter' },
+  { value: 'programs', label: 'Courses' },
 ]
 
 export default function FilterBar({
@@ -46,7 +58,17 @@ export default function FilterBar({
   onStateChange,
   exportQuery,
   resultCount,
+  selectedIds = [],
+  onClearSelection,
 }: FilterBarProps) {
+  const selectedCount = selectedIds.length
+  const hasSelection = selectedCount > 0
+  // The route refuses an over-long selection, and a rejected form post would navigate
+  // the user off the dashboard to read the error. Blocked here instead, in place.
+  const isSelectionTooLarge = selectedCount > MAX_SELECTED_IDS
+  // exportQuery is prefixed with `&` for appending to a link; a form action needs it as
+  // the whole query string.
+  const filterQuery = exportQuery.startsWith('&') ? exportQuery.slice(1) : exportQuery
   const hasActiveFilters =
     searchQuery !== '' || statusFilter !== 'all' || jobTypeFilter !== '' || stateFilter !== ''
 
@@ -152,27 +174,74 @@ export default function FilterBar({
           </button>
         )}
 
-        <div className={styles.exportGroup}>
-          <span className={styles.exportLabel}>
-            Export {resultCount} {resultCount === 1 ? 'contact' : 'contacts'}
-          </span>
-          {/* Plain links: the route sets Content-Disposition, so no JS is involved and
-              the active filters travel with the request. */}
-          <a
-            className={styles.exportBtn}
-            data-testid="export-full"
-            href={`/api/contacts/export?format=full${exportQuery}`}
+        {hasSelection ? (
+          /* A form rather than links: the ids go in the body, so the request does not
+             grow a URL that a proxy will reject once enough rows are ticked. The route
+             still answers with Content-Disposition, so the browser downloads in place. */
+          <form
+            method="post"
+            action={`/api/contacts/export${filterQuery ? `?${filterQuery}` : ''}`}
+            className={styles.exportGroup}
+            data-testid="export-selection-form"
           >
-            CSV
-          </a>
-          <a
-            className={styles.exportBtn}
-            data-testid="export-emailoctopus"
-            href={`/api/contacts/export?format=emailoctopus${exportQuery}`}
-          >
-            EmailOctopus
-          </a>
-        </div>
+            <input type="hidden" name="ids" value={selectedIds.join(',')} />
+            <span className={styles.exportLabel}>
+              {isSelectionTooLarge
+                ? `${selectedCount} selected — export at most ${MAX_SELECTED_IDS}`
+                : `Export ${selectedCount} selected`}
+            </span>
+            <button
+              type="button"
+              className={styles.clearBtn}
+              data-testid="clear-selection"
+              onClick={onClearSelection}
+            >
+              Clear selection
+            </button>
+            <button
+              type="submit"
+              name="format"
+              value="full"
+              className={styles.exportBtn}
+              data-testid="export-selected-full"
+              disabled={isSelectionTooLarge}
+            >
+              CSV
+            </button>
+            <button
+              type="submit"
+              name="format"
+              value="emailoctopus"
+              className={styles.exportBtn}
+              data-testid="export-selected-emailoctopus"
+              disabled={isSelectionTooLarge}
+            >
+              EmailOctopus
+            </button>
+          </form>
+        ) : (
+          <div className={styles.exportGroup}>
+            <span className={styles.exportLabel}>
+              Export {resultCount} {resultCount === 1 ? 'contact' : 'contacts'}
+            </span>
+            {/* Plain links: the route sets Content-Disposition, so no JS is involved and
+                the active filters travel with the request. */}
+            <a
+              className={styles.exportBtn}
+              data-testid="export-full"
+              href={`/api/contacts/export?format=full${exportQuery}`}
+            >
+              CSV
+            </a>
+            <a
+              className={styles.exportBtn}
+              data-testid="export-emailoctopus"
+              href={`/api/contacts/export?format=emailoctopus${exportQuery}`}
+            >
+              EmailOctopus
+            </a>
+          </div>
+        )}
       </div>
     </div>
   )

@@ -121,6 +121,11 @@ describe('API route authentication', () => {
     // should force a conversation rather than slip through.
     expect(publicRoutes.map((route) => route.urlPath).sort()).toEqual([
       '/api/booking/create-session',
+      // Reviewed and deliberate: a login wall in front of an unsubscribe link is a
+      // Spam Act problem, and the person acting has no CRM account by definition. The
+      // signed token in the path is the credential, it names the only contact the
+      // route will touch, and no id is ever read from the request body.
+      '/api/preferences/[token]',
     ])
   })
 })

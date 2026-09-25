@@ -12,6 +12,8 @@ interface DashboardStatsProps {
   customers: number;
   prospects: number;
   newsletterSubscribers: number;
+  /** Contacts consenting to course and training email. Overlaps the newsletter figure. */
+  programSubscribers: number;
 }
 
 export default function DashboardStats({
@@ -19,18 +21,21 @@ export default function DashboardStats({
   customers,
   prospects,
   newsletterSubscribers,
+  programSubscribers,
 }: DashboardStatsProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const totalRef = useRef<HTMLSpanElement>(null);
   const customersRef = useRef<HTMLSpanElement>(null);
   const prospectsRef = useRef<HTMLSpanElement>(null);
   const newsletterRef = useRef<HTMLSpanElement>(null);
+  const programsRef = useRef<HTMLSpanElement>(null);
 
   const prevValues = useRef({
     total: 0,
     customers: 0,
     prospects: 0,
     newsletter: 0,
+    programs: 0,
   });
 
   useGSAP(() => {
@@ -43,6 +48,7 @@ export default function DashboardStats({
         customers,
         prospects,
         newsletter: newsletterSubscribers,
+        programs: programSubscribers,
       };
       return;
     }
@@ -67,6 +73,7 @@ export default function DashboardStats({
       { ref: customersRef, target: customers, start: prevValues.current.customers },
       { ref: prospectsRef, target: prospects, start: prevValues.current.prospects },
       { ref: newsletterRef, target: newsletterSubscribers, start: prevValues.current.newsletter },
+      { ref: programsRef, target: programSubscribers, start: prevValues.current.programs },
     ];
 
     counts.forEach(({ ref, target, start }) => {
@@ -90,8 +97,12 @@ export default function DashboardStats({
       customers,
       prospects,
       newsletter: newsletterSubscribers,
+      programs: programSubscribers,
     };
-  }, { dependencies: [totalContacts, customers, prospects, newsletterSubscribers], scope: containerRef });
+  }, {
+    dependencies: [totalContacts, customers, prospects, newsletterSubscribers, programSubscribers],
+    scope: containerRef,
+  });
 
   // SVGs for the dashboard cards
   const icons = {
@@ -121,6 +132,12 @@ export default function DashboardStats({
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
         <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
         <polyline points="22,6 12,13 2,6" />
+      </svg>
+    ),
+    programs: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M22 10 12 5 2 10l10 5 10-5Z" />
+        <path d="M6 12v5c0 1.1 2.7 2 6 2s6-.9 6-2v-5" />
       </svg>
     ),
   };
@@ -180,6 +197,21 @@ export default function DashboardStats({
           <div className={styles.trend}>
             <span className={styles.trendPositive}>
               {totalContacts > 0 ? Math.round((newsletterSubscribers / totalContacts) * 100) : 0}% subscriber density
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div className={styles.cardShell}>
+        <div className={styles.cardInner}>
+          <div className={styles.header}>
+            <span className={styles.label}>Courses &amp; training</span>
+            <div className={`${styles.iconWrapper} ${styles.programsIcon}`}>{icons.programs}</div>
+          </div>
+          <span ref={programsRef} className={styles.value}>{programSubscribers}</span>
+          <div className={styles.trend}>
+            <span className={styles.trendPositive}>
+              {totalContacts > 0 ? Math.round((programSubscribers / totalContacts) * 100) : 0}% consent to courses
             </span>
           </div>
         </div>

@@ -94,6 +94,22 @@ describe('autoMapHeaders - general spreadsheets', () => {
     expect(mapping.isCustomer).toBe('Is Active Client')
   })
 
+  it('maps the two consents to separate columns', () => {
+    const mapping = autoMapHeaders(['Email', 'Newsletter', 'Courses & Training'])
+
+    expect(mapping.subscribedToNewsletter).toBe('Newsletter')
+    expect(mapping.subscribedToPrograms).toBe('Courses & Training')
+  })
+
+  it('does not let the newsletter rule claim a programmes column', () => {
+    // Both rules fuzzy-match `subscrib`, and the two consents are not interchangeable:
+    // a header claimed by the wrong one grants or withdraws the wrong permission.
+    const mapping = autoMapHeaders(['Email', 'Subscribed to programs'])
+
+    expect(mapping.subscribedToPrograms).toBe('Subscribed to programs')
+    expect(mapping.subscribedToNewsletter).toBe('')
+  })
+
   it('prefers split name columns over a full-name column when both exist', () => {
     const mapping = autoMapHeaders(['Name', 'First Name', 'Last Name', 'Email'])
 

@@ -3,6 +3,7 @@
  */
 import { NextRequest } from 'next/server'
 
+import { MAX_SELECTED_IDS } from '@/lib/contacts/query'
 import { createDbMock, createQueryBuilderMock } from '@/test/supabaseMock'
 
 const mockGetSession = jest.fn()
@@ -16,7 +17,7 @@ jest.mock('@/lib/supabase/server', () => ({
   createSupabaseServerClient: () => mockCreateServerClient(),
 }))
 
-import { GET } from './route'
+import { GET, POST } from './route'
 
 const ORIGIN = 'https://crm.example.com'
 
@@ -162,5 +163,95 @@ describe('GET /api/contacts/export', () => {
     const response = await get()
 
     expect(response.headers.get('cache-control')).toContain('no-store')
+  })
+})
+
+describe('POST /api/contacts/export', () => {
+  function post(body: Record<string, string>, query = '') {
+    const form = new URLSearchParams(body)
+
+    return POST(
+      new NextRequest(`${ORIGIN}/api/contacts/export${query}`, {
+        method: 'POST',
+        body: form.toString(),
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      })
+    )
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    mockGetSession.mockResolvedValue({ userId: 'u1', email: 'admin@example.com' })
+    setRows([contactRow])
+  })
+
+  it('refuses an unauthenticated request', async () => {
+    mockGetSession.mockResolvedValue(null)
+
+    const response = await post({ ids: 'c1', format: 'full' })
+
+    expect(response.status).toBe(401)
+    expect(mockCreateServerClient).not.toHaveBeenCalled()
+  })
+
+  it('exports only the selected contacts', async () => {
+    const builder = setRows([contactRow])
+
+    const response = await post({ ids: 'c1,c2', format: 'full' })
+
+    expect(response.status).toBe(200)
+    expect(builder.argsFor('in')).toEqual(['id', ['c1', 'c2']])
+    expect(response.headers.get('Content-Disposition')).toContain('attachment')
+  })
+
+  it('keeps the active filters alongside the selection', async () => {
+    // A row ticked before the filter changed must not slip into the export.
+    const builder = setRows([contactRow])
+
+    await post({ ids: 'c1', format: 'full' }, '?status=customer')
+
+    expect(builder.allFor('eq')).toContainEqual({ method: 'eq', args: ['status', 'customer'] })
+  })
+
+  it('refuses a request that names no selection at all', async () => {
+    const response = await post({ format: 'full' })
+
+    expect(response.status).toBe(400)
+    expect(mockCreateServerClient).not.toHaveBeenCalled()
+  })
+
+  it('refuses a selection where no id survived validation', async () => {
+    // The dangerous alternative is falling back to exporting every matching contact.
+    const response = await post({ ids: 'a.b,"c"', format: 'full' })
+
+    expect(response.status).toBe(400)
+    expect(mockCreateServerClient).not.toHaveBeenCalled()
+  })
+
+  it('refuses a selection above the cap rather than truncating it', async () => {
+    const ids = Array.from({ length: MAX_SELECTED_IDS + 5 }, (_, i) => `id-${i}`).join(',')
+
+    const response = await post({ ids, format: 'full' })
+
+    expect(response.status).toBe(422)
+    expect(mockCreateServerClient).not.toHaveBeenCalled()
+  })
+
+  it('rejects an unknown format instead of silently defaulting', async () => {
+    const response = await post({ ids: 'c1', format: 'sqlite' })
+
+    expect(response.status).toBe(400)
+  })
+
+  it('honours the emailoctopus format', async () => {
+    const response = await post({ ids: 'c1', format: 'emailoctopus' })
+
+    expect(await response.text()).toContain('EmailAddress')
+  })
+
+  it('marks the response private so a shared cache cannot retain contact data', async () => {
+    const response = await post({ ids: 'c1', format: 'full' })
+
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store')
   })
 })

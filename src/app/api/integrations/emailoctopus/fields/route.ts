@@ -4,6 +4,7 @@ import { conflict, ok, requireSessionOr401, serverError } from '@/lib/api/respon
 import {
   BOOKING_URL_MERGE_FIELD,
   CAMPAIGN_COPY_FIELDS,
+  PREFERENCES_URL_MERGE_FIELD,
   RESERVED_MERGE_FIELDS,
   findMissingMergeFields,
 } from '@/lib/marketing/mergeFields'
@@ -30,6 +31,9 @@ export const runtime = 'nodejs'
 const LABELS: Record<string, string> = {
   ...Object.fromEntries(CAMPAIGN_COPY_FIELDS.map((field) => [field.tag, field.label])),
   [BOOKING_URL_MERGE_FIELD]: 'Booking link',
+  [PREFERENCES_URL_MERGE_FIELD]: 'Email preferences link',
+  Newsletter: 'Subscribed to newsletter',
+  Courses: 'Subscribed to courses',
 }
 
 async function loadCredentials() {

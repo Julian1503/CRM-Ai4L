@@ -9,6 +9,7 @@ import {
   escapeLikePattern,
   getPageRange,
   type ContactFilters,
+  type ContactSortKey,
 } from './query'
 
 /**
@@ -35,6 +36,7 @@ type Filterable = {
   eq: (column: string, value: unknown) => Filterable
   is: (column: string, value: unknown) => Filterable
   not: (column: string, operator: string, value: unknown) => Filterable
+  in: (column: string, values: readonly unknown[]) => Filterable
   or: (expression: string) => Filterable
   order: (column: string, options: { ascending: boolean }) => Filterable
   range: (from: number, to: number) => Filterable
@@ -75,6 +77,13 @@ export function applyContactFilters<T extends Filterable>(
     result = result.not('deleted_at', 'is', null)
   }
 
+  if (filters.ids !== null) {
+    // An explicit selection narrows the set rather than replacing the filters, so a
+    // selected row that no longer matches the current view is not exported behind the
+    // user's back. An empty selection matches nothing, by design — see ContactFilters.
+    result = result.in('id', filters.ids)
+  }
+
   if (filters.jobTypeId) {
     result = result.eq('job_type_id', filters.jobTypeId)
   }
@@ -85,6 +94,10 @@ export function applyContactFilters<T extends Filterable>(
 
   if (filters.status) {
     result = result.eq('status', filters.status)
+  }
+
+  if (filters.subscribedToPrograms !== null) {
+    result = result.eq('subscribed_to_programs', filters.subscribedToPrograms)
   }
 
   if (filters.subscribed !== null) {
@@ -182,6 +195,92 @@ export async function fetchContacts(
 }
 
 /**
+ * Ids named in a single PostgREST request.
+ *
+ * A selection is applied as `id=in.(...)`, which travels in the URL — so the ids are
+ * requested in chunks small enough that the request stays well inside the proxy's
+ * header limit, rather than failing on length once a user selects enough rows.
+ */
+export const EXPORT_ID_CHUNK_SIZE = 200
+
+/** Value a row sorts by for a given key, flattening the joins the DB sorts by id. */
+function sortValue(row: JoinedRow, sort: ContactSortKey): string {
+  switch (sort) {
+    case 'organisation':
+      // The database orders by organisation_id, which is meaningless to a reader. A
+      // selection is re-ordered here anyway, so it sorts by the name that is exported.
+      return row.organisation?.name ?? ''
+    case 'status':
+      return String(row.status ?? '')
+    case 'newsletter':
+      return row.subscribed_to_newsletter ? '1' : '0'
+    case 'created':
+      return String(row.created_at ?? '')
+    case 'name':
+    default:
+      return `${row.last_name ?? ''} ${row.first_name ?? ''}`
+  }
+}
+
+type JoinedRow = ContactRow & { organisation?: { name: string } | null }
+
+/** Orders rows the way the active sort would, for a set assembled from several queries. */
+export function sortSelectedRows<T extends ContactRow>(
+  rows: T[],
+  sort: ContactSortKey,
+  dir: 'asc' | 'desc'
+): T[] {
+  const direction = dir === 'desc' ? -1 : 1
+
+  // Copied rather than sorted in place: the caller's array is not ours to reorder.
+  return [...rows].sort(
+    (a, b) =>
+      direction *
+      sortValue(a as JoinedRow, sort).localeCompare(sortValue(b as JoinedRow, sort), undefined, {
+        sensitivity: 'base',
+      })
+  )
+}
+
+/**
+ * Loads an explicitly selected set of contacts, in bounded id chunks.
+ *
+ * The active filters still apply, so a row that has since been archived or filtered out
+ * of the view is not exported. Fewer rows than ids is therefore an expected outcome, not
+ * an error — unlike the filtered path, where a short read means a truncated export.
+ */
+export async function fetchSelectedContactsForExport(
+  db: SupabaseClient<Database>,
+  filters: ContactFilters,
+  ids: readonly string[],
+  maxRows: number,
+  chunkSize = EXPORT_ID_CHUNK_SIZE
+): Promise<ContactPage> {
+  if (ids.length > maxRows) {
+    throw new ContactExportLimitError(ids.length, maxRows)
+  }
+
+  const safeChunkSize = Math.max(1, chunkSize)
+  const rows: ContactRow[] = []
+
+  for (let start = 0; start < ids.length; start += safeChunkSize) {
+    const chunk = ids.slice(start, start + safeChunkSize)
+    const page = await fetchContacts(db, {
+      ...filters,
+      ids: [...chunk],
+      page: 1,
+      pageSize: chunk.length,
+    })
+
+    rows.push(...page.rows)
+  }
+
+  const ordered = sortSelectedRows(rows, filters.sort, filters.dir)
+
+  return { rows: ordered, total: ordered.length }
+}
+
+/**
  * Loads a complete filtered set in bounded PostgREST pages.
  *
  * Supabase projects commonly cap each response at 1,000 rows even when a larger
@@ -195,6 +294,10 @@ export async function fetchContactsForExport(
   maxRows: number,
   pageSize = 1_000
 ): Promise<ContactPage> {
+  if (filters.ids !== null) {
+    return fetchSelectedContactsForExport(db, filters, filters.ids, maxRows)
+  }
+
   const safePageSize = Math.max(1, Math.min(pageSize, maxRows))
   const rows: ContactRow[] = []
   let page = 1
