@@ -3,6 +3,8 @@
 import { useEffect, useRef } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 
+import Portal from '@/components/ui/Portal'
+
 import styles from './marketing.module.css'
 
 type SendConfirmDialogProps = {
@@ -66,76 +68,78 @@ export default function SendConfirmDialog({
   }
 
   return (
-    <div
-      className={styles.modalBackdrop}
-      onClick={(event) => {
-        if (event.target === event.currentTarget && !loading) onClose()
-      }}
-      onKeyDown={trapFocus}
-    >
+    <Portal>
       <div
-        ref={dialogRef}
-        className={styles.modal}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={headingId}
-        data-testid="send-confirm-dialog"
+        className={styles.modalBackdrop}
+        onClick={(event) => {
+          if (event.target === event.currentTarget && !loading) onClose()
+        }}
+        onKeyDown={trapFocus}
       >
-        <div className={styles.modalHeader}>
-          <div>
-            <h2 id={headingId} className={styles.modalTitle}>Send campaign?</h2>
-            <p className={styles.modalSubtitle}>{campaignName}</p>
+        <div
+          ref={dialogRef}
+          className={styles.modal}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={headingId}
+          data-testid="send-confirm-dialog"
+        >
+          <div className={styles.modalHeader}>
+            <div>
+              <h2 id={headingId} className={styles.modalTitle}>Send campaign?</h2>
+              <p className={styles.modalSubtitle}>{campaignName}</p>
+            </div>
+            <button
+              ref={closeRef}
+              type="button"
+              className={styles.secondaryBtn}
+              onClick={onClose}
+              disabled={loading}
+            >
+              Cancel
+            </button>
           </div>
-          <button
-            ref={closeRef}
-            type="button"
-            className={styles.secondaryBtn}
-            onClick={onClose}
-            disabled={loading}
-          >
-            Cancel
-          </button>
-        </div>
 
-        <div className={styles.confirmBody}>
-          <p>
-            This action sends real email and cannot be recalled. Check the audience before
-            continuing.
-          </p>
-          <dl className={styles.confirmSummary}>
-            <div>
-              <dt>Audience</dt>
-              <dd>{audienceLabel}</dd>
-            </div>
-            <div>
-              <dt>Recipients</dt>
-              <dd>
-                {loading ? 'Checking…' : audienceSize === null ? 'Could not verify' : audienceSize}
-              </dd>
-            </div>
-          </dl>
+          <div className={styles.confirmBody}>
+            <p>
+              This action sends real email and cannot be recalled. Check the audience before
+              continuing.
+            </p>
+            <dl className={styles.confirmSummary}>
+              <div>
+                <dt>Audience</dt>
+                <dd>{audienceLabel}</dd>
+              </div>
+              <div>
+                <dt>Recipients</dt>
+                <dd>
+                  {loading ? 'Checking…' : audienceSize === null ? 'Could not verify' : audienceSize}
+                </dd>
+              </div>
+            </dl>
 
-          {error && <p className={styles.error} role="alert">{error}</p>}
-          {!loading && audienceSize === 0 && (
-            <p className={styles.error} role="alert">No subscribed contacts match this audience.</p>
-          )}
-        </div>
+            {error && <p className={styles.error} role="alert">{error}</p>}
+            {!loading && audienceSize === 0 && (
+              <p className={styles.error} role="alert">No subscribed contacts match this audience.</p>
+            )}
+          </div>
 
-        <div className={styles.confirmActions}>
-          <button type="button" className={styles.secondaryBtn} onClick={onClose} disabled={loading}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            className={styles.dangerBtn}
-            onClick={onConfirm}
-            disabled={loading || audienceSize === null || audienceSize === 0 || Boolean(error)}
-            data-testid="confirm-send"
-          >
-            {loading ? 'Checking audience…' : 'Send campaign'}
-          </button>
+          <div className={styles.confirmActions}>
+            <button type="button" className={styles.secondaryBtn} onClick={onClose} disabled={loading}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className={styles.dangerBtn}
+              onClick={onConfirm}
+              disabled={loading || audienceSize === null || audienceSize === 0 || Boolean(error)}
+              data-testid="confirm-send"
+            >
+              {loading ? 'Checking audience…' : 'Send campaign'}
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+    </Portal>
   )
 }

@@ -406,7 +406,9 @@
 .modalBackdrop {
   position: fixed;
   inset: 0;
-  z-index: 50;
+  /* Rendered through <Portal>, so this is compared against the sidebar directly; it
+     has to clear the mobile bottom bar (100) and its menu (110). */
+  z-index: 1000;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1044,7 +1046,8 @@
 .drawerBackdrop {
   position: fixed;
   inset: 0;
-  z-index: 50;
+  /* See .modalBackdrop. */
+  z-index: 1000;
   display: flex;
   justify-content: flex-end;
   background: rgba(15, 15, 15, 0.45);

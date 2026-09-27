@@ -49,6 +49,17 @@ describe('resolveSegmentAudience', () => {
     )
   })
 
+  it('calls rpc on the client, which supabase-js needs as `this`', async () => {
+    const { db, contacts } = setup()
+    // Mirrors supabase-js: rpc reads `this.rest`, so a detached call throws.
+    db.rpc = jest.fn(function (this: unknown) {
+      if (this !== db) throw new TypeError("Cannot read properties of undefined (reading 'rest')")
+      return contacts
+    }) as never
+
+    await expect(resolveSegmentAudience(db as never, base)).resolves.toBeDefined()
+  })
+
   it('previews an unsaved definition with no overrides', async () => {
     const { db } = setup()
 

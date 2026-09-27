@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react'
 
+import Portal from '@/components/ui/Portal'
+
 import styles from './marketing.module.css'
 import SegmentAddPeopleTab from './SegmentAddPeopleTab'
 import SegmentDecisionsTab from './SegmentDecisionsTab'
@@ -128,71 +130,73 @@ export default function SegmentDrawer({
   const actions: SegmentActions = { segmentId, locked, decide, undo, refreshKey }
 
   return (
-    <div className={styles.drawerBackdrop} onClick={onClose} data-testid="segment-drawer-backdrop">
-      <aside
-        className={styles.drawer}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="segment-drawer-title"
-        onClick={(event) => event.stopPropagation()}
-        data-testid="segment-drawer"
-      >
-        <header className={styles.drawerHeader}>
-          <div>
-            <h2 id="segment-drawer-title" className={styles.modalTitle}>
-              {detail?.segment.name ?? 'Segment'}
-            </h2>
-            {detail && (
-              <p className={styles.modalSubtitle} data-testid="segment-drawer-counts">
-                {detail.counts.newsletter} newsletter · {detail.counts.programs} courses &amp; training ·{' '}
-                {detail.overrides.included} added · {detail.overrides.excluded} excluded
-              </p>
+    <Portal>
+      <div className={styles.drawerBackdrop} onClick={onClose} data-testid="segment-drawer-backdrop">
+        <aside
+          className={styles.drawer}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="segment-drawer-title"
+          onClick={(event) => event.stopPropagation()}
+          data-testid="segment-drawer"
+        >
+          <header className={styles.drawerHeader}>
+            <div>
+              <h2 id="segment-drawer-title" className={styles.modalTitle}>
+                {detail?.segment.name ?? 'Segment'}
+              </h2>
+              {detail && (
+                <p className={styles.modalSubtitle} data-testid="segment-drawer-counts">
+                  {detail.counts.newsletter} newsletter · {detail.counts.programs} courses &amp; training ·{' '}
+                  {detail.overrides.included} added · {detail.overrides.excluded} excluded
+                </p>
+              )}
+            </div>
+            <button type="button" className={styles.secondaryBtn} onClick={onClose} data-testid="close-segment">
+              Close
+            </button>
+          </header>
+
+          {locked && detail && (
+            <div className={styles.constraint} role="status" data-testid="segment-locked">
+              <strong>Locked.</strong> Used by{' '}
+              {detail.lockedBy.map((campaign) => `“${campaign.name}”`).join(', ')}, which is approved or
+              sending. Move that campaign back to draft to change who is in this segment.
+            </div>
+          )}
+
+          {error && (
+            <div className={styles.error} role="alert">
+              {error}
+            </div>
+          )}
+
+          <nav className={styles.tabs} role="tablist" aria-label="Segment sections">
+            {TABS.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                role="tab"
+                aria-selected={tab === item.id}
+                className={`${styles.tab} ${tab === item.id ? styles.tabActive : ''}`}
+                onClick={() => setTab(item.id)}
+                data-testid={`segment-tab-${item.id}`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </nav>
+
+          <div className={styles.drawerBody} role="tabpanel">
+            {tab === 'members' && <SegmentMembersTab actions={actions} />}
+            {tab === 'decisions' && <SegmentDecisionsTab actions={actions} />}
+            {tab === 'add' && <SegmentAddPeopleTab actions={actions} />}
+            {tab === 'filters' && detail && (
+              <SegmentFiltersTab segment={detail.segment} jobTypes={jobTypes} locked={locked} onSaved={changed} />
             )}
           </div>
-          <button type="button" className={styles.secondaryBtn} onClick={onClose} data-testid="close-segment">
-            Close
-          </button>
-        </header>
-
-        {locked && detail && (
-          <div className={styles.constraint} role="status" data-testid="segment-locked">
-            <strong>Locked.</strong> Used by{' '}
-            {detail.lockedBy.map((campaign) => `“${campaign.name}”`).join(', ')}, which is approved or
-            sending. Move that campaign back to draft to change who is in this segment.
-          </div>
-        )}
-
-        {error && (
-          <div className={styles.error} role="alert">
-            {error}
-          </div>
-        )}
-
-        <nav className={styles.tabs} role="tablist" aria-label="Segment sections">
-          {TABS.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              role="tab"
-              aria-selected={tab === item.id}
-              className={`${styles.tab} ${tab === item.id ? styles.tabActive : ''}`}
-              onClick={() => setTab(item.id)}
-              data-testid={`segment-tab-${item.id}`}
-            >
-              {item.label}
-            </button>
-          ))}
-        </nav>
-
-        <div className={styles.drawerBody} role="tabpanel">
-          {tab === 'members' && <SegmentMembersTab actions={actions} />}
-          {tab === 'decisions' && <SegmentDecisionsTab actions={actions} />}
-          {tab === 'add' && <SegmentAddPeopleTab actions={actions} />}
-          {tab === 'filters' && detail && (
-            <SegmentFiltersTab segment={detail.segment} jobTypes={jobTypes} locked={locked} onSaved={changed} />
-          )}
-        </div>
-      </aside>
-    </div>
+        </aside>
+      </div>
+    </Portal>
   )
 }

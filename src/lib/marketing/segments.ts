@@ -102,7 +102,9 @@ export async function segmentAudienceQuery(
   const organisationIds = criteria.q ? await findOrganisationIdsMatching(db, criteria.q) : []
   const expression = buildSegmentFilterExpression(criteria, organisationIds)
 
-  const rpc = db.rpc as unknown as (
+  // Bound: supabase-js reads `this.rest` inside rpc, so a detached reference throws
+  // "Cannot read properties of undefined (reading 'rest')".
+  const rpc = db.rpc.bind(db) as unknown as (
     fn: string,
     args: Record<string, unknown>,
     options: { count: 'exact' }

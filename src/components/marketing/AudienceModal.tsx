@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef } from 'react'
 
 import Pagination from '@/components/ui/Pagination'
+import Portal from '@/components/ui/Portal'
 
 import styles from './marketing.module.css'
 
@@ -104,131 +105,133 @@ export default function AudienceModal({
   const heading = `audience-heading-${campaignName.replace(/\s+/g, '-').toLowerCase()}`
 
   return (
-    <div
-      className={styles.modalBackdrop}
-      // A click on the backdrop closes; a click that started inside the dialog and
-      // drifted out does not, which is why this is on the backdrop alone.
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose()
-      }}
-      onKeyDown={(event) => {
-        if (event.key === 'Escape') onClose()
-        trapFocus(event)
-      }}
-    >
+    <Portal>
       <div
-        className={styles.modal}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={heading}
-        ref={dialogRef}
-        data-testid="audience-modal"
+        className={styles.modalBackdrop}
+        // A click on the backdrop closes; a click that started inside the dialog and
+        // drifted out does not, which is why this is on the backdrop alone.
+        onClick={(event) => {
+          if (event.target === event.currentTarget) onClose()
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') onClose()
+          trapFocus(event)
+        }}
       >
-        <div className={styles.modalHeader}>
-          <div>
-            <h3 id={heading} className={styles.modalTitle}>
-              {campaignName}
-            </h3>
-            <p className={styles.modalSubtitle}>
-              {audience
-                ? [
-                    `${numberFormat.format(audience.total)} recipient${audience.total === 1 ? '' : 's'}`,
-                    audience.segmentName,
-                    audience.source === 'ledger'
-                      ? `send ${audience.run}`
-                      : 'not sent yet — this is who matches now',
-                  ]
-                    .filter(Boolean)
-                    .join(' · ')
-                : 'Loading…'}
-            </p>
+        <div
+          className={styles.modal}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={heading}
+          ref={dialogRef}
+          data-testid="audience-modal"
+        >
+          <div className={styles.modalHeader}>
+            <div>
+              <h3 id={heading} className={styles.modalTitle}>
+                {campaignName}
+              </h3>
+              <p className={styles.modalSubtitle}>
+                {audience
+                  ? [
+                      `${numberFormat.format(audience.total)} recipient${audience.total === 1 ? '' : 's'}`,
+                      audience.segmentName,
+                      audience.source === 'ledger'
+                        ? `send ${audience.run}`
+                        : 'not sent yet — this is who matches now',
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')
+                  : 'Loading…'}
+              </p>
+            </div>
+            <button
+              type="button"
+              className={styles.secondaryBtn}
+              onClick={onClose}
+              ref={closeRef}
+              data-testid="close-audience"
+            >
+              Close
+            </button>
           </div>
-          <button
-            type="button"
-            className={styles.secondaryBtn}
-            onClick={onClose}
-            ref={closeRef}
-            data-testid="close-audience"
-          >
-            Close
-          </button>
-        </div>
 
-        {error && (
-          <p className={styles.error} role="alert">
-            {error}
-          </p>
-        )}
+          {error && (
+            <p className={styles.error} role="alert">
+              {error}
+            </p>
+          )}
 
-        {audience?.truncated && (
-          <p className={styles.constraint}>
-            This segment matches more contacts than one send can carry. Only the first
-            10,000 would receive it.
-          </p>
-        )}
+          {audience?.truncated && (
+            <p className={styles.constraint}>
+              This segment matches more contacts than one send can carry. Only the first
+              10,000 would receive it.
+            </p>
+          )}
 
-        <div className={styles.modalBody}>
-          <table className={styles.audienceTable}>
-            <thead>
-              <tr>
-                <th scope="col">First name</th>
-                <th scope="col">Last name</th>
-                <th scope="col">Email</th>
-                <th scope="col">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {audience?.recipients.map((recipient) => (
-                <tr key={recipient.contactId}>
-                  <td>{recipient.firstName}</td>
-                  <td>{recipient.lastName}</td>
-                  <td>{recipient.email}</td>
-                  <td>
-                    <span
-                      className={
-                        recipient.status === 'failed' ? styles.recipientFailed : undefined
-                      }
-                    >
-                      {STATUS_LABELS[recipient.status]}
-                    </span>
-                    {/* The provider's own words, against the contact they belong to —
-                        the one place a per-recipient failure can actually be read. */}
-                    {recipient.error && (
-                      <span className={styles.recipientError}> — {recipient.error}</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-              {!loading && audience?.recipients.length === 0 && (
+          <div className={styles.modalBody}>
+            <table className={styles.audienceTable}>
+              <thead>
                 <tr>
-                  <td colSpan={4} className={styles.empty}>
-                    This campaign has no audience yet. Point it at a segment first.
-                  </td>
+                  <th scope="col">First name</th>
+                  <th scope="col">Last name</th>
+                  <th scope="col">Email</th>
+                  <th scope="col">Status</th>
                 </tr>
-              )}
-              {loading && !audience && (
-                <tr>
-                  <td colSpan={4} className={styles.empty}>
-                    Loading recipients…
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {audience?.recipients.map((recipient) => (
+                  <tr key={recipient.contactId}>
+                    <td>{recipient.firstName}</td>
+                    <td>{recipient.lastName}</td>
+                    <td>{recipient.email}</td>
+                    <td>
+                      <span
+                        className={
+                          recipient.status === 'failed' ? styles.recipientFailed : undefined
+                        }
+                      >
+                        {STATUS_LABELS[recipient.status]}
+                      </span>
+                      {/* The provider's own words, against the contact they belong to —
+                          the one place a per-recipient failure can actually be read. */}
+                      {recipient.error && (
+                        <span className={styles.recipientError}> — {recipient.error}</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+                {!loading && audience?.recipients.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className={styles.empty}>
+                      This campaign has no audience yet. Point it at a segment first.
+                    </td>
+                  </tr>
+                )}
+                {loading && !audience && (
+                  <tr>
+                    <td colSpan={4} className={styles.empty}>
+                      Loading recipients…
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
 
-        <Pagination
-          page={page}
-          pageSize={pageSize}
-          total={audience?.total ?? 0}
-          shown={audience?.recipients.length}
-          isLoading={loading}
-          onPageChange={onPageChange}
-          onPageSizeChange={onPageSizeChange}
-          label="recipients"
-          testId="audience-pagination"
-        />
+          <Pagination
+            page={page}
+            pageSize={pageSize}
+            total={audience?.total ?? 0}
+            shown={audience?.recipients.length}
+            isLoading={loading}
+            onPageChange={onPageChange}
+            onPageSizeChange={onPageSizeChange}
+            label="recipients"
+            testId="audience-pagination"
+          />
+        </div>
       </div>
-    </div>
+    </Portal>
   )
 }
