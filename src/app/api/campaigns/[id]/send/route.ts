@@ -124,7 +124,11 @@ export async function POST(
         if (segmentError) throw new Error(segmentError.message)
         if (!segment) return conflict('The campaign segment no longer exists.')
 
-        const members = await resolveSegmentMembers(db, segment.definition, campaign.consent_stream)
+        const members = await resolveSegmentMembers(
+          db,
+          { id: campaign.segment_id, definition: segment.definition },
+          campaign.consent_stream
+        )
 
         if (members.total === 0) {
           return conflict('This segment currently matches no subscribed contacts.')

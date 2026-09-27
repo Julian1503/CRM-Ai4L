@@ -2,10 +2,8 @@
 
 import React, { useCallback, useEffect, useState } from 'react'
 
-import { AU_STATES } from '@/lib/contacts/states'
 import type { ConsentStream } from '@/lib/db/types'
 import { CONSENT_STREAM_LABELS, parseConsentStream } from '@/lib/marketing/consentStream'
-import type { FacetCounts, SegmentFacets } from '@/lib/marketing/facets'
 
 import Pagination from '@/components/ui/Pagination'
 
@@ -16,6 +14,7 @@ import AutomationConnectionField, {
 } from './AutomationConnectionField'
 import CampaignCopyEditor from './CampaignCopyEditor'
 import CampaignStreamField from './CampaignStreamField'
+import SegmentsPanel from './SegmentsPanel'
 import SendConfirmDialog from './SendConfirmDialog'
 import styles from './marketing.module.css'
 import StreamPill from './StreamPill'
@@ -36,14 +35,6 @@ type Campaign = {
   consent_stream: ConsentStream
   merge_fields: Record<string, string>
   segment?: { name: string } | null
-}
-
-type Preview = {
-  total: number
-  truncated: boolean
-  estimatedSendMs: number
-  /** Per-option counts for the three filter lists; absent on an older cached response. */
-  facets?: SegmentFacets & { truncated: boolean }
 }
 
 export type JobTypeOption = { id: string; name: string }
@@ -174,26 +165,6 @@ function copyToggleLabel(campaign: Campaign, isOpen: boolean): string {
   return COPY_EDITABLE_STATUSES.has(campaign.status) ? 'Write copy with AI' : 'View copy'
 }
 
-/**
- * The ` (12)` a filter option carries.
- *
- * Counted against the other two selections, so the number says what picking this
- * option would actually leave you with rather than how many exist overall. Nothing is
- * shown until the first preview lands: a placeholder zero reads as "empty segment",
- * which is a different thing from "not counted yet".
- */
-function optionCount(counts: FacetCounts | undefined, value: string): string {
-  if (!counts) return ''
-
-  return ` (${counts[value] ?? 0})`
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return 'under a second'
-  const minutes = Math.round(ms / 60000)
-  if (minutes < 1) return `${Math.round(ms / 1000)} seconds`
-  return `${minutes} minute${minutes === 1 ? '' : 's'}`
-}
 
 /**
  * Segments offered in the campaign form's dropdown.
@@ -231,10 +202,6 @@ async function readError(response: Response): Promise<string> {
 }
 
 export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] }) {
-  const [segments, setSegments] = useState<Segment[]>([])
-  const [segmentsPage, setSegmentsPage] = useState(1)
-  const [segmentsPageSize, setSegmentsPageSize] = useState(25)
-  const [segmentsTotal, setSegmentsTotal] = useState(0)
 
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [campaignsPage, setCampaignsPage] = useState(1)
@@ -267,12 +234,6 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
   const [sendAudienceLoading, setSendAudienceLoading] = useState(false)
   const [sendAudienceError, setSendAudienceError] = useState<string | null>(null)
 
-  // Segment draft
-  const [segmentName, setSegmentName] = useState('')
-  const [segmentState, setSegmentState] = useState('')
-  const [segmentJobType, setSegmentJobType] = useState('')
-  const [segmentStatus, setSegmentStatus] = useState('')
-  const [preview, setPreview] = useState<Preview | null>(null)
 
   // Audience sizes, keyed by campaign *and* segment so a re-pointed campaign does not
   // read a stale count. The composer says who the email is going to, and refuses to
@@ -405,9 +366,8 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
 
   const load = useCallback(async () => {
     try {
-      const [segmentsResponse, campaignsResponse, pickerResponse, templatesResponse] =
+      const [campaignsResponse, pickerResponse, templatesResponse] =
         await Promise.all([
-          fetch(`/api/segments?page=${segmentsPage}&pageSize=${segmentsPageSize}`),
           fetch(
             `/api/campaigns?page=${campaignsPage}&pageSize=${campaignsPageSize}` +
               (campaignStreamFilter ? `&stream=${campaignStreamFilter}` : '') +
@@ -417,11 +377,6 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
           fetch('/api/templates'),
         ])
 
-      if (segmentsResponse.ok) {
-        const body = await segmentsResponse.json()
-        setSegments(body.segments ?? [])
-        setSegmentsTotal(body.total ?? 0)
-      }
       if (campaignsResponse.ok) {
         const body = await campaignsResponse.json()
         const loaded: Campaign[] = body.campaigns ?? []
@@ -450,8 +405,6 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
       setError(loadError instanceof Error ? loadError.message : 'Could not load marketing data.')
     }
   }, [
-    segmentsPage,
-    segmentsPageSize,
     campaignsPage,
     campaignsPageSize,
     campaignStreamFilter,
@@ -517,34 +470,6 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
     setAudienceFor(campaign)
   }
 
-  const definition = React.useMemo(
-    () => ({
-      ...(segmentState ? { state: segmentState } : {}),
-      ...(segmentJobType ? { jobTypeId: segmentJobType } : {}),
-      ...(segmentStatus ? { status: segmentStatus } : {}),
-    }),
-    [segmentState, segmentJobType, segmentStatus]
-  )
-
-  // Live audience size. Debounced so dragging through a dropdown does not fire a
-  // request per keystroke.
-  useEffect(() => {
-    const timer = setTimeout(async () => {
-      try {
-        const response = await fetch('/api/segments/preview', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ definition }),
-        })
-
-        setPreview(response.ok ? await response.json() : null)
-      } catch {
-        setPreview(null)
-      }
-    }, 300)
-
-    return () => clearTimeout(timer)
-  }, [definition])
 
   // Checks the automation id on the draft campaign as it is chosen or typed. Debounced
   // for the same reason as the preview above: the manual field is a text box, and a
@@ -581,7 +506,8 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
         const response = await fetch('/api/segments/preview', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ definition: reviewingSegment.definition }),
+          // With the id, so the count honours the segment's manual decisions.
+          body: JSON.stringify({ segmentId: reviewingSegment.id, definition: reviewingSegment.definition }),
         })
 
         if (!response.ok) return
@@ -603,30 +529,6 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
     }
   }, [audienceKey, reviewingSegment, reviewingAudience])
 
-  const createSegment = async () => {
-    setError(null)
-    setBusy('segment')
-
-    try {
-      const response = await fetch('/api/segments', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: segmentName, definition }),
-      })
-
-      if (!response.ok) throw new Error(await readError(response))
-
-      setSegmentName('')
-      // Listings are newest-first, so the new record is on page 1 — not wherever the
-      // user happened to be paged to.
-      setSegmentsPage(1)
-      await load()
-    } catch (createError) {
-      setError(createError instanceof Error ? createError.message : 'Could not create segment.')
-    } finally {
-      setBusy(null)
-    }
-  }
 
   // The registered template behind the automation picked, if there is one. Matched by
   // automation id because that is what the picker holds.
@@ -856,153 +758,7 @@ You will approve it again before anything leaves, and EmailOctopus only delivers
         segments take time — the estimate below is real.
       </div>
 
-      <section className={styles.panel} aria-labelledby="segments-heading">
-        <h2 id="segments-heading" className={styles.panelTitle}>
-          Segments
-        </h2>
-        <p className={styles.panelHint}>
-          Segments always exclude archived contacts and anyone not subscribed to the
-          newsletter.
-        </p>
-
-        <div className={styles.formRow}>
-          <label className={styles.field}>
-            <span className={styles.label}>Name</span>
-            <input
-              className={styles.input}
-              value={segmentName}
-              onChange={(event) => setSegmentName(event.target.value)}
-              placeholder="NSW electricians"
-              data-testid="segment-name"
-            />
-          </label>
-
-          <label className={styles.field}>
-            <span className={styles.label}>State</span>
-            <select
-              className={styles.input}
-              value={segmentState}
-              onChange={(event) => setSegmentState(event.target.value)}
-              data-testid="segment-state"
-            >
-              <option value="">Any state{optionCount(preview?.facets?.state, '')}</option>
-              {AU_STATES.map((state) => (
-                <option key={state.code} value={state.code}>
-                  {state.code}
-                  {optionCount(preview?.facets?.state, state.code)}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className={styles.field}>
-            <span className={styles.label}>Job type</span>
-            <select
-              className={styles.input}
-              value={segmentJobType}
-              onChange={(event) => setSegmentJobType(event.target.value)}
-              data-testid="segment-job-type"
-            >
-              <option value="">Any job type{optionCount(preview?.facets?.jobType, '')}</option>
-              {jobTypes.map((jobType) => (
-                <option key={jobType.id} value={jobType.id}>
-                  {jobType.name}
-                  {optionCount(preview?.facets?.jobType, jobType.id)}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className={styles.field}>
-            <span className={styles.label}>Status</span>
-            <select
-              className={styles.input}
-              value={segmentStatus}
-              onChange={(event) => setSegmentStatus(event.target.value)}
-              data-testid="segment-status"
-            >
-              <option value="">Any status{optionCount(preview?.facets?.status, '')}</option>
-              <option value="lead">Lead{optionCount(preview?.facets?.status, 'lead')}</option>
-              <option value="prospect">
-                Prospect{optionCount(preview?.facets?.status, 'prospect')}
-              </option>
-              <option value="customer">
-                Customer{optionCount(preview?.facets?.status, 'customer')}
-              </option>
-            </select>
-          </label>
-        </div>
-
-        <div className={styles.previewRow}>
-          <div className={styles.preview} data-testid="segment-preview">
-            {preview ? (
-              <>
-                <span className={styles.previewCount}>{preview.total}</span>
-                <span className={styles.previewLabel}>
-                  subscribed contact{preview.total === 1 ? '' : 's'} match
-                  {preview.total === 1 ? 'es' : ''}
-                </span>
-                {preview.total > 0 && (
-                  <span className={styles.previewMeta}>
-                    ≈ {formatDuration(preview.estimatedSendMs)} to send
-                  </span>
-                )}
-                {preview.total === 0 && (
-                  <span className={styles.previewWarning} data-testid="segment-preview-empty">
-                    Nothing matches these filters. A campaign on this segment cannot
-                    generate copy or send.
-                  </span>
-                )}
-                {preview.truncated && (
-                  <span className={styles.previewWarning}>
-                    Capped — only the first 10,000 will receive this.
-                  </span>
-                )}
-              </>
-            ) : (
-              <span className={styles.previewLabel}>Counting…</span>
-            )}
-          </div>
-
-          <button
-            type="button"
-            className={styles.primaryBtn}
-            onClick={createSegment}
-            disabled={!segmentName.trim() || busy !== null}
-            data-testid="create-segment"
-          >
-            {busy === 'segment' ? 'Saving…' : 'Save segment'}
-          </button>
-        </div>
-
-        <ul className={styles.list}>
-          {segments.length === 0 && <li className={styles.empty}>No segments yet.</li>}
-          {segments.map((segment) => (
-            <li key={segment.id} className={styles.listItem}>
-              <span className={styles.itemName}>{segment.name}</span>
-              <span className={styles.itemMeta}>
-                {Object.entries(segment.definition ?? {})
-                  .map(([key, value]) => `${key}: ${String(value)}`)
-                  .join(' · ') || 'All subscribed contacts'}
-              </span>
-            </li>
-          ))}
-        </ul>
-
-        <Pagination
-          page={segmentsPage}
-          pageSize={segmentsPageSize}
-          total={segmentsTotal}
-          shown={segments.length}
-          onPageChange={setSegmentsPage}
-          onPageSizeChange={(size) => {
-            setSegmentsPageSize(size)
-            setSegmentsPage(1)
-          }}
-          label="segments"
-          testId="segments-pagination"
-        />
-      </section>
+      <SegmentsPanel jobTypes={jobTypes} onChanged={() => void load()} />
 
       <section className={styles.panel} aria-labelledby="campaigns-heading">
         <h2 id="campaigns-heading" className={styles.panelTitle}>

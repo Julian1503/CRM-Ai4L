@@ -6,7 +6,7 @@ import type { CampaignRow, Database } from '@/lib/db/types'
 import { BOOKING_URL_MERGE_FIELD } from './mergeFields'
 import type { CampaignProvider } from './providers/types'
 import { TokenBucket } from './rateLimiter'
-import type { SegmentMembers } from './segments'
+import type { SegmentMember } from './segments'
 
 
 /**
@@ -63,7 +63,7 @@ type PendingSend = {
 export async function prepareCampaignSends(
   db: SupabaseClient<Database>,
   campaignId: string,
-  members: SegmentMembers['members'],
+  members: ReadonlyArray<Pick<SegmentMember, 'id' | 'email' | 'first_name' | 'last_name'>>,
   run = 1
 ): Promise<number> {
   if (members.length === 0) {

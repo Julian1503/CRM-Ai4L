@@ -4,11 +4,8 @@ import { NextResponse } from 'next/server'
 import { badRequest, ok, readJsonBody, requireSessionOr401, serverError } from '@/lib/api/responses'
 import { buildPageMeta, getPageRange, readPageParams } from '@/lib/pagination'
 import { readConsentStream } from '@/lib/marketing/consentStream'
-import {
-  filtersToSegmentDefinition,
-  resolveSegmentMembers,
-  segmentDefinitionToFilters,
-} from '@/lib/marketing/segments'
+import { criteriaToDefinition, parseSegmentCriteria } from '@/lib/marketing/segmentCriteria'
+import { resolveSegmentAudience } from '@/lib/marketing/segments'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 
 export const runtime = 'nodejs'
@@ -54,15 +51,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return badRequest('A segment name is required.')
   }
 
-  // A segment stores no consent gate of its own — filtersToSegmentDefinition keeps only
-  // the descriptive filters, and the gate is re-applied from the campaign's stream every
-  // time the segment resolves. The stream here only decides which audience the member
-  // count below describes.
+  // A segment stores no consent gate of its own — the gate is re-applied from the
+  // campaign's stream every time the segment resolves. The stream here only decides
+  // which audience the member count below describes.
   const stream = readConsentStream(body.stream)
 
-  // Round-tripping through the parser strips anything unrecognised and forces the
-  // consent / no-archived invariants, so only a sane definition is ever stored.
-  const definition = filtersToSegmentDefinition(segmentDefinitionToFilters(body.definition, stream))
+  // Round-tripping through the parser strips anything unrecognised, so only a sane
+  // definition is ever stored.
+  const definition = criteriaToDefinition(parseSegmentCriteria(body.definition))
 
   try {
     const db = await createSupabaseServerClient()
@@ -89,7 +85,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       throw new Error(error.message)
     }
 
-    const members = await resolveSegmentMembers(db, definition, stream)
+    const members = await resolveSegmentAudience(db, {
+      segmentId: data.id,
+      definition,
+      stream,
+      page: 1,
+      pageSize: 1,
+    })
 
     return ok({ segment: data, memberCount: members.total, truncated: members.truncated })
   } catch (error) {

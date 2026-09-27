@@ -17,7 +17,7 @@
     "vercel:env": "node --env-file-if-exists=.env.local scripts/vercel-env-push.mjs",
     "typecheck": "tsc --noEmit",
     "db:types": "npx supabase gen types typescript --linked --schema public > src/lib/db/types.ts",
-    "db:verify": "npm run db:verify:contacts && npm run db:verify:webhooks && npm run db:verify:campaigns && npm run db:verify:bookings && npm run db:verify:operations && npm run db:verify:reruns && npm run db:verify:consent && npm run db:verify:schedules",
+    "db:verify": "npm run db:verify:contacts && npm run db:verify:webhooks && npm run db:verify:campaigns && npm run db:verify:bookings && npm run db:verify:operations && npm run db:verify:reruns && npm run db:verify:consent && npm run db:verify:schedules && npm run db:verify:segments",
     "db:verify:contacts": "npx supabase db query --linked --file supabase/tests/verify_20260807000000.sql",
     "db:verify:webhooks": "npx supabase db query --linked --file supabase/tests/verify_20260807010000.sql",
     "db:verify:campaigns": "npx supabase db query --linked --file supabase/tests/verify_20260808000000.sql",
@@ -26,6 +26,7 @@
     "db:verify:reruns": "npx supabase db query --linked --file supabase/tests/verify_20260827000000.sql",
     "db:verify:consent": "npx supabase db query --linked --file supabase/tests/verify_20260901000000.sql",
     "db:verify:schedules": "npx supabase db query --linked --file supabase/tests/verify_20260928000000.sql",
+    "db:verify:segments": "npx supabase db query --linked --file supabase/tests/verify_20260929000000.sql",
     "db:create-admin": "node --env-file=.env.local supabase/create-admin.js",
     "db:sync-job-types": "node --env-file=.env.local supabase/sync-job-types.js"
   },

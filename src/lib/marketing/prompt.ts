@@ -61,6 +61,10 @@ export type AudienceBrief = {
   /** How many contacts the segment currently resolves to. */
   size: number
   jobType?: string | null
+  /** Organisation name, when the segment targets one. */
+  organisation?: string | null
+  /** Service name, when the segment targets contacts who use one. */
+  service?: string | null
   state?: string | null
   status?: string | null
   /** The segment's free-text filter, if it has one. Redacted before use. */
@@ -208,6 +212,12 @@ export function buildUserPrompt(brief: CampaignBrief): string {
   }
   if (audience.jobType?.trim()) {
     lines.push(`- Job type: ${redactPii(audience.jobType.trim())}`)
+  }
+  if (audience.organisation?.trim()) {
+    lines.push(`- Organisation: ${redactPii(audience.organisation.trim())}`)
+  }
+  if (audience.service?.trim()) {
+    lines.push(`- Uses the service: ${redactPii(audience.service.trim())}`)
   }
   if (audience.state?.trim()) {
     lines.push(`- Australian state: ${audience.state.trim()}`)

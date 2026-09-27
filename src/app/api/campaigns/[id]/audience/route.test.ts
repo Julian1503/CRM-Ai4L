@@ -162,9 +162,10 @@ describe('GET /api/campaigns/[id]/audience', () => {
 
     // The campaign's own stream is passed through: the audience shown has to be the
     // audience the send would reach, gated on the same consent.
+    // By id as well as definition, so the segment's manual overrides apply.
     expect(mockResolveSegmentPage).toHaveBeenCalledWith(
       expect.anything(),
-      { state: 'NSW' },
+      { id: 'seg-1', definition: { state: 'NSW' } },
       'newsletter',
       { page: 3, pageSize: 50 }
     )

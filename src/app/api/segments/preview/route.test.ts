@@ -28,6 +28,7 @@ function post(body: unknown) {
 function setup(count = 12) {
   const contacts = createQueryBuilderMock({ data: [], error: null, count })
   const db = createDbMock(contacts)
+  db.rpc = jest.fn(() => contacts) as never
   mockCreateServerClient.mockResolvedValue(db)
   return { db, contacts }
 }
@@ -96,9 +97,10 @@ describe('POST /api/segments/preview', () => {
       { state: 'NSW', job_type_id: 'plumb', status: 'customer' },
       { state: 'VIC', job_type_id: 'elec', status: 'lead' },
     ]
-    mockCreateServerClient.mockResolvedValue(
-      createDbMock(createQueryBuilderMock({ data: rows, error: null, count: rows.length }))
-    )
+    const builder = createQueryBuilderMock({ data: rows, error: null, count: rows.length })
+    const db = createDbMock(builder)
+    db.rpc = jest.fn(() => builder) as never
+    mockCreateServerClient.mockResolvedValue(db)
 
     const body = await (await post({ definition: { state: 'NSW' } })).json()
 
@@ -107,12 +109,20 @@ describe('POST /api/segments/preview', () => {
     expect(body.facets.truncated).toBe(false)
   })
 
-  it('reads through the active contacts view', async () => {
+  it('reads through segment_contacts(), with no overrides for an unsaved segment', async () => {
     const { db } = setup()
 
     await post({ definition: {} })
 
-    expect(db.from).toHaveBeenCalledWith('active_contacts')
+    expect(db.rpc).toHaveBeenCalledWith('segment_contacts', { p_segment_id: null }, { count: 'exact' })
+  })
+
+  it('previews an existing segment with its overrides', async () => {
+    const { db } = setup()
+
+    await post({ segmentId: 'seg-1', definition: { state: 'VIC' } })
+
+    expect(db.rpc).toHaveBeenCalledWith('segment_contacts', { p_segment_id: 'seg-1' }, { count: 'exact' })
   })
 
   it('rejects a non-object body', async () => {

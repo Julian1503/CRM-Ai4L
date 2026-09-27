@@ -128,6 +128,41 @@ export type CampaignRow = {
   updated_at: string
 }
 
+/** A manual segment membership decision. See 20260929000000_segment_control.sql. */
+export type SegmentOverrideRow = {
+  segment_id: string
+  contact_id: string
+  mode: 'include' | 'exclude'
+  reason: string | null
+  created_by: string | null
+  created_at: string
+}
+
+/** One row of `segment_contacts()`: a candidate for a segment, before criteria and consent. */
+export type SegmentContactRow = Pick<
+  ContactRow,
+  | 'id'
+  | 'first_name'
+  | 'last_name'
+  | 'email'
+  | 'mobile_number'
+  | 'work_phone'
+  | 'organisation_id'
+  | 'job_type_id'
+  | 'state'
+  | 'status'
+  | 'department'
+  | 'position'
+  | 'source'
+  | 'created_at'
+  | 'subscribed_to_newsletter'
+  | 'subscribed_to_programs'
+> & {
+  service_ids: string[]
+  /** Added to this segment by hand. Still subject to consent. */
+  is_included: boolean
+}
+
 export type NewsletterFrequency = 'weekly' | 'fortnightly' | 'monthly'
 
 /**
@@ -402,6 +437,7 @@ export interface Database {
       campaign_templates: TableDef<CampaignTemplateRow>
       newsletter_schedules: TableDef<NewsletterScheduleRow>
       newsletter_topics: TableDef<NewsletterTopicRow>
+      segment_overrides: TableDef<SegmentOverrideRow>
       bookings: TableDef<BookingRow>
     }
     Views: {
@@ -432,6 +468,10 @@ export interface Database {
           p_evidence?: Record<string, unknown> | null
         }
         Returns: undefined
+      }
+      segment_contacts: {
+        Args: { p_segment_id: string | null }
+        Returns: SegmentContactRow[]
       }
       get_operations_summary: {
         Args: Record<string, never>

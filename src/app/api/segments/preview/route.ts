@@ -5,7 +5,8 @@ import { badRequest, ok, readJsonBody, requireSessionOr401, serverError } from '
 import { resolveSegmentFacets } from '@/lib/marketing/facets'
 import { estimateDrainMs } from '@/lib/marketing/rateLimiter'
 import { readConsentStream } from '@/lib/marketing/consentStream'
-import { resolveSegmentMembers, segmentDefinitionToFilters } from '@/lib/marketing/segments'
+import { criteriaToDefinition, parseSegmentCriteria } from '@/lib/marketing/segmentCriteria'
+import { resolveSegmentAudience } from '@/lib/marketing/segments'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 
 export const runtime = 'nodejs'
@@ -37,12 +38,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // builder says which one it is previewing for; without an answer this counts the
     // newsletter audience, which is the narrower of the two.
     const stream = readConsentStream(body.stream)
-    const filters = segmentDefinitionToFilters(body.definition, stream)
+    const criteria = parseSegmentCriteria(body.definition)
+    // An existing segment being edited is previewed with its manual overrides, so the
+    // count matches what saving would give. A new one has none yet.
+    const segment = {
+      id: typeof body.segmentId === 'string' && body.segmentId ? body.segmentId : null,
+      definition: criteriaToDefinition(criteria),
+    }
     // Independent reads of the same audience; serialising them would double the
-    // latency of a preview that fires on every dropdown change.
+    // latency of a preview that fires on every dropdown change. Five rows is all the
+    // sample needs -- the total comes from the exact count, not from reading everyone.
     const [members, facets] = await Promise.all([
-      resolveSegmentMembers(db, body.definition, stream),
-      resolveSegmentFacets(db, body.definition, stream),
+      resolveSegmentAudience(db, { segmentId: segment.id, definition: segment.definition, stream, page: 1, pageSize: 5 }),
+      resolveSegmentFacets(db, segment, stream),
     ])
 
     return ok({
@@ -53,13 +61,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       // Echoed back so the UI can show what was actually applied, including the
       // invariants the definition cannot override.
       stream,
-      appliedFilters: {
-        state: filters.state,
-        status: filters.status,
-        jobTypeId: filters.jobTypeId,
-        subscribedOnly: filters.subscribed === true || filters.subscribedToPrograms === true,
-      },
-      sample: members.members.slice(0, 5),
+      appliedFilters: { ...criteria, subscribedOnly: true },
+      sample: members.members,
     })
   } catch (error) {
     return serverError(error, 'Could not preview segment.')

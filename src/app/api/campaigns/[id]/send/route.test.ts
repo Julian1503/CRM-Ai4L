@@ -100,6 +100,8 @@ function setup(options: Setup = {}) {
     if (table === 'campaign_sends') return sends
     return contacts
   })
+  // The audience is read through segment_contacts(), which is an rpc.
+  db.rpc = jest.fn(() => contacts) as never
 
   mockCreateServerClient.mockResolvedValue(db)
 

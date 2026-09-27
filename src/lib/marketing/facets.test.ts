@@ -1,7 +1,8 @@
 import { createDbMock, createQueryBuilderMock } from '@/test/supabaseMock'
 
 import { computeSegmentFacets, resolveSegmentFacets, type FacetRow } from './facets'
-import { SEGMENT_MEMBER_CAP, segmentDefinitionToFilters } from './segments'
+import { parseSegmentCriteria } from './segmentCriteria'
+import { SEGMENT_MEMBER_CAP } from './segments'
 
 /**
  * Nine subscribed contacts: 5 in NSW (3 electricians, 2 plumbers), 3 in VIC
@@ -19,8 +20,7 @@ const ROWS: FacetRow[] = [
   { state: null, job_type_id: null, status: 'lead' },
 ]
 
-const filtersFor = (definition: Record<string, string>) =>
-  segmentDefinitionToFilters(definition, 'newsletter')
+const filtersFor = (definition: Record<string, string>) => parseSegmentCriteria(definition)
 
 describe('computeSegmentFacets', () => {
   it('counts every option when nothing is selected', () => {
@@ -70,6 +70,16 @@ describe('computeSegmentFacets', () => {
     expect(facets.state.QLD).toBeUndefined()
   })
 
+  it('counts a contact added by hand under every option', () => {
+    // A manual inclusion is in the audience whatever the dropdowns say.
+    const facets = computeSegmentFacets(
+      [...ROWS, { state: 'WA', job_type_id: null, status: 'customer', is_included: true }],
+      filtersFor({ state: 'NSW' })
+    )
+
+    expect(facets.jobType['']).toBe(6)
+  })
+
   it('returns empty counts for an empty audience', () => {
     const facets = computeSegmentFacets([], filtersFor({}))
 
@@ -78,45 +88,50 @@ describe('computeSegmentFacets', () => {
 })
 
 describe('resolveSegmentFacets', () => {
+  const segment = { id: 'seg-1', definition: { state: 'NSW', status: 'lead', jobTypeId: 'elec', source: 'import' } }
+
   function setup(rows: FacetRow[] = ROWS, count = rows.length) {
     const builder = createQueryBuilderMock({ data: rows, error: null, count })
-    return { builder, db: createDbMock(builder) }
+    const db = createDbMock(createQueryBuilderMock({ data: [], error: null }))
+    db.rpc = jest.fn(() => builder) as never
+    return { builder, db }
   }
 
-  it('counts through the active_contacts view', async () => {
+  it('counts the same audience the segment resolves to, overrides included', async () => {
     const { db } = setup()
 
-    await resolveSegmentFacets(db as never, {}, 'newsletter')
+    await resolveSegmentFacets(db as never, segment, 'newsletter')
 
-    expect(db.from).toHaveBeenCalledWith('active_contacts')
+    expect(db.rpc).toHaveBeenCalledWith('segment_contacts', { p_segment_id: 'seg-1' }, { count: 'exact' })
   })
 
-  it('reads only the three columns the builder filters on', async () => {
+  it('reads only the columns it counts', async () => {
     const { builder, db } = setup()
 
-    await resolveSegmentFacets(db as never, {}, 'newsletter')
+    await resolveSegmentFacets(db as never, segment, 'newsletter')
 
-    expect(builder.argsFor('select')?.[0]).toBe('state, job_type_id, status')
+    expect(builder.argsFor('select')?.[0]).toBe('state, job_type_id, status, is_included')
   })
 
-  it('applies the segment invariants but not the facet filters', async () => {
-    // The three filtered columns are counted in memory, so sending them to Postgres
+  it('applies consent and the other criteria but not the three it counts', async () => {
+    // The three counted columns are tallied in memory, so sending them to Postgres
     // would return exactly the rows the counts must look past.
     const { builder, db } = setup()
 
-    await resolveSegmentFacets(db as never, { state: 'NSW', status: 'lead', jobTypeId: 'elec' }, 'newsletter')
+    await resolveSegmentFacets(db as never, segment, 'newsletter')
 
-    const columns = builder.allFor('eq').map((call) => call.args[0])
-    expect(columns).toContain('subscribed_to_newsletter')
-    expect(columns).not.toContain('state')
-    expect(columns).not.toContain('status')
-    expect(columns).not.toContain('job_type_id')
+    expect(builder.allFor('eq').map((call) => call.args)).toContainEqual(['subscribed_to_newsletter', true])
+    const criteria = builder.allFor('or').map((call) => call.args[0] as string).join(' ')
+    expect(criteria).toContain('source.eq.import')
+    expect(criteria).not.toContain('state.eq')
+    expect(criteria).not.toContain('status.eq')
+    expect(criteria).not.toContain('job_type_id.eq')
   })
 
-  it('counts against the filters the definition asked for', async () => {
+  it('counts against the selections the definition asked for', async () => {
     const { db } = setup()
 
-    const facets = await resolveSegmentFacets(db as never, { state: 'NSW' }, 'newsletter')
+    const facets = await resolveSegmentFacets(db as never, { id: null, definition: { state: 'NSW' } }, 'newsletter')
 
     expect(facets.jobType).toEqual({ '': 5, elec: 3, plumb: 2 })
   })
@@ -124,27 +139,23 @@ describe('resolveSegmentFacets', () => {
   it('caps the rows it reads', async () => {
     const { builder, db } = setup()
 
-    await resolveSegmentFacets(db as never, {}, 'newsletter')
+    await resolveSegmentFacets(db as never, segment, 'newsletter')
 
-    expect((builder.argsFor('range') as [number, number])[1]).toBe(SEGMENT_MEMBER_CAP - 1)
+    expect(builder.argsFor('range')).toEqual([0, SEGMENT_MEMBER_CAP - 1])
   })
 
   it('reports counts as truncated once past the cap', async () => {
     // Past the cap the numbers describe the first N contacts, not the audience.
     const { db } = setup(ROWS, SEGMENT_MEMBER_CAP + 1)
 
-    expect((await resolveSegmentFacets(db as never, {}, 'newsletter')).truncated).toBe(true)
-  })
-
-  it('is not truncated when the audience fits', async () => {
-    const { db } = setup()
-
-    expect((await resolveSegmentFacets(db as never, {}, 'newsletter')).truncated).toBe(false)
+    expect((await resolveSegmentFacets(db as never, segment, 'newsletter')).truncated).toBe(true)
   })
 
   it('surfaces a query failure', async () => {
     const builder = createQueryBuilderMock({ data: null, error: { message: 'boom' }, count: null })
+    const db = createDbMock(builder)
+    db.rpc = jest.fn(() => builder) as never
 
-    await expect(resolveSegmentFacets(createDbMock(builder) as never, {}, 'newsletter')).rejects.toThrow(/boom/)
+    await expect(resolveSegmentFacets(db as never, segment, 'newsletter')).rejects.toThrow(/boom/)
   })
 })

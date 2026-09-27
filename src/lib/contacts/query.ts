@@ -191,7 +191,7 @@ export function escapeLikePattern(term: string): string {
  * (`,` `.` `(` `)`) lose their meaning. Backslash and quote are escaped so the value
  * cannot terminate its own quoting.
  */
-function quoteFilterValue(value: string): string {
+export function quoteFilterValue(value: string): string {
   return `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`
 }
 

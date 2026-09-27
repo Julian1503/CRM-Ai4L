@@ -1,10 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
-import type { ContactFilters } from '@/lib/contacts/query'
-import { applyContactFilters, findOrganisationIdsMatching } from '@/lib/contacts/repository'
 import type { ConsentStream, ContactStatus, Database } from '@/lib/db/types'
 
-import { SEGMENT_MEMBER_CAP, segmentDefinitionToFilters } from './segments'
+import { parseSegmentCriteria, type SegmentCriteria } from './segmentCriteria'
+import { SEGMENT_MEMBER_CAP, segmentAudienceQuery, type SegmentRef } from './segments'
 
 /**
  * Option counts for the segment builder's dropdowns.
@@ -24,7 +23,11 @@ export type FacetRow = {
   state: string | null
   job_type_id: string | null
   status: ContactStatus | null
+  /** Added by hand: in the audience whatever the dropdowns say. */
+  is_included?: boolean
 }
+
+type FacetCriteria = Pick<SegmentCriteria, 'state' | 'jobTypeId' | 'status'>
 
 /**
  * Contacts per option value.
@@ -44,7 +47,8 @@ export type SegmentFacets = {
 /** Which list is being counted, and therefore which filter is set aside. */
 type Facet = keyof SegmentFacets
 
-function isAllowed(row: FacetRow, filters: ContactFilters, counting: Facet): boolean {
+function isAllowed(row: FacetRow, filters: FacetCriteria, counting: Facet): boolean {
+  if (row.is_included) return true
   if (counting !== 'state' && filters.state && row.state !== filters.state) return false
   if (counting !== 'jobType' && filters.jobTypeId && row.job_type_id !== filters.jobTypeId) {
     return false
@@ -56,7 +60,7 @@ function isAllowed(row: FacetRow, filters: ContactFilters, counting: Facet): boo
 
 function tally(
   rows: readonly FacetRow[],
-  filters: ContactFilters,
+  filters: FacetCriteria,
   counting: Facet,
   valueOf: (row: FacetRow) => string | null
 ): FacetCounts {
@@ -79,7 +83,7 @@ function tally(
 /** Counts each dropdown's options against the other two selections. */
 export function computeSegmentFacets(
   rows: readonly FacetRow[],
-  filters: ContactFilters
+  filters: FacetCriteria
 ): SegmentFacets {
   return {
     state: tally(rows, filters, 'state', (row) => row.state),
@@ -105,27 +109,27 @@ export type ResolvedSegmentFacets = SegmentFacets & {
  */
 export async function resolveSegmentFacets(
   db: SupabaseClient<Database>,
-  definition: unknown,
+  segment: SegmentRef,
   stream: ConsentStream
 ): Promise<ResolvedSegmentFacets> {
-  const filters = segmentDefinitionToFilters(definition, stream)
+  const criteria = parseSegmentCriteria(segment.definition)
 
-  // Same organisation expansion as the member query, or a segment saved from a search
-  // would count a different audience than it sends to.
-  const organisationIds = filters.q ? await findOrganisationIdsMatching(db, filters.q) : []
-
-  const query = db
-    .from('active_contacts')
-    .select('state, job_type_id, status', { count: 'exact' })
-
-  // The facet columns are deliberately left unfiltered -- the counts are what the
+  // The three dropdown columns are left out of the query -- the counts are what the
   // audience would look like under each *other* value, and the database cannot return
-  // rows it has already excluded.
-  const { data, error, count } = await (applyContactFilters(
-    query as never,
-    { ...filters, state: null, jobTypeId: null, status: null, page: 1, pageSize: SEGMENT_MEMBER_CAP },
-    { organisationIds }
-  ) as unknown as PromiseLike<{
+  // rows it has already excluded. Every other criterion, the consent gate and the
+  // segment's overrides still apply.
+  const { query } = await segmentAudienceQuery(
+    db,
+    {
+      segmentId: segment.id,
+      definition: segment.definition,
+      stream,
+      columns: 'state, job_type_id, status, is_included',
+    },
+    ['state', 'jobTypeId', 'status']
+  )
+
+  const { data, error, count } = await (query.range(0, SEGMENT_MEMBER_CAP - 1) as unknown as PromiseLike<{
     data: FacetRow[] | null
     error: { message: string } | null
     count: number | null
@@ -138,7 +142,7 @@ export async function resolveSegmentFacets(
   const rows = data ?? []
 
   return {
-    ...computeSegmentFacets(rows, filters),
+    ...computeSegmentFacets(rows, criteria),
     truncated: (count ?? rows.length) > SEGMENT_MEMBER_CAP,
   }
 }

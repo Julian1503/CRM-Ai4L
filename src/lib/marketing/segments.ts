@@ -1,18 +1,25 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
-import { parseContactFilters, type ContactFilters } from '@/lib/contacts/query'
-import { applyContactFilters, findOrganisationIdsMatching } from '@/lib/contacts/repository'
-import type { ConsentStream, ContactRow, Database } from '@/lib/db/types'
+import { buildSearchOrExpression } from '@/lib/contacts/query'
+import { findOrganisationIdsMatching } from '@/lib/contacts/repository'
+import type { ConsentStream, Database, SegmentContactRow } from '@/lib/db/types'
+
+import { buildSegmentFilterExpression, parseSegmentCriteria } from './segmentCriteria'
 
 /**
- * Segments — stored filter definitions used to build campaign audiences.
+ * Segments: who a campaign goes to.
  *
- * The definition reuses the contact-list filter vocabulary rather than inventing a
- * second query language, so a segment and a filtered list mean exactly the same thing,
- * and `parseContactFilters` does the whitelisting for both.
+ * A segment is a saved set of criteria (see `segmentCriteria.ts`) plus manual
+ * overrides. Resolution happens in one place, for every caller: the member list, the
+ * campaign audience, the send, and the copy generator. What an operator sees in the
+ * segment panel is exactly what a send will do.
  *
- * The *definition* is stored, never a frozen member list, so a segment stays current as
- * contacts change.
+ *   segment_contacts(segment id)            active contacts minus this segment's exclusions
+ *   AND consent for the campaign's stream   never optional, never overridden
+ *   AND (included by hand OR criteria)      a manual inclusion widens only the criteria
+ *
+ * The stream comes from the campaign, not the segment. A segment describes people; which
+ * permission is being spent on them is a property of what is being sent.
  */
 
 /**
@@ -24,73 +31,24 @@ import type { ConsentStream, ContactRow, Database } from '@/lib/db/types'
  */
 export const SEGMENT_MEMBER_CAP = 10_000
 
-type SegmentDefinition = Record<string, unknown>
+/** A stored segment, or a draft one (`id: null`) that has no overrides yet. */
+export type SegmentRef = { id: string | null; definition: unknown }
 
-/**
- * Converts a stored definition into validated filters.
- *
- * Two invariants are forced regardless of what the stored JSON says, because a row can
- * be hand-edited or arrive from an older migration:
- *
- * - The consent for `stream` is always required. Marketing to contacts who never opted
- *   in is the Australian Spam Act exposure recorded in PLAN.md; a segment must not be
- *   able to express it.
- * - `includeArchived` is always false. Archived contacts are archived.
- *
- * The stream comes from the *campaign*, not from the definition. A segment describes
- * people ("NSW electricians"); which permission is being spent on them is a property of
- * what is being sent, and storing it in the definition would let a hand-edited row pick
- * its own gate — the one thing this function exists to prevent.
- *
- * Only the campaign's own stream is required. The other is left unfiltered rather than
- * excluded: a contact who takes both is a legitimate recipient of either.
- */
-export function segmentDefinitionToFilters(
-  definition: unknown,
-  stream: ConsentStream
-): ContactFilters {
-  const source: SegmentDefinition =
-    typeof definition === 'object' && definition !== null && !Array.isArray(definition)
-      ? (definition as SegmentDefinition)
-      : {}
-
-  // Coerce to the string/string[] shape parseContactFilters expects, discarding
-  // anything else rather than trusting it.
-  const params: Record<string, string> = {}
-  for (const [key, value] of Object.entries(source)) {
-    if (typeof value === 'string') {
-      params[key] = value
-    } else if (typeof value === 'number' || typeof value === 'boolean') {
-      params[key] = String(value)
-    }
-  }
-
-  const filters = parseContactFilters(params)
-
-  return {
-    ...filters,
-    subscribed: stream === 'newsletter' ? true : null,
-    subscribedToPrograms: stream === 'programs' ? true : null,
-    includeArchived: false,
-    page: 1,
-    pageSize: Math.min(filters.pageSize, SEGMENT_MEMBER_CAP),
-  }
+export const CONSENT_COLUMNS: Record<ConsentStream, 'subscribed_to_newsletter' | 'subscribed_to_programs'> = {
+  newsletter: 'subscribed_to_newsletter',
+  programs: 'subscribed_to_programs',
 }
 
-/** Serialises filters for storage, omitting pagination, which is not part of a segment. */
-export function filtersToSegmentDefinition(filters: ContactFilters): SegmentDefinition {
-  const definition: SegmentDefinition = {}
+const MEMBER_COLUMNS =
+  'id, email, first_name, last_name, organisation_id, state, status, is_included'
 
-  if (filters.q) definition.q = filters.q
-  if (filters.jobTypeId) definition.jobTypeId = filters.jobTypeId
-  if (filters.state) definition.state = filters.state
-  if (filters.status) definition.status = filters.status
-
-  return definition
-}
+export type SegmentMember = Pick<
+  SegmentContactRow,
+  'id' | 'email' | 'first_name' | 'last_name' | 'organisation_id' | 'state' | 'status' | 'is_included'
+>
 
 export type SegmentMembers = {
-  members: Pick<ContactRow, 'id' | 'email' | 'first_name' | 'last_name'>[]
+  members: SegmentMember[]
   total: number
   /** True when the segment matched more contacts than the cap allows. */
   truncated: boolean
@@ -98,96 +56,91 @@ export type SegmentMembers = {
 
 export type SegmentPage = SegmentMembers & { page: number; pageSize: number }
 
-/**
- * Resolves one page of a segment's current members.
- *
- * Separate from `resolveSegmentMembers` only in how much it reads: a send needs the
- * whole audience at once, while a screen showing who a campaign is going to needs
- * twenty-five rows and a total. Both go through the same filters, so what the operator
- * reads is what the send will do.
- */
-export async function resolveSegmentPage(
-  db: SupabaseClient<Database>,
-  definition: unknown,
-  stream: ConsentStream,
-  params: { page: number; pageSize: number }
-): Promise<SegmentPage> {
-  const filters = {
-    ...segmentDefinitionToFilters(definition, stream),
-    page: Math.max(1, params.page),
-    pageSize: Math.max(1, Math.min(params.pageSize, SEGMENT_MEMBER_CAP)),
-  }
+export type AudienceRequest = {
+  segmentId: string | null
+  definition: unknown
+  stream: ConsentStream
+  page: number
+  pageSize: number
+  /** Narrows the list further (the panel's search box). Never widens it. */
+  search?: string | null
+}
 
-  const organisationIds = filters.q ? await findOrganisationIdsMatching(db, filters.q) : []
+type QueryResult<T> = PromiseLike<{
+  data: T[] | null
+  error: { message: string } | null
+  count: number | null
+}>
 
-  const query = db
-    .from('active_contacts')
-    .select('id, email, first_name, last_name', { count: 'exact' })
-
-  const { data, error, count } = await (applyContactFilters(
-    query as never,
-    filters,
-    { organisationIds }
-  ) as unknown as PromiseLike<{
-    data: SegmentMembers['members'] | null
-    error: { message: string } | null
-    count: number | null
-  }>)
-
-  if (error) {
-    throw new Error(`Could not resolve segment members: ${error.message}`)
-  }
-
-  const total = count ?? data?.length ?? 0
-
-  return {
-    members: data ?? [],
-    total,
-    truncated: total > SEGMENT_MEMBER_CAP,
-    page: filters.page,
-    pageSize: filters.pageSize,
-  }
+/** The chainable subset of a PostgREST filter builder this module uses. */
+type AudienceQuery = {
+  eq(column: string, value: unknown): AudienceQuery
+  or(expression: string): AudienceQuery
+  order(column: string, options: { ascending: boolean }): AudienceQuery
+  range(from: number, to: number): AudienceQuery
 }
 
 /**
- * Resolves a segment definition to its current members.
+ * Starts a query over the segment's candidates with consent and criteria applied.
+ * Exported for the facet counts, which read other columns from the same audience.
  *
- * Selects only the fields a send actually needs — there is no reason to pull full
- * contact records into a fan-out loop.
+ * Returned inside an object on purpose: a PostgREST builder is thenable, so an async
+ * function returning it bare would run the query at the `await`, before the caller
+ * could add its ordering and range.
  */
-export async function resolveSegmentMembers(
+export async function segmentAudienceQuery(
   db: SupabaseClient<Database>,
-  definition: unknown,
-  stream: ConsentStream
-): Promise<SegmentMembers> {
-  const filters = {
-    ...segmentDefinitionToFilters(definition, stream),
-    pageSize: SEGMENT_MEMBER_CAP,
-    page: 1,
+  params: { segmentId: string | null; definition: unknown; stream: ConsentStream; columns: string },
+  omit: ReadonlyArray<'state' | 'jobTypeId' | 'status'> = []
+): Promise<{ query: AudienceQuery }> {
+  const criteria = parseSegmentCriteria(params.definition)
+
+  for (const key of omit) criteria[key] = null
+
+  // A segment saved from a search carries the same `q` as the contact list, so it has
+  // to match organisation names the same way, or the two silently disagree.
+  const organisationIds = criteria.q ? await findOrganisationIdsMatching(db, criteria.q) : []
+  const expression = buildSegmentFilterExpression(criteria, organisationIds)
+
+  const rpc = db.rpc as unknown as (
+    fn: string,
+    args: Record<string, unknown>,
+    options: { count: 'exact' }
+  ) => { select(columns: string): AudienceQuery }
+
+  let query = rpc('segment_contacts', { p_segment_id: params.segmentId }, { count: 'exact' })
+    .select(params.columns)
+    .eq(CONSENT_COLUMNS[params.stream], true)
+
+  if (expression) query = query.or(`is_included.is.true,${expression}`)
+
+  return { query }
+}
+
+/** One page of a segment's current members, flagged where they were added by hand. */
+export async function resolveSegmentAudience(
+  db: SupabaseClient<Database>,
+  request: AudienceRequest
+): Promise<SegmentPage> {
+  const page = Math.max(1, request.page)
+  const pageSize = Math.max(1, Math.min(request.pageSize, SEGMENT_MEMBER_CAP))
+
+  let { query } = await segmentAudienceQuery(db, { ...request, columns: MEMBER_COLUMNS })
+
+  if (request.search?.trim()) {
+    const searchOrganisations = await findOrganisationIdsMatching(db, request.search)
+    const search = buildSearchOrExpression(request.search, searchOrganisations)
+
+    if (search) query = query.or(search)
   }
 
-  // A segment saved from a contact search carries the same `q`, so it has to resolve
-  // organisations the same way the contact list does -- otherwise the audience preview
-  // and the list it was built from silently disagree.
-  const organisationIds = filters.q ? await findOrganisationIdsMatching(db, filters.q) : []
+  const from = (page - 1) * pageSize
+  const { data, error, count } = await (query
+    .order('last_name', { ascending: true })
+    .order('id', { ascending: true })
+    .range(from, from + pageSize - 1) as unknown as QueryResult<SegmentMember>)
 
-  const query = db
-    .from('active_contacts')
-    .select('id, email, first_name, last_name', { count: 'exact' })
-
-  const { data, error, count } = await (applyContactFilters(
-    query as never,
-    filters,
-    { organisationIds }
-  ) as unknown as PromiseLike<{
-    data: SegmentMembers['members'] | null
-    error: { message: string } | null
-    count: number | null
-  }>)
-
-  if (error) {
-    throw new Error(`Could not resolve segment members: ${error.message}`)
-  }
+  if (error) throw new Error(`Could not resolve segment members: ${error.message}`)
 
   const total = count ?? data?.length ?? 0
 
@@ -196,5 +149,39 @@ export async function resolveSegmentMembers(
     total,
     // Surfaced so a truncated send is never mistaken for a complete one.
     truncated: total > SEGMENT_MEMBER_CAP,
+    page,
+    pageSize,
   }
+}
+
+/** The whole audience a send would reach, up to the cap. */
+export async function resolveSegmentMembers(
+  db: SupabaseClient<Database>,
+  segment: SegmentRef,
+  stream: ConsentStream
+): Promise<SegmentMembers> {
+  const { members, total, truncated } = await resolveSegmentAudience(db, {
+    segmentId: segment.id,
+    definition: segment.definition,
+    stream,
+    page: 1,
+    pageSize: SEGMENT_MEMBER_CAP,
+  })
+
+  return { members, total, truncated }
+}
+
+/** One page of the audience, for screens that show who a campaign will reach. */
+export async function resolveSegmentPage(
+  db: SupabaseClient<Database>,
+  segment: SegmentRef,
+  stream: ConsentStream,
+  params: { page: number; pageSize: number }
+): Promise<SegmentPage> {
+  return resolveSegmentAudience(db, {
+    segmentId: segment.id,
+    definition: segment.definition,
+    stream,
+    ...params,
+  })
 }

@@ -127,7 +127,7 @@ export async function GET(
 
     const page = await resolveSegmentPage(
       db,
-      segment.definition,
+      { id: campaign.segment_id, definition: segment.definition },
       campaign.consent_stream,
       pageParams
     )

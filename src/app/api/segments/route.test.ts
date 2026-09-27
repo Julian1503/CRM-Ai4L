@@ -36,6 +36,7 @@ function setup(insertResult: unknown = { data: { id: 'seg-1' }, error: null }) {
   const contacts = createQueryBuilderMock({ data: [], error: null, count: 12 })
 
   const db = createDbMock((table: string) => (table === 'segments' ? segments : contacts))
+  db.rpc = jest.fn(() => contacts) as never
   mockCreateServerClient.mockResolvedValue(db)
 
   return { db, segments, contacts }

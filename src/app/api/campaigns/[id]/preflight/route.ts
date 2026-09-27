@@ -50,7 +50,11 @@ export async function GET(
     const segment = campaign.segment as unknown as { definition: Record<string, unknown> } | null
     if (!segment) return conflict('The campaign audience no longer exists.')
 
-    const members = await resolveSegmentMembers(db, segment.definition, campaign.consent_stream)
+    const members = await resolveSegmentMembers(
+      db,
+      { id: campaign.segment_id, definition: segment.definition },
+      campaign.consent_stream
+    )
     return ok({ ready: members.total > 0, total: members.total, truncated: members.truncated })
   } catch (error) {
     return serverError(error, 'Could not run campaign preflight.')

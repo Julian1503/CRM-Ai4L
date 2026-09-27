@@ -4,7 +4,8 @@ import type { CampaignRow, Database } from '@/lib/db/types'
 
 import { generateCampaignCopy, type GenerationUsage, type MessagesApi } from './generateCampaign'
 import type { ScheduleBrief } from './prompt'
-import { resolveSegmentMembers, segmentDefinitionToFilters } from './segments'
+import { parseSegmentCriteria } from './segmentCriteria'
+import { resolveSegmentMembers } from './segments'
 
 /**
  * Writes copy for one campaign and stores it.
@@ -69,7 +70,11 @@ export async function generateForCampaign(
     }
   }
 
-  const audience = await resolveSegmentMembers(db, segment.definition, campaign.consent_stream)
+  const audience = await resolveSegmentMembers(
+    db,
+    { id: campaign.segment_id, definition: segment.definition },
+    campaign.consent_stream
+  )
 
   if (audience.total === 0) {
     return {
@@ -79,22 +84,16 @@ export async function generateForCampaign(
     }
   }
 
-  const filters = segmentDefinitionToFilters(segment.definition, campaign.consent_stream)
+  const filters = parseSegmentCriteria(segment.definition)
 
-  // Resolve the job type to its name. The segment stores a UUID, and handing the model a
-  // UUID is worse than handing it nothing — it is noise that looks like information, and
+  // Ids resolved to names. The segment stores UUIDs, and handing the model a UUID is
+  // worse than handing it nothing — it is noise that looks like information, and
   // "write to 3d02ab78-194e-481f" steers nothing.
-  let jobTypeName: string | null = null
-
-  if (filters.jobTypeId) {
-    const { data: jobType } = await db
-      .from('job_types')
-      .select('name')
-      .eq('id', filters.jobTypeId)
-      .maybeSingle()
-
-    jobTypeName = jobType?.name ?? null
-  }
+  const [jobTypeName, organisationName, serviceName] = await Promise.all([
+    nameOf(db, 'job_types', filters.jobTypeId),
+    nameOf(db, 'organisations', filters.organisationId),
+    nameOf(db, 'services', filters.serviceId),
+  ])
 
   const result = await generateCampaignCopy(messages, {
     campaignName: campaign.name,
@@ -106,6 +105,8 @@ export async function generateForCampaign(
       segmentDescription: segment.description,
       size: audience.total,
       jobType: jobTypeName,
+      organisation: organisationName,
+      service: serviceName,
       state: filters.state,
       status: filters.status,
       search: filters.q,
@@ -141,4 +142,16 @@ export async function generateForCampaign(
     generation: { attempts: result.attempts, usage: result.usage },
     audience: { size: audience.total, truncated: audience.truncated },
   }
+}
+
+async function nameOf(
+  db: SupabaseClient<Database>,
+  table: 'job_types' | 'organisations' | 'services',
+  id: string | null
+): Promise<string | null> {
+  if (!id) return null
+
+  const { data } = await db.from(table).select('name').eq('id', id).maybeSingle()
+
+  return (data as { name?: string } | null)?.name ?? null
 }

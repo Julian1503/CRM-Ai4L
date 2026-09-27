@@ -1,169 +1,157 @@
-import { createDbMock, createQueryBuilderMock } from '@/test/supabaseMock'
+import { createDbMock, createQueryBuilderMock, type QueryBuilderMock } from '@/test/supabaseMock'
 
 import {
   SEGMENT_MEMBER_CAP,
-  filtersToSegmentDefinition,
+  resolveSegmentAudience,
   resolveSegmentMembers,
-  segmentDefinitionToFilters,
 } from './segments'
 
-describe('segmentDefinitionToFilters', () => {
-  it('reads a stored definition', () => {
-    const filters = segmentDefinitionToFilters(
-      { state: 'NSW', status: 'lead', jobTypeId: 'job-1' },
-      'newsletter'
+const CONTACTS = [
+  { id: 'c1', email: 'a@example.com', first_name: 'A', last_name: 'One', is_included: false },
+  { id: 'c2', email: 'b@example.com', first_name: 'B', last_name: 'Two', is_included: true },
+]
+
+function setup(
+  response: unknown = { data: CONTACTS, error: null, count: CONTACTS.length },
+  organisations: unknown = { data: [], error: null }
+) {
+  const contacts = createQueryBuilderMock(response)
+  const orgs = createQueryBuilderMock(organisations)
+  const db = createDbMock(() => orgs)
+
+  db.rpc = jest.fn(() => contacts) as never
+
+  return { db, contacts, orgs }
+}
+
+function orArgs(builder: QueryBuilderMock): string[] {
+  return builder.allFor('or').map((call) => call.args[0] as string)
+}
+
+describe('resolveSegmentAudience', () => {
+  const base = {
+    segmentId: 'seg-1',
+    definition: { state: 'NSW' },
+    stream: 'newsletter' as const,
+    page: 1,
+    pageSize: 25,
+  }
+
+  it('reads the segment’s candidates, which already leave its exclusions out', async () => {
+    const { db } = setup()
+
+    await resolveSegmentAudience(db as never, base)
+
+    expect(db.rpc).toHaveBeenCalledWith(
+      'segment_contacts',
+      { p_segment_id: 'seg-1' },
+      { count: 'exact' }
     )
-
-    expect(filters).toMatchObject({ state: 'NSW', status: 'lead', jobTypeId: 'job-1' })
   })
 
-  it('only ever targets contacts who consented to the stream being sent', () => {
-    // Marketing to contacts who never opted in is the Spam Act exposure flagged in
-    // PLAN.md. A segment cannot be defined to include them, whatever the stored JSON
-    // says.
-    expect(segmentDefinitionToFilters({ subscribed: 'false' }, 'newsletter').subscribed).toBe(true)
-    expect(segmentDefinitionToFilters({}, 'newsletter').subscribed).toBe(true)
+  it('previews an unsaved definition with no overrides', async () => {
+    const { db } = setup()
 
-    const programs = segmentDefinitionToFilters({ subscribed: 'false' }, 'programs')
-    expect(programs.subscribedToPrograms).toBe(true)
+    await resolveSegmentAudience(db as never, { ...base, segmentId: null })
+
+    expect((db.rpc as jest.Mock).mock.calls[0][1]).toEqual({ p_segment_id: null })
   })
 
-  it('gates on the stream being sent and leaves the other unfiltered', () => {
-    // A contact who takes courses but not the newsletter is a legitimate recipient of a
-    // course campaign. Requiring both consents would silently shrink every audience to
-    // the intersection.
-    const programs = segmentDefinitionToFilters({}, 'programs')
-    expect(programs.subscribed).toBeNull()
+  it('always requires consent for the stream being sent, outside the criteria', async () => {
+    const { db, contacts } = setup()
 
-    const newsletter = segmentDefinitionToFilters({}, 'newsletter')
-    expect(newsletter.subscribedToPrograms).toBeNull()
+    await resolveSegmentAudience(db as never, { ...base, stream: 'programs' })
+
+    expect(contacts.allFor('eq').map((call) => call.args)).toContainEqual([
+      'subscribed_to_programs',
+      true,
+    ])
   })
 
-  it('never includes archived contacts', () => {
-    expect(segmentDefinitionToFilters({ includeArchived: 'true' }, 'newsletter').includeArchived).toBe(false)
+  it('lets a manual inclusion satisfy the criteria, and nothing else', async () => {
+    const { db, contacts } = setup()
+
+    await resolveSegmentAudience(db as never, base)
+
+    expect(orArgs(contacts)).toEqual(['is_included.is.true,and(state.eq."NSW")'])
   })
 
-  it('discards an unknown status rather than passing it through', () => {
-    expect(segmentDefinitionToFilters({ status: 'vip' }, 'newsletter').status).toBeNull()
+  it('applies no criteria filter when the segment has none', async () => {
+    const { db, contacts } = setup()
+
+    await resolveSegmentAudience(db as never, { ...base, definition: {} })
+
+    expect(orArgs(contacts)).toEqual([])
   })
 
-  it('discards an unknown sort key', () => {
-    expect(segmentDefinitionToFilters({ sort: 'password' }, 'newsletter').sort).toBe('name')
+  it('narrows further by a search, as a separate condition', async () => {
+    const { db, contacts } = setup()
+
+    await resolveSegmentAudience(db as never, { ...base, search: 'ada' })
+
+    const [criteria, search] = orArgs(contacts)
+    expect(criteria.startsWith('is_included.is.true,')).toBe(true)
+    expect(search).toContain('first_name.ilike."%ada%"')
   })
 
-  it.each([null, undefined, 'a string', 42, []])(
-    'falls back to safe defaults for %p',
-    (definition) => {
-      const filters = segmentDefinitionToFilters(definition, 'newsletter')
+  it('expands a free-text criterion to matching organisations', async () => {
+    const { db, contacts } = setup(undefined, { data: [{ id: 'org-7' }], error: null })
 
-      expect(filters.subscribed).toBe(true)
-      expect(filters.includeArchived).toBe(false)
-      expect(filters.status).toBeNull()
-    }
-  )
+    await resolveSegmentAudience(db as never, { ...base, definition: { q: 'acme' } })
 
-  it('ignores a definition trying to raise the member cap', () => {
-    // A hand-edited row must not be able to produce an unbounded query.
-    expect(
-      segmentDefinitionToFilters({ pageSize: '999999' }, 'newsletter').pageSize
-    ).toBeLessThanOrEqual(SEGMENT_MEMBER_CAP)
-  })
-})
-
-describe('filtersToSegmentDefinition', () => {
-  it('round-trips through storage', () => {
-    const original = segmentDefinitionToFilters({ state: 'VIC', jobTypeId: 'job-2' }, 'newsletter')
-    const stored = filtersToSegmentDefinition(original)
-    const reparsed = segmentDefinitionToFilters(stored, 'newsletter')
-
-    expect(reparsed).toEqual(original)
+    expect(orArgs(contacts)[0]).toContain('organisation_id.in.(org-7)')
   })
 
-  it('stores a plain JSON-serialisable object', () => {
-    const stored = filtersToSegmentDefinition(segmentDefinitionToFilters({ state: 'QLD' }, 'newsletter'))
+  it('pages in a stable order', async () => {
+    const { db, contacts } = setup()
 
-    expect(JSON.parse(JSON.stringify(stored))).toEqual(stored)
+    await resolveSegmentAudience(db as never, { ...base, page: 3, pageSize: 25 })
+
+    expect(contacts.allFor('order').map((call) => call.args[0])).toEqual(['last_name', 'id'])
+    expect(contacts.argsFor('range')).toEqual([50, 74])
   })
 
-  it('does not persist pagination, which is not part of a segment', () => {
-    const stored = filtersToSegmentDefinition(segmentDefinitionToFilters({ page: '4' }, 'newsletter'))
+  it('reports which members were added by hand', async () => {
+    const { db } = setup()
 
-    expect(stored).not.toHaveProperty('page')
-    expect(stored).not.toHaveProperty('pageSize')
+    const page = await resolveSegmentAudience(db as never, base)
+
+    expect(page.members.map((member) => member.is_included)).toEqual([false, true])
+    expect(page).toMatchObject({ total: 2, truncated: false, page: 1, pageSize: 25 })
+  })
+
+  it('surfaces a query failure', async () => {
+    const { db } = setup({ data: null, error: { message: 'boom' }, count: null })
+
+    await expect(resolveSegmentAudience(db as never, base)).rejects.toThrow(/boom/)
   })
 })
 
 describe('resolveSegmentMembers', () => {
-  const contacts = [
-    { id: 'c1', email: 'a@example.com', first_name: 'A', last_name: 'One' },
-    { id: 'c2', email: 'b@example.com', first_name: 'B', last_name: 'Two' },
-  ]
+  const segment = { id: 'seg-1', definition: {} }
 
-  function setup(rows: unknown[] = contacts, count = rows.length) {
-    const builder = createQueryBuilderMock({ data: rows, error: null, count })
-    return { builder, db: createDbMock(builder) }
-  }
+  it('reads the whole audience up to the cap', async () => {
+    const { db, contacts } = setup()
 
-  it('returns the matching contacts', async () => {
-    const { db } = setup()
+    const result = await resolveSegmentMembers(db as never, segment, 'newsletter')
 
-    const result = await resolveSegmentMembers(db as never, { state: 'NSW' }, 'newsletter')
-
+    expect(contacts.argsFor('range')).toEqual([0, SEGMENT_MEMBER_CAP - 1])
     expect(result.members).toHaveLength(2)
-    expect(result.total).toBe(2)
-  })
-
-  it('reads through the active_contacts view', async () => {
-    const { db } = setup()
-
-    await resolveSegmentMembers(db as never, {}, 'newsletter')
-
-    expect(db.from).toHaveBeenCalledWith('active_contacts')
-  })
-
-  it('filters to subscribed contacts at the query level', async () => {
-    const { builder } = setup()
-    const db = createDbMock(builder)
-
-    await resolveSegmentMembers(db as never, { subscribed: 'false' }, 'newsletter')
-
-    expect(builder.allFor('eq')).toContainEqual({
-      method: 'eq',
-      args: ['subscribed_to_newsletter', true],
-    })
-  })
-
-  it('caps the result set', async () => {
-    const { builder } = setup()
-    const db = createDbMock(builder)
-
-    await resolveSegmentMembers(db as never, {}, 'newsletter')
-
-    const range = builder.argsFor('range') as [number, number]
-    expect(range[1]).toBe(SEGMENT_MEMBER_CAP - 1)
   })
 
   it('reports when the cap truncated the segment', async () => {
     // Silently sending to the first N of a larger segment would look like a
     // successful full send.
-    const { db } = setup(contacts, SEGMENT_MEMBER_CAP + 500)
+    const { db } = setup({ data: CONTACTS, error: null, count: SEGMENT_MEMBER_CAP + 500 })
 
-    const result = await resolveSegmentMembers(db as never, {}, 'newsletter')
-
-    expect(result.truncated).toBe(true)
+    expect((await resolveSegmentMembers(db as never, segment, 'newsletter')).truncated).toBe(true)
   })
 
-  it('is not truncated when everything fits', async () => {
+  it('honours the segment’s overrides, because it reads through its id', async () => {
     const { db } = setup()
 
-    expect((await resolveSegmentMembers(db as never, {}, 'newsletter')).truncated).toBe(false)
-  })
+    await resolveSegmentMembers(db as never, segment, 'newsletter')
 
-  it('surfaces a query failure', async () => {
-    const builder = createQueryBuilderMock({ data: null, error: { message: 'boom' }, count: null })
-
-    await expect(
-      resolveSegmentMembers(createDbMock(builder) as never, {}, 'newsletter')
-    ).rejects.toThrow(/boom/)
+    expect((db.rpc as jest.Mock).mock.calls[0][1]).toEqual({ p_segment_id: 'seg-1' })
   })
 })

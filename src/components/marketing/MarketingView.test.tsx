@@ -72,11 +72,11 @@ describe('MarketingView', () => {
     expect(await screen.findByText(/Started via API/)).toBeInTheDocument()
   })
 
-  it('warns that segments exclude unsubscribed contacts', async () => {
+  it('warns that segments exclude archived and non-consenting contacts', async () => {
     render(<MarketingView jobTypes={jobTypes} />)
 
     expect(
-      await screen.findByText(/exclude archived contacts and anyone not subscribed/i)
+      await screen.findByText(/exclude archived contacts and anyone who has not agreed/i)
     ).toBeInTheDocument()
   })
 
