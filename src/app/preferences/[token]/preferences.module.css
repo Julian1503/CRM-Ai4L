@@ -110,6 +110,20 @@
   color: var(--text-muted);
 }
 
+.choiceStatusOn,
+.choiceStatusOff {
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.choiceStatusOn {
+  color: var(--success);
+}
+
+.choiceStatusOff {
+  color: var(--text-muted);
+}
+
 .actions {
   display: flex;
   flex-direction: column;

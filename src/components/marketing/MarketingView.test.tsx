@@ -44,6 +44,7 @@ const defaultHandlers = {
         status: 'in_review',
         segment_id: 'seg-1',
         provider_automation_id: 'auto-1',
+        consent_stream: 'newsletter',
         segment: { name: 'NSW leads' },
       },
     ],
@@ -677,6 +678,9 @@ describe('MarketingView', () => {
       fireEvent.change(screen.getByTestId('campaign-automation'), {
         target: { value: 'auto-9' },
       })
+      fireEvent.change(screen.getByTestId('campaign-stream'), {
+        target: { value: 'programs' },
+      })
       fireEvent.click(screen.getByTestId('create-campaign'))
 
       await waitFor(() => {
@@ -688,6 +692,69 @@ describe('MarketingView', () => {
           name: 'August offer',
           segmentId: 'seg-1',
           providerAutomationId: 'auto-9',
+          consentStream: 'programs',
+        })
+      })
+    })
+
+    it('asks for the stream when the automation is not a registered template', async () => {
+      render(<MarketingView jobTypes={jobTypes} />)
+
+      fireEvent.change(await screen.findByTestId('campaign-name'), {
+        target: { value: 'August offer' },
+      })
+
+      // Nothing else says who a hand-typed automation is for, and guessing the
+      // newsletter is how every campaign used to end up filed there.
+      expect(screen.getByTestId('create-campaign')).toBeDisabled()
+
+      fireEvent.change(screen.getByTestId('campaign-stream'), {
+        target: { value: 'newsletter' },
+      })
+      expect(screen.getByTestId('create-campaign')).toBeEnabled()
+    })
+
+    it('takes the stream from a registered template instead of asking', async () => {
+      routeFetch({
+        ...defaultHandlers,
+        'GET /api/templates': jsonResponse({
+          templates: [
+            {
+              id: 't2',
+              name: 'Course invite',
+              description: null,
+              provider_automation_id: 'course-auto',
+              consent_stream: 'programs',
+            },
+          ],
+        }),
+      })
+
+      render(<MarketingView jobTypes={jobTypes} />)
+
+      fireEvent.change(await screen.findByTestId('campaign-name'), {
+        target: { value: 'September courses' },
+      })
+      await screen.findByRole('option', { name: 'Course invite' })
+      fireEvent.change(screen.getByTestId('campaign-automation-picker'), {
+        target: { value: 'course-auto' },
+      })
+
+      expect(screen.queryByTestId('campaign-stream')).toBeNull()
+      expect(screen.getByTestId('campaign-stream-inherited')).toHaveTextContent(
+        'Courses & training'
+      )
+
+      fireEvent.click(screen.getByTestId('create-campaign'))
+
+      await waitFor(() => {
+        const call = mockFetch.mock.calls.find(
+          (entry) => entry[0] === '/api/campaigns' && entry[1]?.method === 'POST'
+        )
+        expect(JSON.parse(call![1].body)).toEqual({
+          name: 'September courses',
+          segmentId: null,
+          templateId: 't2',
         })
       })
     })
@@ -702,9 +769,57 @@ describe('MarketingView', () => {
       fireEvent.change(await screen.findByTestId('campaign-name'), {
         target: { value: 'August offer' },
       })
+      fireEvent.change(screen.getByTestId('campaign-stream'), {
+        target: { value: 'newsletter' },
+      })
       fireEvent.click(screen.getByTestId('create-campaign'))
 
       expect(await screen.findByText('That name is taken.')).toBeInTheDocument()
+    })
+  })
+
+  describe('streams in the campaign list', () => {
+    it('labels each campaign with the stream it spends', async () => {
+      render(<MarketingView jobTypes={jobTypes} />)
+
+      expect(await screen.findByTestId('campaign-stream-camp-1')).toHaveTextContent('Newsletter')
+    })
+
+    it('narrows the list to one stream, starting again from the first page', async () => {
+      render(<MarketingView jobTypes={jobTypes} />)
+
+      fireEvent.change(await screen.findByTestId('campaign-stream-filter'), {
+        target: { value: 'programs' },
+      })
+
+      await waitFor(() =>
+        expect(
+          mockFetch.mock.calls.some(
+            ([url]) =>
+              typeof url === 'string' &&
+              url.startsWith('/api/campaigns?page=1&') &&
+              url.includes('stream=programs')
+          )
+        ).toBe(true)
+      )
+    })
+  })
+
+  describe('awaiting approval', () => {
+    it('narrows the list to campaigns waiting for approval', async () => {
+      render(<MarketingView jobTypes={jobTypes} />)
+
+      fireEvent.change(await screen.findByTestId('campaign-status-filter'), {
+        target: { value: 'in_review' },
+      })
+
+      await waitFor(() =>
+        expect(
+          mockFetch.mock.calls.some(
+            ([url]) => typeof url === 'string' && url.includes('status=in_review')
+          )
+        ).toBe(true)
+      )
     })
   })
 

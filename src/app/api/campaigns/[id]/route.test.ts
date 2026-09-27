@@ -19,13 +19,19 @@ jest.mock('@/lib/supabase/server', () => ({
 
 import { GET, PATCH } from './route'
 
-function setup(existing: unknown = { id: 'camp-1', status: 'draft' }) {
+function setup(
+  existing: unknown = { id: 'camp-1', status: 'draft', consent_stream: 'newsletter' },
+  templatesForAutomation: unknown[] = []
+) {
   const campaigns = createQueryBuilderMock([
     { data: existing, error: null },
     { data: { id: 'camp-1' }, error: null },
   ])
-  mockCreateServerClient.mockResolvedValue(createDbMock(campaigns))
-  return { campaigns }
+  const templates = createQueryBuilderMock({ data: templatesForAutomation, error: null })
+  mockCreateServerClient.mockResolvedValue(
+    createDbMock((table: string) => (table === 'campaign_templates' ? templates : campaigns))
+  )
+  return { campaigns, templates }
 }
 
 function patch(body: unknown, id = 'camp-1') {
@@ -61,6 +67,25 @@ describe('/api/campaigns/[id]', () => {
     mockGetSession.mockResolvedValue(null)
 
     expect((await patch({ name: 'x' })).status).toBe(401)
+  })
+
+  it('refuses to re-point a campaign at an automation registered for the other stream', async () => {
+    // The stream is frozen at creation. Swapping in a course template's automation
+    // would send course copy to an audience counted against newsletter consent.
+    const { campaigns, templates } = setup(undefined, [{ consent_stream: 'programs' }])
+
+    const response = await patch({ providerAutomationId: 'course-auto' })
+
+    expect(response.status).toBe(409)
+    expect(templates.argsFor('eq')).toEqual(['provider_automation_id', 'course-auto'])
+    expect(campaigns.argsFor('update')).toBeUndefined()
+  })
+
+  it('allows an automation registered for the same stream', async () => {
+    const { campaigns } = setup(undefined, [{ consent_stream: 'newsletter' }])
+
+    expect((await patch({ providerAutomationId: 'news-auto' })).status).toBe(200)
+    expect(campaigns.argsFor('update')).toBeDefined()
   })
 
   it('updates editable fields', async () => {

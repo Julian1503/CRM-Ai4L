@@ -211,6 +211,15 @@ describe('POST /api/campaigns/generate', () => {
   })
 
   describe('brief construction', () => {
+    it('tells the model which consent the audience holds', async () => {
+      setup({ ...DRAFT, consent_stream: 'programs' })
+
+      await generate()
+
+      const [, brief] = mockGenerate.mock.calls[0]
+      expect(brief).toMatchObject({ consentStream: 'programs' })
+    })
+
     it('describes the audience by its filters and its real size', async () => {
       await generate()
 

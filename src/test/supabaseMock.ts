@@ -15,6 +15,8 @@ const CHAINABLE = [
   'or',
   'ilike',
   'in',
+  'lte',
+  'gte',
   'order',
   'range',
   'limit',

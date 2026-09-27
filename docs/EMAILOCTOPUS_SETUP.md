@@ -70,22 +70,29 @@ That leaves two things the status cannot say, and both travel as fields:
   sync rather than at send time because, unlike `BookingUrl`, it never changes — which is
   what lets a dashboard-composed newsletter carry a working unsubscribe too.
 
-Put all four links in the template footer by appending a path to `{{PrefsUrl}}`:
+Put **one** link in the template footer:
 
 ```html
-<a href="{{PrefsUrl}}">Email preferences</a> ·
-<a href="{{PrefsUrl}}/newsletter">Stop the newsletter</a> ·
-<a href="{{PrefsUrl}}/programs">Stop course emails</a> ·
-<a href="{{PrefsUrl}}/all">Unsubscribe from everything</a>
+<a href="{{PrefsUrl}}">Unsubscribe or choose which emails you receive</a>
 ```
 
-**Check this renders before the first send.** The merge tag is substituted inline, so a
-suffix after it should work exactly as it does for `{{BookingUrl}}` inside an `href` —
-but it has not been confirmed against a real EmailOctopus template. Send yourself a test
-and click each link. If the suffix does not survive substitution, the fallback is four
-separate fields written by the sync instead of one.
+One link, not one per stream. The page it opens explains both streams (newsletter, and
+courses & training), shows which ones the reader currently receives, and lets them stop
+either one or both — so the reader decides with the information in front of them rather
+than guessing from four footer links. The older per-stream paths (`/newsletter`,
+`/programs`, `/all`) still work for emails already sent, but new templates should not
+use them.
 
-None of these links act on click: they open a page with the change pre-selected and a
+**Check this renders before the first send.** Send yourself a test and click the link.
+
+**EmailOctopus's own unsubscribe link.** If EmailOctopus insists on its own unsubscribe
+link in the template, leave it in but keep the preferences link above it and more
+prominent. Their link removes the contact from the whole list, and the webhook treats
+that as withdrawing **both** streams (see `applyNewsletterEvent` in
+`src/lib/contacts/newsletter.ts`) — correct for "stop emailing me", but it gives the
+reader no way to keep one stream.
+
+The link does not act on click: it opens a page where the reader presses a
 button. That is deliberate — Outlook Safe Links and similar gateways fetch every URL in
 an email before the reader sees it, and a link that unsubscribed on load would empty a
 share of the list on the first send.

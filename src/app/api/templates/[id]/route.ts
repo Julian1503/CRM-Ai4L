@@ -10,6 +10,7 @@ import {
   serverError,
 } from '@/lib/api/responses'
 import type { CampaignTemplateRow } from '@/lib/db/types'
+import { parseConsentStream } from '@/lib/marketing/consentStream'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 
 export const runtime = 'nodejs'
@@ -19,7 +20,8 @@ type RouteContext = { params: Promise<{ id: string }> }
 const NO_STORE = { 'Cache-Control': 'private, no-store' }
 
 /**
- * Renames a template, re-points it at another automation, or archives it.
+ * Renames a template, re-points it at another automation, moves it to another consent
+ * stream, or archives it.
  *
  * There is no DELETE, and the table grants no delete policy: a campaign that has
  * already sent still references the template its copy was written for, and dropping
@@ -60,6 +62,16 @@ export async function PATCH(
 
   if (typeof body.description === 'string') {
     patch.description = body.description.trim() || null
+  }
+
+  // Safe to change: campaigns copy the stream at creation, so only campaigns created
+  // from now on follow the template to its new stream.
+  if (body.consentStream !== undefined) {
+    const consentStream = parseConsentStream(body.consentStream)
+
+    if (!consentStream) return badRequest('Unknown consent stream.')
+
+    patch.consent_stream = consentStream
   }
 
   if (typeof body.archived === 'boolean') {

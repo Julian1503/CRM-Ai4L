@@ -1,0 +1,144 @@
+import type { SupabaseClient } from '@supabase/supabase-js'
+
+import type { CampaignRow, Database } from '@/lib/db/types'
+
+import { generateCampaignCopy, type GenerationUsage, type MessagesApi } from './generateCampaign'
+import type { ScheduleBrief } from './prompt'
+import { resolveSegmentMembers, segmentDefinitionToFilters } from './segments'
+
+/**
+ * Writes copy for one campaign and stores it.
+ *
+ * Shared by the "Write copy with AI" route and the newsletter scheduler, so a scheduled
+ * issue is written by exactly the path an operator's is — same audience description,
+ * same validation, same rule that rewriting sends the campaign back to draft.
+ *
+ * Returns the two outcomes a caller answers differently (`not_found`, `conflict`) and
+ * throws for everything else, so a failure carries its own message to the log or the
+ * 500 without a third kind of result to forget to handle.
+ */
+
+/** Statuses whose copy may still be rewritten. */
+const EDITABLE_STATUSES = new Set(['draft', 'in_review', 'failed'])
+
+export type GenerateForCampaignOutcome =
+  | {
+      ok: true
+      campaign: CampaignRow
+      generation: { attempts: number; usage: GenerationUsage }
+      audience: { size: number; truncated: boolean }
+    }
+  | { ok: false; reason: 'not_found' | 'conflict'; message: string }
+
+export async function generateForCampaign(
+  db: SupabaseClient<Database>,
+  messages: MessagesApi,
+  campaignId: string,
+  schedule?: ScheduleBrief
+): Promise<GenerateForCampaignOutcome> {
+  const { data: campaign, error: loadError } = await db
+    .from('campaigns')
+    .select(
+      'id, name, status, notes, segment_id, consent_stream, segment:segments(name, description, definition)'
+    )
+    .eq('id', campaignId)
+    .maybeSingle()
+
+  if (loadError) throw new Error(loadError.message)
+  if (!campaign) return { ok: false, reason: 'not_found', message: 'Campaign not found.' }
+
+  if (!EDITABLE_STATUSES.has(campaign.status)) {
+    // Regenerating an approved campaign would swap the copy out from under the person
+    // who approved it, leaving the approval attributed to text they never saw.
+    return {
+      ok: false,
+      reason: 'conflict',
+      message: `A campaign in "${campaign.status}" cannot be rewritten. Move it back to draft first.`,
+    }
+  }
+
+  const segment = (campaign as unknown as {
+    segment: { name: string; description: string | null; definition: unknown } | null
+  }).segment
+
+  if (!campaign.segment_id || !segment) {
+    return {
+      ok: false,
+      reason: 'conflict',
+      message: 'Select a segment before generating copy — it defines the audience.',
+    }
+  }
+
+  const audience = await resolveSegmentMembers(db, segment.definition, campaign.consent_stream)
+
+  if (audience.total === 0) {
+    return {
+      ok: false,
+      reason: 'conflict',
+      message: 'This segment currently matches no contacts, so there is no audience to write for.',
+    }
+  }
+
+  const filters = segmentDefinitionToFilters(segment.definition, campaign.consent_stream)
+
+  // Resolve the job type to its name. The segment stores a UUID, and handing the model a
+  // UUID is worse than handing it nothing — it is noise that looks like information, and
+  // "write to 3d02ab78-194e-481f" steers nothing.
+  let jobTypeName: string | null = null
+
+  if (filters.jobTypeId) {
+    const { data: jobType } = await db
+      .from('job_types')
+      .select('name')
+      .eq('id', filters.jobTypeId)
+      .maybeSingle()
+
+    jobTypeName = jobType?.name ?? null
+  }
+
+  const result = await generateCampaignCopy(messages, {
+    campaignName: campaign.name,
+    notes: campaign.notes,
+    consentStream: campaign.consent_stream,
+    schedule,
+    audience: {
+      segmentName: segment.name,
+      segmentDescription: segment.description,
+      size: audience.total,
+      jobType: jobTypeName,
+      state: filters.state,
+      status: filters.status,
+      search: filters.q,
+    },
+  })
+
+  if (!result.ok) throw new Error(result.error)
+
+  // Replaces `merge_fields` outright rather than merging: the generated copy is the whole
+  // contract, and a leftover value from a previous generation would merge into the
+  // template beside the new copy without anything flagging the mismatch. The booking
+  // link is not lost by this — it is added per recipient at send time.
+  //
+  // Status drops back to `draft` on purpose. Rewriting copy that was already in review
+  // invalidates the review, and the reviewer should see the new text as new.
+  const { data: updated, error: saveError } = await db
+    .from('campaigns')
+    .update({
+      merge_fields: result.copy,
+      subject: result.copy.Headline ?? null,
+      status: 'draft',
+    })
+    .eq('id', campaignId)
+    .eq('status', campaign.status)
+    .select('*')
+    .single()
+
+  if (saveError) throw new Error(saveError.message)
+
+  return {
+    ok: true,
+    campaign: updated as CampaignRow,
+    generation: { attempts: result.attempts, usage: result.usage },
+    audience: { size: audience.total, truncated: audience.truncated },
+  }
+}

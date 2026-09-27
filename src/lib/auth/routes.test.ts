@@ -1,7 +1,9 @@
 import {
+  CRON_PATHS,
   PUBLIC_PATHS,
   WEBHOOK_PATHS,
   isApiPath,
+  isCronPath,
   isPublicPath,
   isWebhookPath,
 } from './routes'
@@ -71,6 +73,22 @@ describe('auth/routes', () => {
 
     it('does not exempt the sync route, which acts on behalf of a user', () => {
       expect(isWebhookPath('/api/integrations/emailoctopus/sync')).toBe(false)
+    })
+  })
+
+  describe('isCronPath', () => {
+    it.each(CRON_PATHS)('exempts %s from the session gate', (path) => {
+      expect(isCronPath(path)).toBe(true)
+    })
+
+    it('matches on exact path only', () => {
+      expect(isCronPath('/api/cron')).toBe(false)
+      expect(isCronPath('/api/cron/anything-else')).toBe(false)
+      expect(isCronPath('/api/cron/newsletters/extra')).toBe(false)
+    })
+
+    it('does not exempt the schedule routes an operator uses', () => {
+      expect(isCronPath('/api/newsletter-schedules')).toBe(false)
     })
   })
 

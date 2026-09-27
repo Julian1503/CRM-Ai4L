@@ -153,6 +153,28 @@ describe('Home Page & Excel Importer UI Integration Tests', () => {
     routeFetch();
   });
 
+  it('badges the campaigns tab with how many are waiting for approval', async () => {
+    routeFetch({ '/api/campaigns?status=in_review': jsonResponse({ campaigns: [], total: 3 }) });
+
+    render(<Home />);
+
+    expect(await screen.findByTestId('nav-badge-campaigns')).toHaveTextContent('3');
+  });
+
+  it('opens the view named in the URL, which is where the review email links', async () => {
+    window.history.replaceState(null, '', '/?view=campaigns&campaign=camp-1');
+
+    try {
+      render(<Home />);
+
+      await waitFor(() =>
+        expect(screen.getByTestId('nav-item-campaigns').className).toMatch(/activeItem/)
+      );
+    } finally {
+      window.history.replaceState(null, '', '/');
+    }
+  });
+
   it('renders dashboard overview by default', () => {
     render(<Home />);
     expect(screen.getByRole('heading', { name: /dashboard overview/i })).toBeInTheDocument();

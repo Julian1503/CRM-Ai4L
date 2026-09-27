@@ -18,6 +18,34 @@ function renderSidebar(currentView: ActiveView = 'contacts') {
 }
 
 describe('Sidebar', () => {
+  describe('badges', () => {
+    it('shows how many campaigns are waiting for approval', () => {
+      render(
+        <Sidebar currentView="contacts" onViewChange={jest.fn()} badges={{ campaigns: 2 }} />
+      )
+
+      const badge = screen.getByTestId('nav-badge-campaigns')
+      expect(badge).toHaveTextContent('2')
+      expect(badge).toHaveAccessibleName('2 waiting for approval')
+    })
+
+    it('shows nothing when none are waiting', () => {
+      render(
+        <Sidebar currentView="contacts" onViewChange={jest.fn()} badges={{ campaigns: 0 }} />
+      )
+
+      expect(screen.queryByTestId('nav-badge-campaigns')).toBeNull()
+    })
+
+    it('caps a large count so the pill keeps its size', () => {
+      render(
+        <Sidebar currentView="contacts" onViewChange={jest.fn()} badges={{ campaigns: 140 }} />
+      )
+
+      expect(screen.getByTestId('nav-badge-campaigns')).toHaveTextContent('99+')
+    })
+  })
+
   describe('navigation', () => {
     it('offers every workspace', () => {
       renderSidebar()

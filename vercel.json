@@ -3,5 +3,11 @@
   "regions": ["hnd1"],
   "github": {
     "silent": true
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/newsletters",
+      "schedule": "0 22 * * *"
+    }
+  ]
 }

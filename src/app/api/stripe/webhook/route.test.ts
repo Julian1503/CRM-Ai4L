@@ -10,6 +10,7 @@ const mockConstructEvent = jest.fn()
 const mockGetStripeConfig = jest.fn()
 const mockStartIntegrationDelivery = jest.fn().mockResolvedValue('delivery-1')
 const mockCompleteIntegrationDelivery = jest.fn().mockResolvedValue(undefined)
+const mockSendBookingPaidEmail = jest.fn()
 
 jest.mock('@/lib/supabase/admin', () => ({ getAdminClient: () => mockGetAdminClient() }))
 jest.mock('@/lib/stripe/client', () => ({
@@ -19,6 +20,10 @@ jest.mock('@/lib/stripe/client', () => ({
 jest.mock('@/lib/operations/deliveries', () => ({
   startIntegrationDelivery: (...args: unknown[]) => mockStartIntegrationDelivery(...args),
   completeIntegrationDelivery: (...args: unknown[]) => mockCompleteIntegrationDelivery(...args),
+}))
+
+jest.mock('@/lib/booking/paidEmail', () => ({
+  sendBookingPaidEmail: (...args: unknown[]) => mockSendBookingPaidEmail(...args),
 }))
 
 import { POST } from './route'
@@ -70,6 +75,7 @@ describe('POST /api/stripe/webhook', () => {
       webhookSecret: 'whsec_1',
     })
     mockConstructEvent.mockReturnValue(completedEvent)
+    mockSendBookingPaidEmail.mockResolvedValue({ status: 'sent', emailId: 'email_1' })
     setupDb()
   })
 
@@ -137,6 +143,47 @@ describe('POST /api/stripe/webhook', () => {
         args: ['stripe_session_id', 'cs_1'],
       })
       expect(bookings.allFor('eq')).toContainEqual({ method: 'eq', args: ['id', 'b1'] })
+    })
+
+    it('emails the scheduling link once the booking is paid', async () => {
+      await POST(request())
+
+      expect(mockSendBookingPaidEmail).toHaveBeenCalledWith(
+        expect.anything(),
+        completedEvent.data.object,
+        'b1'
+      )
+    })
+
+    it('does not email when the session matched no pending booking', async () => {
+      const bookings = createQueryBuilderMock({ data: [], error: null })
+      mockGetAdminClient.mockReturnValue(
+        createDbMock((table: string) =>
+          table === 'webhook_events'
+            ? createQueryBuilderMock({ data: null, error: null })
+            : bookings
+        )
+      )
+
+      await POST(request())
+
+      expect(mockSendBookingPaidEmail).not.toHaveBeenCalled()
+    })
+
+    it('still acknowledges the event when the email fails to send', async () => {
+      // The booking is already paid; a 500 would retry into a transition that no
+      // longer matches, turning an email hiccup into a failed delivery.
+      mockSendBookingPaidEmail.mockRejectedValue(new Error('Resend down'))
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
+
+      const response = await POST(request())
+
+      expect(response.status).toBe(200)
+      expect(errorSpy).toHaveBeenCalledWith(
+        'Booking confirmation email failed',
+        expect.objectContaining({ bookingId: 'b1', message: 'Resend down' })
+      )
+      errorSpy.mockRestore()
     })
 
     it('acknowledges event types it does not act on', async () => {

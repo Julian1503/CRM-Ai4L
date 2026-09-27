@@ -120,8 +120,54 @@ export type CampaignRow = {
    * so a second send builds its own ledger instead of overwriting the first one's.
    */
   send_run: number
+  /** The newsletter schedule that drafted this campaign; null for hand-made ones. */
+  schedule_id: string | null
+  /** The occurrence (a local date) this campaign was drafted for. Unique per schedule. */
+  scheduled_for: string | null
   created_at: string
   updated_at: string
+}
+
+export type NewsletterFrequency = 'weekly' | 'fortnightly' | 'monthly'
+
+/**
+ * A recurring newsletter. A daily cron drafts one campaign per due schedule and leaves
+ * it in review; approving and sending stay manual. Newsletter templates only — the
+ * database refuses a schedule on a programs template.
+ */
+export type NewsletterScheduleRow = {
+  id: string
+  name: string
+  template_id: string
+  segment_id: string
+  frequency: NewsletterFrequency
+  /** When the next campaign is due. Advanced before generation, which is the claim. */
+  next_run_at: string
+  /** IANA zone the frequency is counted in. */
+  timezone: string
+  /** What every issue is for. Required. */
+  goal: string
+  tone: string | null
+  cta: string | null
+  must_include: string | null
+  avoid: string | null
+  is_active: boolean
+  archived_at: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+/** One entry in a schedule's topic queue. Taken in `position` order, once each. */
+export type NewsletterTopicRow = {
+  id: string
+  schedule_id: string
+  title: string
+  details: string | null
+  position: number
+  used_at: string | null
+  campaign_id: string | null
+  created_at: string
 }
 
 /**
@@ -354,6 +400,8 @@ export interface Database {
       campaigns: TableDef<CampaignRow>
       campaign_sends: TableDef<CampaignSendRow>
       campaign_templates: TableDef<CampaignTemplateRow>
+      newsletter_schedules: TableDef<NewsletterScheduleRow>
+      newsletter_topics: TableDef<NewsletterTopicRow>
       bookings: TableDef<BookingRow>
     }
     Views: {
@@ -395,6 +443,7 @@ export interface Database {
       campaign_status: CampaignStatus
       booking_status: BookingStatus
       consent_stream: ConsentStream
+      newsletter_frequency: NewsletterFrequency
       integration_delivery_status: IntegrationDeliveryStatus
     }
   }

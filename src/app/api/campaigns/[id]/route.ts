@@ -74,7 +74,7 @@ export async function PATCH(
 
     const { data: existing, error: loadError } = await db
       .from('campaigns')
-      .select('id, status')
+      .select('id, status, consent_stream')
       .eq('id', id)
       .maybeSingle()
 
@@ -89,6 +89,27 @@ export async function PATCH(
     if (typeof body.notes === 'string') updates.notes = body.notes.trim() || null
     if (typeof body.providerAutomationId === 'string') {
       updates.provider_automation_id = body.providerAutomationId.trim() || null
+    }
+
+    // The stream was frozen when the campaign was created. An automation registered
+    // for the other stream carries that stream's copy, so pointing this campaign at it
+    // would send, say, a course invitation to people who only agreed to the newsletter.
+    // An unregistered id cannot be checked and is allowed, as it is at creation.
+    if (updates.provider_automation_id) {
+      const { data: registered, error: templateError } = await db
+        .from('campaign_templates')
+        .select('consent_stream')
+        .eq('provider_automation_id', updates.provider_automation_id)
+        .is('archived_at', null)
+
+      if (templateError) throw new Error(templateError.message)
+
+      if ((registered ?? []).some((row) => row.consent_stream !== existing.consent_stream)) {
+        return conflict(
+          'That automation belongs to a template for the other consent stream. ' +
+            'Create a new campaign from that template instead.'
+        )
+      }
     }
 
     // Human edits go through the same gate as generated copy. An operator retyping a

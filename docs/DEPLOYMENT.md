@@ -107,6 +107,8 @@ payment → scheduling flow stops at the point the missing one is needed.
 | `STRIPE_CONSULTATION_COUPON_ID` | **Secret** | The $500 consultation cannot be discounted to $0 |
 | `STRIPE_WEBHOOK_SECRET` | **Secret** | Payments never confirm; bookings stay at `checkout_started` |
 | `CALENDLY_WEBHOOK_SECRET` | **Secret** | Bookings stay at `paid` forever — nothing marks them scheduled |
+| `RESEND_API_KEY` | **Secret** | No confirmation email after checkout; the lead only has the redirect to reach the calendar |
+| `BOOKING_EMAIL_FROM` | Server | Same as above. Must be a sender on a domain verified in Resend |
 | `NEXT_PUBLIC_CALENDLY_SCHEDULING_URL` | Public | Nowhere to send a paid customer to book a time |
 | `EMAILOCTOPUS_WEBHOOK_SECRET` | **Secret** | Newsletter subscribe/unsubscribe events are rejected with 401 |
 | `PREFERENCES_SECRET` | **Secret** | Preference links cannot be signed: `PrefsUrl` is left off the contact and every email ships without a working unsubscribe |
@@ -139,6 +141,18 @@ field, and `GET /api/integrations/emailoctopus/fields` reports `PrefsUrl` as mis
 |---|---|---|
 | `ANTHROPIC_API_KEY` | **Secret** | "Write with AI" returns a handled "not configured" error; copy can still be typed by hand |
 | `GEOAPIFY_API_KEY` | **Secret** | Address autocomplete returns 503 with a clear message; addresses can still be typed |
+| `CRON_SECRET` | **Secret** | `/api/cron/newsletters` refuses every call, so recurring newsletters are never drafted. "Generate now" still works |
+| `CAMPAIGN_REVIEW_EMAILS` | Server | Scheduled newsletters still land in review with a badge on Campaigns, but nobody is emailed |
+| `NOTIFY_EMAIL_FROM` | Server | Review notices are sent from `BOOKING_EMAIL_FROM` instead |
+
+#### Recurring newsletters
+
+The daily cron (`vercel.json`, 22:00 UTC ≈ 08:00–09:00 Sydney) drafts one campaign per
+due schedule, writes its copy and moves it to review. It never sends. On the Hobby plan
+Vercel runs it once a day at some point within that hour, which is all a weekly or
+monthly newsletter needs. Test it after deploying with
+`curl -H "Authorization: Bearer $CRON_SECRET" https://<host>/api/cron/newsletters` —
+a second call must not create a second campaign for the same day.
 
 ### Do **not** set these on Vercel
 

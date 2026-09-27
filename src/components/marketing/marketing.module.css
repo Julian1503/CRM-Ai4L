@@ -360,6 +360,40 @@
   background: var(--danger-bg);
 }
 
+.listFilter {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 1.25rem;
+  max-width: 32rem;
+}
+
+.listFilter .input {
+  flex: 1 1 12rem;
+}
+
+/* Which consent a template or campaign spends. Colour tells the two apart at a glance
+   in a long list; the label carries the meaning. */
+.stream {
+  padding: 0.1875rem 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.stream_newsletter {
+  color: #0b6b8a;
+  background: var(--primary-muted);
+}
+
+.stream_programs {
+  color: #7a4405;
+  background: rgba(249, 137, 8, 0.14);
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;
@@ -946,4 +980,60 @@
   flex-wrap: wrap;
   gap: var(--space-sm);
   margin-bottom: var(--space-md);
+}
+
+/* ---------------------------------------------------------------------------
+   Recurring newsletters
+   --------------------------------------------------------------------------- */
+.textarea {
+  min-height: 3.5rem;
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.5;
+}
+
+.topicQueue {
+  flex: 1 1 100%;
+  margin-top: var(--space-sm);
+  padding: var(--space-md);
+  border-radius: 10px;
+  background: var(--primary-muted);
+}
+
+.topicList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin: var(--space-md) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.topicItem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: 0.625rem 0.75rem;
+  border-radius: 8px;
+  background: var(--bg-card);
+}
+
+.topicUsed {
+  opacity: 0.6;
+}
+
+.topicOrder {
+  flex: 0 0 3rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.topicText {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
 }

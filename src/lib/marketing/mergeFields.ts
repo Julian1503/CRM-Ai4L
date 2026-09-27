@@ -45,8 +45,9 @@ export const BOOKING_URL_MERGE_FIELD = 'BookingUrl'
  * and it still has to carry a working unsubscribe. Storing the link as an ordinary
  * contact field is what makes every email — ours or theirs — able to reference it.
  *
- * The template builds the per-stream links from it by appending a path:
- * `{{PrefsUrl}}`, `{{PrefsUrl}}/newsletter`, `{{PrefsUrl}}/programs`, `{{PrefsUrl}}/all`.
+ * Templates carry this one link; the page it opens explains both streams and lets the
+ * reader stop either or both. The per-stream suffixes (`/newsletter`, `/programs`,
+ * `/all`) still resolve for emails already sent but are no longer used in templates.
  */
 export const PREFERENCES_URL_MERGE_FIELD = 'PrefsUrl'
 

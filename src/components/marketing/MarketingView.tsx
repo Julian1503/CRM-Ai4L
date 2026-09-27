@@ -3,6 +3,8 @@
 import React, { useCallback, useEffect, useState } from 'react'
 
 import { AU_STATES } from '@/lib/contacts/states'
+import type { ConsentStream } from '@/lib/db/types'
+import { CONSENT_STREAM_LABELS, parseConsentStream } from '@/lib/marketing/consentStream'
 import type { FacetCounts, SegmentFacets } from '@/lib/marketing/facets'
 
 import Pagination from '@/components/ui/Pagination'
@@ -13,8 +15,10 @@ import AutomationConnectionField, {
   type TemplateOption,
 } from './AutomationConnectionField'
 import CampaignCopyEditor from './CampaignCopyEditor'
+import CampaignStreamField from './CampaignStreamField'
 import SendConfirmDialog from './SendConfirmDialog'
 import styles from './marketing.module.css'
+import StreamPill from './StreamPill'
 
 type Segment = {
   id: string
@@ -29,6 +33,7 @@ type Campaign = {
   status: 'draft' | 'in_review' | 'approved' | 'sending' | 'sent' | 'failed'
   segment_id: string | null
   provider_automation_id: string | null
+  consent_stream: ConsentStream
   merge_fields: Record<string, string>
   segment?: { name: string } | null
 }
@@ -283,6 +288,9 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
   const [campaignName, setCampaignName] = useState('')
   const [campaignSegment, setCampaignSegment] = useState('')
   const [automationId, setAutomationId] = useState('')
+  const [campaignStream, setCampaignStream] = useState<ConsentStream | ''>('')
+  const [campaignStreamFilter, setCampaignStreamFilter] = useState<ConsentStream | ''>('')
+  const [awaitingOnly, setAwaitingOnly] = useState(false)
 
   // The named registry over automation ids, and what EmailOctopus says about each one.
   // Both exist because the provider has no endpoint that lists automations: a name can
@@ -400,7 +408,11 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
       const [segmentsResponse, campaignsResponse, pickerResponse, templatesResponse] =
         await Promise.all([
           fetch(`/api/segments?page=${segmentsPage}&pageSize=${segmentsPageSize}`),
-          fetch(`/api/campaigns?page=${campaignsPage}&pageSize=${campaignsPageSize}`),
+          fetch(
+            `/api/campaigns?page=${campaignsPage}&pageSize=${campaignsPageSize}` +
+              (campaignStreamFilter ? `&stream=${campaignStreamFilter}` : '') +
+              (awaitingOnly ? '&status=in_review' : '')
+          ),
           fetch(`/api/segments?pageSize=${SEGMENT_PICKER_LIMIT}`),
           fetch('/api/templates'),
         ])
@@ -442,6 +454,8 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
     segmentsPageSize,
     campaignsPage,
     campaignsPageSize,
+    campaignStreamFilter,
+    awaitingOnly,
     loadSendReports,
     checkAutomations,
   ])
@@ -614,6 +628,15 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
     }
   }
 
+  // The registered template behind the automation picked, if there is one. Matched by
+  // automation id because that is what the picker holds.
+  const pickedTemplate =
+    templates.find(
+      (template) =>
+        Boolean(template.provider_automation_id) &&
+        template.provider_automation_id === automationId.trim()
+    ) ?? null
+
   const createCampaign = async () => {
     setError(null)
     setBusy('campaign')
@@ -622,17 +645,29 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
       const response = await fetch('/api/campaigns', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: campaignName,
-          segmentId: campaignSegment || null,
-          providerAutomationId: automationId,
-        }),
+        // A registered template carries its own automation and stream, and the server
+        // reads both from it; only a hand-typed automation has to name its stream.
+        body: JSON.stringify(
+          pickedTemplate
+            ? {
+                name: campaignName,
+                segmentId: campaignSegment || null,
+                templateId: pickedTemplate.id,
+              }
+            : {
+                name: campaignName,
+                segmentId: campaignSegment || null,
+                providerAutomationId: automationId,
+                consentStream: campaignStream,
+              }
+        ),
       })
 
       if (!response.ok) throw new Error(await readError(response))
 
       setCampaignName('')
       setAutomationId('')
+      setCampaignStream('')
       setCampaignsPage(1)
       await load()
     } catch (createError) {
@@ -1020,17 +1055,59 @@ You will approve it again before anything leaves, and EmailOctopus only delivers
             check={automationChecks[automationId.trim()]}
             testId="campaign-automation"
           />
+
+          <CampaignStreamField
+            inherited={pickedTemplate?.consent_stream ?? null}
+            value={campaignStream}
+            onChange={setCampaignStream}
+          />
         </div>
 
         <button
           type="button"
           className={styles.primaryBtn}
           onClick={createCampaign}
-          disabled={!campaignName.trim() || busy !== null}
+          disabled={
+            !campaignName.trim() || (!pickedTemplate && !campaignStream) || busy !== null
+          }
           data-testid="create-campaign"
         >
           {busy === 'campaign' ? 'Saving…' : 'Create draft'}
         </button>
+
+        <div className={styles.listFilter} role="group" aria-label="Filter campaigns">
+          <span className={styles.label}>Show</span>
+          <select
+            className={styles.input}
+            aria-label="Campaign stream"
+            value={campaignStreamFilter}
+            onChange={(event) => {
+              setCampaignStreamFilter(parseConsentStream(event.target.value) ?? '')
+              setCampaignsPage(1)
+            }}
+            data-testid="campaign-stream-filter"
+          >
+            <option value="">All campaigns</option>
+            {(Object.keys(CONSENT_STREAM_LABELS) as ConsentStream[]).map((option) => (
+              <option key={option} value={option}>
+                {CONSENT_STREAM_LABELS[option]} only
+              </option>
+            ))}
+          </select>
+          <select
+            className={styles.input}
+            value={awaitingOnly ? 'in_review' : ''}
+            onChange={(event) => {
+              setAwaitingOnly(event.target.value === 'in_review')
+              setCampaignsPage(1)
+            }}
+            aria-label="Campaign status"
+            data-testid="campaign-status-filter"
+          >
+            <option value="">Any status</option>
+            <option value="in_review">Waiting for approval</option>
+          </select>
+        </div>
 
         <ul className={styles.list}>
           {campaigns.length === 0 && <li className={styles.empty}>No campaigns yet.</li>}
@@ -1043,7 +1120,13 @@ You will approve it again before anything leaves, and EmailOctopus only delivers
             return (
             <li key={campaign.id} className={styles.campaignItem}>
               <div className={styles.campaignMain}>
-                <span className={styles.itemName}>{campaign.name}</span>
+                <span className={styles.itemName}>
+                  {campaign.name}{' '}
+                  <StreamPill
+                    stream={campaign.consent_stream ?? 'newsletter'}
+                    testId={`campaign-stream-${campaign.id}`}
+                  />
+                </span>
                 <span className={styles.itemMeta}>
                   {campaign.segment?.name ?? 'No segment'}
                   {campaign.provider_automation_id

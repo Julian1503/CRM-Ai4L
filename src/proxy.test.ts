@@ -132,6 +132,15 @@ describe('proxy', () => {
     expect(mockCreateServerClient).not.toHaveBeenCalled()
   })
 
+  it('lets the newsletter cron through, which authenticates with its own secret', async () => {
+    anonymous()
+
+    const response = await proxy(request('/api/cron/newsletters'))
+
+    expect(response.status).toBe(200)
+    expect(mockCreateServerClient).not.toHaveBeenCalled()
+  })
+
   it('does not exempt the emailoctopus sync route, which acts for a user', async () => {
     anonymous()
 

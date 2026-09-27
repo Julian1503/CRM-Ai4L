@@ -1,5 +1,6 @@
 'use client'
 
+import type { ConsentStream } from '@/lib/db/types'
 import type { AutomationCheck } from '@/lib/marketing/providers/emailOctopus'
 
 import styles from './marketing.module.css'
@@ -10,6 +11,7 @@ export type TemplateOption = {
   name: string
   description: string | null
   provider_automation_id: string | null
+  consent_stream: ConsentStream
 }
 
 /** What the registry knows about an id right now, including "we are still asking". */

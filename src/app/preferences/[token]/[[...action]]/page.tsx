@@ -19,8 +19,14 @@ export const metadata: Metadata = {
 /**
  * The reader's email preferences.
  *
- * One optional catch-all rather than several routes, because every email carries four
- * links into the same screen and they differ only in what they pre-select:
+ * Every email carries one link, `/preferences/{token}`, and this page does the
+ * explaining: what each stream contains, which ones the reader receives now, and a way
+ * to stop either or both. One link rather than one per stream because a footer of four
+ * unsubscribe links asks the reader to decide before they can see what they are
+ * deciding about.
+ *
+ * The optional catch-all still honours the per-stream paths that earlier emails carry;
+ * they only pre-select a change:
  *
  *   /preferences/{token}             both choices, nothing pre-selected
  *   /preferences/{token}/newsletter  arriving to stop the newsletter
@@ -125,7 +131,7 @@ export default async function PreferencesPage({
             <p className={styles.lede}>
               {requested
                 ? REQUEST_LEDE[requested]
-                : 'Choose what you would like to hear about. You can change this at any time from any email we send.'}
+                : 'We send two kinds of email. Untick the ones you no longer want and press save, or stop everything at once. You can come back and change this from any email we send.'}
             </p>
 
             <PreferencesForm token={token} initial={consent} requested={requested} />

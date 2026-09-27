@@ -12,10 +12,10 @@ type Props = {
   /**
    * The stream a per-stream link named, if any.
    *
-   * Every email carries one link per consent as well as one to this page, so a reader
-   * who only wants to stop the course emails does not have to read a settings screen to
-   * do it. Arriving that way pre-selects the change and states it plainly; the choices
-   * stay editable, because the link is a shortcut and not a decision already made.
+   * Emails now carry a single link to this page, which explains both streams and lets
+   * the reader stop either or both. The per-stream paths are still honoured because
+   * emails already sent contain them: arriving that way pre-selects the change and
+   * states it plainly, and the choices stay editable.
    */
   requested?: 'newsletter' | 'programs' | 'all'
 }
@@ -23,11 +23,11 @@ type Props = {
 const COPY = {
   newsletter: {
     label: 'Newsletter',
-    hint: 'Occasional news and updates from Ai4L.',
+    hint: 'Our regular newsletter: news, articles and updates from Ai4L.',
   },
   programs: {
     label: 'Courses and training',
-    hint: 'Invitations to courses, training and programmes.',
+    hint: 'Invitations to our courses, training and programmes, including new intakes and dates.',
   },
 } as const
 
@@ -92,6 +92,9 @@ export default function PreferencesForm({ token, initial, requested }: Props) {
   }
 
   const nothingLeft = saved !== null && !saved.newsletter && !saved.programs
+  // What is true on the server right now: the last save, or what the page loaded with.
+  const current = saved ?? initial
+  const receivingNothing = saved === null && !initial.newsletter && !initial.programs
 
   return (
     <>
@@ -106,6 +109,13 @@ export default function PreferencesForm({ token, initial, requested }: Props) {
       {error !== null && (
         <p className={styles.error} role="alert">
           {error}
+        </p>
+      )}
+
+      {receivingNothing && (
+        <p className={styles.lede} data-testid="receiving-nothing">
+          You are not receiving any email from us at the moment. Tick anything you would
+          like to start receiving again.
         </p>
       )}
 
@@ -126,6 +136,12 @@ export default function PreferencesForm({ token, initial, requested }: Props) {
             <span className={styles.choiceText}>
               <span className={styles.choiceLabel}>{COPY[stream].label}</span>
               <span className={styles.choiceHint}>{COPY[stream].hint}</span>
+              <span
+                className={current[stream] ? styles.choiceStatusOn : styles.choiceStatusOff}
+                data-testid={`current-${stream}`}
+              >
+                {current[stream] ? 'You currently receive these.' : 'You do not currently receive these.'}
+              </span>
             </span>
           </label>
         ))}

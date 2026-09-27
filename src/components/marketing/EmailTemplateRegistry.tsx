@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useState } from 'react'
 
-import type { CampaignTemplateRow } from '@/lib/db/types'
+import type { CampaignTemplateRow, ConsentStream } from '@/lib/db/types'
+import { CONSENT_STREAM_LABELS, parseConsentStream } from '@/lib/marketing/consentStream'
 
 import { describeAutomationCheck, type AutomationStatus } from './AutomationConnectionField'
 import styles from './marketing.module.css'
+import StreamPill from './StreamPill'
 
 /**
  * Names for EmailOctopus automations.
@@ -19,7 +21,7 @@ import styles from './marketing.module.css'
 
 type Template = Pick<
   CampaignTemplateRow,
-  'id' | 'name' | 'description' | 'provider_automation_id' | 'archived_at'
+  'id' | 'name' | 'description' | 'provider_automation_id' | 'consent_stream' | 'archived_at'
 >
 
 async function readError(response: Response): Promise<string> {
@@ -36,6 +38,8 @@ export default function EmailTemplateRegistry() {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [automationId, setAutomationId] = useState('')
+  // Never pre-selected: every campaign built on the template inherits it.
+  const [stream, setStream] = useState<ConsentStream | ''>('')
 
   const check = useCallback(async (ids: string[]) => {
     const wanted = [...new Set(ids.map((id) => id.trim()).filter((id) => id !== ''))]
@@ -118,7 +122,12 @@ export default function EmailTemplateRegistry() {
       const response = await fetch('/api/templates', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, description, providerAutomationId: automationId }),
+        body: JSON.stringify({
+          name,
+          description,
+          providerAutomationId: automationId,
+          consentStream: stream,
+        }),
       })
 
       if (!response.ok) throw new Error(await readError(response))
@@ -126,6 +135,7 @@ export default function EmailTemplateRegistry() {
       setName('')
       setDescription('')
       setAutomationId('')
+      setStream('')
       await load()
     } catch (createError) {
       setError(
@@ -225,6 +235,26 @@ export default function EmailTemplateRegistry() {
             </span>
           )}
         </label>
+
+        <label className={styles.field}>
+          <span className={styles.label}>Sends to</span>
+          <select
+            className={styles.input}
+            value={stream}
+            onChange={(event) => setStream(parseConsentStream(event.target.value) ?? '')}
+            data-testid="template-stream"
+          >
+            <option value="">Choose who this reaches…</option>
+            {(Object.keys(CONSENT_STREAM_LABELS) as ConsentStream[]).map((option) => (
+              <option key={option} value={option}>
+                {CONSENT_STREAM_LABELS[option]} subscribers
+              </option>
+            ))}
+          </select>
+          <span className={styles.fieldHint}>
+            Campaigns built on this template only reach contacts who agreed to this stream.
+          </span>
+        </label>
       </div>
 
       <div className={styles.templateActions}>
@@ -241,7 +271,7 @@ export default function EmailTemplateRegistry() {
           type="button"
           className={styles.primaryBtn}
           onClick={register}
-          disabled={!name.trim() || !automationId.trim() || busy !== null}
+          disabled={!name.trim() || !automationId.trim() || !stream || busy !== null}
           data-testid="create-template"
         >
           {busy === 'create' ? 'Saving…' : 'Register template'}
@@ -257,7 +287,13 @@ export default function EmailTemplateRegistry() {
           return (
             <li key={template.id} className={styles.campaignItem}>
               <div className={styles.campaignMain}>
-                <span className={styles.itemName}>{template.name}</span>
+                <span className={styles.itemName}>
+                  {template.name}{' '}
+                  <StreamPill
+                    stream={template.consent_stream}
+                    testId={`template-stream-${template.id}`}
+                  />
+                </span>
                 <span className={styles.itemMeta}>
                   {template.description ? `${template.description} · ` : ''}
                   {template.provider_automation_id}

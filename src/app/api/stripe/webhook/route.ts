@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import type Stripe from 'stripe'
 
+import { sendBookingPaidEmail } from '@/lib/booking/paidEmail'
 import { markBookingPaid } from '@/lib/booking/repository'
 import {
   completeIntegrationDelivery,
@@ -95,6 +96,25 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     if (!matched) {
       throw new Error('Checkout session matched no pending booking.')
+    }
+
+    // Only reached on the transition to 'paid', so each booking is emailed once.
+    // A delivery failure is logged, not rethrown: the booking is already paid, and a
+    // 500 would make Stripe retry into a markBookingPaid that no longer matches.
+    try {
+      const emailResult = await sendBookingPaidEmail(db, session, bookingId)
+
+      if (emailResult.status === 'skipped') {
+        console.warn('Booking confirmation email skipped', {
+          bookingId,
+          reason: emailResult.reason,
+        })
+      }
+    } catch (emailError) {
+      console.error('Booking confirmation email failed', {
+        bookingId,
+        message: emailError instanceof Error ? emailError.message : String(emailError),
+      })
     }
 
     await completeIntegrationDelivery(db, deliveryId, {

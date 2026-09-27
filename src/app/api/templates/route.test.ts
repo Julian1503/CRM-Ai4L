@@ -99,6 +99,7 @@ describe('/api/templates', () => {
         name: '  August free courses  ',
         description: ' The seasonal one. ',
         providerAutomationId: '  b690d44a-a0dd-11f1-9fa9-7381a1ee33bd  ',
+        consentStream: 'programs',
       })
 
       expect(response.status).toBe(200)
@@ -106,7 +107,16 @@ describe('/api/templates', () => {
         name: 'August free courses',
         description: 'The seasonal one.',
         provider_automation_id: 'b690d44a-a0dd-11f1-9fa9-7381a1ee33bd',
+        consent_stream: 'programs',
       })
+    })
+
+    it('requires the stream, since the template decides whose consent a campaign spends', async () => {
+      const response = await post({ name: 'August', providerAutomationId: 'a' })
+
+      expect(response.status).toBe(400)
+      expect((await response.json()).error).toMatch(/stream/i)
+      expect(mockCreateServerClient).not.toHaveBeenCalled()
     })
 
     it('starts every template on the built-in merge-field contract', async () => {
@@ -114,7 +124,7 @@ describe('/api/templates', () => {
       // ask the copywriter for tags the template does not merge.
       const builder = withBuilder({ data: TEMPLATE, error: null })
 
-      await post({ name: 'n', providerAutomationId: 'a' })
+      await post({ name: 'n', providerAutomationId: 'a', consentStream: 'newsletter' })
 
       expect(builder.argsFor('insert')?.[0]).toMatchObject({
         slots: BUILT_IN_TEMPLATE_SLOTS,
@@ -139,7 +149,7 @@ describe('/api/templates', () => {
       // The picker shows names; two identical ones make the choice a coin flip.
       withBuilder({ data: null, error: { code: '23505', message: 'duplicate key' } })
 
-      const response = await post({ name: 'August', providerAutomationId: 'a' })
+      const response = await post({ name: 'August', providerAutomationId: 'a', consentStream: 'newsletter' })
 
       expect(response.status).toBe(409)
       expect((await response.json()).error).toContain('August')
@@ -148,7 +158,7 @@ describe('/api/templates', () => {
     it('does not verify the id, so a slow provider cannot block a correct save', async () => {
       const builder = withBuilder({ data: TEMPLATE, error: null })
 
-      await post({ name: 'n', providerAutomationId: 'a' })
+      await post({ name: 'n', providerAutomationId: 'a', consentStream: 'newsletter' })
 
       // No provider round trip: verification is its own route, and its `unknown`
       // answer must never masquerade as "this name is wrong".

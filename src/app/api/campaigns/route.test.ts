@@ -29,10 +29,23 @@ function post(body: unknown) {
   )
 }
 
-function setup(result: unknown = { data: { id: 'camp-1' }, error: null }) {
+const TEMPLATE_ROW = {
+  id: 'tpl-1',
+  provider_automation_id: 'auto-from-template',
+  consent_stream: 'programs',
+  archived_at: null,
+}
+
+function setup(
+  result: unknown = { data: { id: 'camp-1' }, error: null },
+  templateResult: unknown = { data: TEMPLATE_ROW, error: null }
+) {
   const campaigns = createQueryBuilderMock(result)
-  mockCreateServerClient.mockResolvedValue(createDbMock(campaigns))
-  return { campaigns }
+  const templates = createQueryBuilderMock(templateResult)
+  mockCreateServerClient.mockResolvedValue(
+    createDbMock((table: string) => (table === 'campaign_templates' ? templates : campaigns))
+  )
+  return { campaigns, templates }
 }
 
 describe('/api/campaigns', () => {
@@ -117,6 +130,7 @@ describe('/api/campaigns', () => {
       name: ' August offer ',
       segmentId: 'seg-1',
       providerAutomationId: ' auto-1 ',
+      consentStream: 'newsletter',
       subject: ' Hello ',
     })
 
@@ -134,7 +148,7 @@ describe('/api/campaigns', () => {
     // means a hopeful client cannot even try.
     const { campaigns } = setup()
 
-    await post({ name: 'x', status: 'approved' })
+    await post({ name: 'x', consentStream: 'newsletter', status: 'approved' })
 
     const insert = campaigns.argsFor('insert') as [Record<string, unknown>]
     expect(insert[0]).not.toHaveProperty('status')
@@ -145,6 +159,7 @@ describe('/api/campaigns', () => {
 
     await post({
       name: 'x',
+      consentStream: 'newsletter',
       mergeFields: { Headline: 'Free consult', Bad: { nested: true }, Count: 5 },
     })
 
@@ -155,7 +170,7 @@ describe('/api/campaigns', () => {
   it('defaults merge fields to an empty object', async () => {
     const { campaigns } = setup()
 
-    await post({ name: 'x' })
+    await post({ name: 'x', consentStream: 'newsletter' })
 
     const insert = campaigns.argsFor('insert') as [Record<string, unknown>]
     expect(insert[0].merge_fields).toEqual({})
@@ -164,6 +179,95 @@ describe('/api/campaigns', () => {
   it('surfaces a creation failure', async () => {
     setup({ data: null, error: { message: 'denied' } })
 
-    expect((await post({ name: 'x' })).status).toBe(500)
+    expect((await post({ name: 'x', consentStream: 'newsletter' })).status).toBe(500)
+  })
+
+  it('filters the listing by stream when asked', async () => {
+    const { campaigns } = setup({ data: [], error: null, count: 0 })
+
+    await get('?stream=programs')
+
+    expect(campaigns.allFor('eq').map((call) => call.args)).toContainEqual([
+      'consent_stream',
+      'programs',
+    ])
+  })
+
+  it('ignores an unrecognised stream filter rather than returning nothing', async () => {
+    const { campaigns } = setup({ data: [], error: null, count: 0 })
+
+    await get('?stream=courses')
+
+    expect(campaigns.allFor('eq')).toHaveLength(0)
+  })
+
+  it('filters the listing by status when asked', async () => {
+    const { campaigns } = setup({ data: [], error: null, count: 0 })
+
+    await get('?status=in_review')
+
+    expect(campaigns.allFor('eq').map((call) => call.args)).toContainEqual([
+      'status',
+      'in_review',
+    ])
+  })
+
+  describe('stream', () => {
+    it('takes the stream and automation from the chosen template', async () => {
+      const { campaigns, templates } = setup()
+
+      const response = await post({
+        name: 'Course invite',
+        templateId: 'tpl-1',
+        // Both ignored: the template is the authority, so a stale or hostile client
+        // cannot pair a course template with the newsletter audience.
+        providerAutomationId: 'something-else',
+        consentStream: 'newsletter',
+      })
+
+      expect(response.status).toBe(200)
+      expect(templates.argsFor('eq')).toEqual(['id', 'tpl-1'])
+      expect((campaigns.argsFor('insert') as [Record<string, unknown>])[0]).toMatchObject({
+        template_id: 'tpl-1',
+        provider_automation_id: 'auto-from-template',
+        consent_stream: 'programs',
+      })
+    })
+
+    it('refuses a template that does not exist', async () => {
+      const { campaigns } = setup(undefined, { data: null, error: null })
+
+      const response = await post({ name: 'x', templateId: 'missing' })
+
+      expect(response.status).toBe(400)
+      expect(campaigns.argsFor('insert')).toBeUndefined()
+    })
+
+    it('refuses an archived template', async () => {
+      setup(undefined, { data: { ...TEMPLATE_ROW, archived_at: '2026-09-01T00:00:00Z' }, error: null })
+
+      expect((await post({ name: 'x', templateId: 'tpl-1' })).status).toBe(400)
+    })
+
+    it('requires an explicit stream when no template is chosen', async () => {
+      // The old fallback silently filed every campaign under the newsletter.
+      const { campaigns } = setup()
+
+      const response = await post({ name: 'x', providerAutomationId: 'auto-1' })
+
+      expect(response.status).toBe(400)
+      expect(campaigns.argsFor('insert')).toBeUndefined()
+    })
+
+    it('stores the stream named for a hand-entered automation', async () => {
+      const { campaigns } = setup()
+
+      await post({ name: 'x', providerAutomationId: 'auto-1', consentStream: 'programs' })
+
+      expect((campaigns.argsFor('insert') as [Record<string, unknown>])[0]).toMatchObject({
+        template_id: null,
+        consent_stream: 'programs',
+      })
+    })
   })
 })

@@ -30,7 +30,7 @@ import { gsap } from 'gsap';
 import { useGSAP } from '@gsap/react';
 
 import { prefersReducedMotion } from '@/lib/motion';
-import Sidebar, { ActiveView } from '@/components/Sidebar';
+import Sidebar, { ACTIVE_VIEWS, ActiveView } from '@/components/Sidebar';
 import DashboardStats from '@/components/DashboardStats';
 import ContactTable, { TableContact } from '@/components/ContactTable';
 import ContactDrawer from '@/components/ContactDrawer';
@@ -46,6 +46,7 @@ import { importContacts } from '@/lib/contacts/import';
 import FilterBar, { type StatusFilter } from '@/components/contacts/FilterBar';
 import MarketingView from '@/components/marketing/MarketingView';
 import EmailTemplateRegistry from '@/components/marketing/EmailTemplateRegistry';
+import NewsletterSchedules from '@/components/marketing/NewsletterSchedules';
 import ArchiveView from '@/components/contacts/ArchiveView';
 import BookingsView from '@/components/bookings/BookingsView';
 import OperationsPanel from '@/components/operations/OperationsPanel';
@@ -194,7 +195,37 @@ const CRM_FIELDS: { key: CrmFieldKey; label: string; description: string }[] = [
 
 export default function App() {
   const [currentView, setCurrentView] = useState<ActiveView>('contacts');
+  const [awaitingApproval, setAwaitingApproval] = useState(0);
   const mainContentRef = useRef<HTMLElement>(null);
+
+  // `?view=campaigns` opens that workspace directly — it is where the newsletter review
+  // email links. Read once on mount; the tabs are not otherwise kept in the URL.
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get('view');
+
+    if (requested && (ACTIVE_VIEWS as readonly string[]).includes(requested)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setCurrentView(requested as ActiveView);
+    }
+  }, []);
+
+  // Campaigns waiting for approval, for the sidebar badge. Re-read on every tab change
+  // so approving one and moving on clears it. A failure leaves the last count: the badge
+  // is a nudge, and an error here must not disturb the rest of the dashboard.
+  useEffect(() => {
+    let cancelled = false;
+
+    fetch('/api/campaigns?status=in_review&pageSize=1')
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body) => {
+        if (!cancelled && body && typeof body.total === 'number') setAwaitingApproval(body.total);
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentView]);
 
   useGSAP(() => {
     // Decorative entrance only. Skipping it leaves the panes at their final rendered
@@ -1002,7 +1033,11 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
       <div className={styles.ambientBlur3} />
       
       {/* Navigation Sidebar */}
-      <Sidebar currentView={currentView} onViewChange={setCurrentView} />
+      <Sidebar
+        currentView={currentView}
+        onViewChange={setCurrentView}
+        badges={{ campaigns: awaitingApproval }}
+      />
 
       {/* Main View Area */}
       <main ref={mainContentRef} className={styles.mainContent}>
@@ -1156,6 +1191,7 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
             </header>
 
             <MarketingView jobTypes={jobTypes} />
+            <NewsletterSchedules />
           </>
         )}
 

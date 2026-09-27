@@ -113,4 +113,47 @@ describe('PreferencesForm', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/Could not save/i)
     expect(screen.queryByTestId('preferences-saved')).not.toBeInTheDocument()
   })
+
+  describe('one link, every choice', () => {
+    it('says which emails the reader receives right now', () => {
+      // Every email carries a single link, so the page has to do the explaining: the
+      // reader cannot choose sensibly without knowing what they are currently getting.
+      setup({ initial: { newsletter: true, programs: false } })
+
+      expect(screen.getByTestId('current-newsletter')).toHaveTextContent(/currently receive/i)
+      expect(screen.getByTestId('current-programs')).toHaveTextContent(/not currently/i)
+    })
+
+    it('describes what each stream actually contains', () => {
+      setup()
+
+      expect(screen.getByText(/news, articles and updates/i)).toBeInTheDocument()
+      expect(screen.getByText(/courses, training and programmes/i)).toBeInTheDocument()
+    })
+
+    it('offers stopping one stream, the other, or both from the same page', () => {
+      setup()
+
+      expect(screen.getByTestId('consent-newsletter')).toBeEnabled()
+      expect(screen.getByTestId('consent-programs')).toBeEnabled()
+      expect(screen.getByTestId('unsubscribe-all')).toBeEnabled()
+    })
+
+    it('stops only the course emails when that is the one unticked', async () => {
+      setup()
+
+      fireEvent.click(screen.getByTestId('consent-programs'))
+      fireEvent.click(screen.getByTestId('save-preferences'))
+
+      await waitFor(() => expect(postedBody()).toEqual({ newsletter: true, programs: false }))
+    })
+
+    it('tells a reader who receives nothing that nothing is being sent', () => {
+      setup({ initial: { newsletter: false, programs: false } })
+
+      expect(screen.getByTestId('receiving-nothing')).toHaveTextContent(
+        /not receiving any email/i
+      )
+    })
+  })
 })

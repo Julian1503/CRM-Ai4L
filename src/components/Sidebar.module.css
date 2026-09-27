@@ -115,6 +115,29 @@
   transition: transform var(--transition-spring), color var(--transition-fast);
 }
 
+.iconContainer {
+  position: relative;
+}
+
+/* Attention count, pinned to the icon so it survives the collapsed sidebar and the
+   mobile tab bar, where the label is hidden. */
+.badge {
+  position: absolute;
+  top: -0.45rem;
+  right: -0.6rem;
+  min-width: 1.05rem;
+  height: 1.05rem;
+  padding: 0 0.25rem;
+  font-size: 0.625rem;
+  font-weight: 700;
+  line-height: 1.05rem;
+  text-align: center;
+  color: #fff;
+  background: var(--accent);
+  border-radius: 999px;
+  box-shadow: 0 0 0 2px var(--bg-card);
+}
+
 .activeItem .iconContainer {
   color: var(--primary);
   transform: scale(1.1);

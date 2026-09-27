@@ -45,6 +45,14 @@ export const WEBHOOK_PATHS = [
   '/api/calendly/webhook',
 ] as const
 
+/**
+ * Scheduled jobs. Called by Vercel Cron, which carries no session; each route checks
+ * `Authorization: Bearer $CRON_SECRET` itself and fails closed without it.
+ *
+ * Exact allowlist, fail-closed, for the same reasons as WEBHOOK_PATHS.
+ */
+export const CRON_PATHS = ['/api/cron/newsletters'] as const
+
 function normalise(pathname: string): string {
   // Treat '/x/' and '/x' identically, but keep the root as '/'.
   return pathname.length > 1 && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname
@@ -62,6 +70,13 @@ export function isWebhookPath(pathname: string): boolean {
   const path = normalise(pathname)
 
   return WEBHOOK_PATHS.some((webhookPath) => path === webhookPath)
+}
+
+/** True only for an exact scheduled-job endpoint. */
+export function isCronPath(pathname: string): boolean {
+  const path = normalise(pathname)
+
+  return CRON_PATHS.some((cronPath) => path === cronPath)
 }
 
 /** True for API routes, which should receive a 401 rather than a redirect. */

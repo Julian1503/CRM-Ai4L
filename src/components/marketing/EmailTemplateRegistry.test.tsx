@@ -14,6 +14,7 @@ const TEMPLATE = {
   name: 'August free courses',
   description: 'Seasonal offer',
   provider_automation_id: 'auto-1',
+  consent_stream: 'newsletter',
   archived_at: null,
 }
 
@@ -127,6 +128,7 @@ describe('EmailTemplateRegistry', () => {
     fireEvent.change(screen.getByTestId('template-automation'), {
       target: { value: 'auto-9' },
     })
+    fireEvent.change(screen.getByTestId('template-stream'), { target: { value: 'programs' } })
     fireEvent.click(screen.getByTestId('create-template'))
 
     await waitFor(() =>
@@ -134,6 +136,7 @@ describe('EmailTemplateRegistry', () => {
         name: 'September intake',
         description: 'Second semester',
         providerAutomationId: 'auto-9',
+        consentStream: 'programs',
       })
     )
   })
@@ -148,7 +151,26 @@ describe('EmailTemplateRegistry', () => {
     expect(create).toBeDisabled()
 
     fireEvent.change(screen.getByTestId('template-automation'), { target: { value: 'auto-9' } })
+    // Still disabled: the stream is never pre-selected, because every campaign built on
+    // the template inherits it and a default is a guess made on the operator's behalf.
+    expect(create).toBeDisabled()
+
+    fireEvent.change(screen.getByTestId('template-stream'), { target: { value: 'newsletter' } })
     expect(create).not.toBeDisabled()
+  })
+
+  it('shows which stream each template sends to', async () => {
+    routeFetch({
+      ...defaultHandlers,
+      'GET /api/templates': jsonResponse({
+        templates: [TEMPLATE, { ...TEMPLATE, id: 't2', name: 'Course invite', consent_stream: 'programs' }],
+      }),
+    })
+
+    render(<EmailTemplateRegistry />)
+
+    expect(await screen.findByTestId('template-stream-t1')).toHaveTextContent('Newsletter')
+    expect(screen.getByTestId('template-stream-t2')).toHaveTextContent('Courses & training')
   })
 
   it('reports a duplicate name instead of silently doing nothing', async () => {
@@ -165,6 +187,7 @@ describe('EmailTemplateRegistry', () => {
 
     fireEvent.change(await screen.findByTestId('template-name'), { target: { value: 'August' } })
     fireEvent.change(screen.getByTestId('template-automation'), { target: { value: 'a' } })
+    fireEvent.change(screen.getByTestId('template-stream'), { target: { value: 'newsletter' } })
     fireEvent.click(screen.getByTestId('create-template'))
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/already exists/)

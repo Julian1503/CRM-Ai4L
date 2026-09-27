@@ -7,14 +7,21 @@ import { useGSAP } from '@gsap/react';
 
 import { prefersReducedMotion } from '@/lib/motion';
 
-export type ActiveView = 'contacts' | 'archive' | 'campaigns' | 'bookings' | 'imports' | 'integrations' | 'settings';
+export const ACTIVE_VIEWS = ['contacts', 'archive', 'campaigns', 'bookings', 'imports', 'integrations', 'settings'] as const;
+
+export type ActiveView = (typeof ACTIVE_VIEWS)[number];
 
 interface SidebarProps {
   currentView: ActiveView;
   onViewChange: (view: ActiveView) => void;
+  /** Counts that need someone's attention, e.g. campaigns waiting for approval. */
+  badges?: Partial<Record<ActiveView, number>>;
 }
 
-export default function Sidebar({ currentView, onViewChange }: SidebarProps) {
+/** Past this a count stops being information and starts breaking the pill. */
+const BADGE_CAP = 99;
+
+export default function Sidebar({ currentView, onViewChange, badges = {} }: SidebarProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -288,6 +295,15 @@ export default function Sidebar({ currentView, onViewChange }: SidebarProps) {
             >
               <div className={styles.iconContainer}>
                 {item.icon}
+                {(badges[item.id] ?? 0) > 0 && (
+                  <span
+                    className={styles.badge}
+                    data-testid={`nav-badge-${item.id}`}
+                    aria-label={`${badges[item.id]} waiting for approval`}
+                  >
+                    {(badges[item.id] ?? 0) > BADGE_CAP ? `${BADGE_CAP}+` : badges[item.id]}
+                  </span>
+                )}
               </div>
               <span className={styles.desktopLabel}>{item.label}</span>
               <span className={styles.mobileLabel}>

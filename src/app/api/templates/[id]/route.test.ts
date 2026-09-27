@@ -64,6 +64,21 @@ describe('PATCH /api/templates/[id]', () => {
     })
   })
 
+  it('moves a template to the other stream', async () => {
+    const builder = withBuilder({ data: { id: 't1' }, error: null })
+
+    await patch({ consentStream: 'programs' })
+
+    expect(builder.argsFor('update')?.[0]).toMatchObject({ consent_stream: 'programs' })
+  })
+
+  it('refuses a stream it does not recognise instead of guessing', async () => {
+    const response = await patch({ consentStream: 'courses' })
+
+    expect(response.status).toBe(400)
+    expect(mockCreateServerClient).not.toHaveBeenCalled()
+  })
+
   it('archives and un-archives rather than deleting', async () => {
     // A sent campaign still points at its template; deleting the row would leave its
     // copy uninterpretable, which is why the table grants no delete policy.

@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 
 import { badRequest, ok, readJsonBody, requireSessionOr401, serverError } from '@/lib/api/responses'
+import { parseConsentStream } from '@/lib/marketing/consentStream'
 import { BUILT_IN_TEMPLATE_SLOTS } from '@/lib/marketing/templates'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 
@@ -76,6 +77,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return badRequest('An EmailOctopus automation ID is required.')
   }
 
+  // Required rather than defaulted: every campaign built on this template inherits it,
+  // so a silent default would misfile a course template under the newsletter.
+  const consentStream = parseConsentStream(body.consentStream)
+
+  if (!consentStream) {
+    return badRequest('Choose which consent stream this template sends to.')
+  }
+
   try {
     const db = await createSupabaseServerClient()
 
@@ -85,6 +94,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         name,
         description: typeof body.description === 'string' ? body.description.trim() || null : null,
         provider_automation_id: automationId,
+        consent_stream: consentStream,
         // Registering a name does not yet mean designing a new slot set; every
         // template starts on the contract the copy generator already writes for.
         slots: BUILT_IN_TEMPLATE_SLOTS,

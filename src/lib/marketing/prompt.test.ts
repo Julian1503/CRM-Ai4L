@@ -110,6 +110,15 @@ describe('buildUserPrompt', () => {
     expect(buildUserPrompt(brief())).toContain('subscribed to the newsletter')
   })
 
+  test('names course consent for a programs campaign, not the newsletter', () => {
+    // Telling the model a course audience subscribed to the newsletter invites copy
+    // that implies a relationship the reader never agreed to.
+    const prompt = buildUserPrompt(brief({ consentStream: 'programs' }))
+
+    expect(prompt).toContain('opted in to emails about courses and training')
+    expect(prompt).not.toContain('subscribed to the newsletter')
+  })
+
   test('redacts an email address hiding in a segment search term', () => {
     const prompt = buildUserPrompt(
       brief({
@@ -168,3 +177,57 @@ describe('buildRetryPrompt', () => {
     expect(buildRetryPrompt(['too long'])).toContain('not by truncating')
   })
 })
+
+describe('buildUserPrompt — scheduled newsletter brief', () => {
+  const schedule = {
+    goal: 'Keep training managers up to date on AI tools',
+    tone: 'Warm and practical',
+    topic: { title: 'AI note-taking in meetings', details: 'Cover privacy settings' },
+    cta: 'Book a free consultation',
+    mustInclude: 'Next intake starts 3 November',
+    avoid: 'Hype, and the word "revolutionary"',
+    recentSubjects: ['Five AI tools for trainers', 'What changed in September'],
+  }
+
+  test('carries every part of the brief the operator wrote', () => {
+    const prompt = buildUserPrompt(brief({ schedule }))
+
+    expect(prompt).toContain('NEWSLETTER BRIEF')
+    expect(prompt).toContain('Goal: Keep training managers up to date on AI tools')
+    expect(prompt).toContain('Tone: Warm and practical')
+    expect(prompt).toContain('Topic: AI note-taking in meetings')
+    expect(prompt).toContain('Cover privacy settings')
+    expect(prompt).toContain('Call to action: Book a free consultation')
+    expect(prompt).toContain('Must include: Next intake starts 3 November')
+    expect(prompt).toContain('Avoid: Hype')
+  })
+
+  test('lists recent subjects so the issue does not repeat them', () => {
+    const prompt = buildUserPrompt(brief({ schedule }))
+
+    expect(prompt).toContain('- Five AI tools for trainers')
+    expect(prompt).toMatch(/do not repeat/i)
+  })
+
+  test('asks for a fresh angle when the topic queue is empty', () => {
+    const prompt = buildUserPrompt(
+      brief({ schedule: { goal: 'Stay in touch', recentSubjects: [] } })
+    )
+
+    expect(prompt).not.toContain('Topic:')
+    expect(prompt).toMatch(/choose a fresh topic/i)
+  })
+
+  test('redacts contact details an operator pasted into the brief', () => {
+    const prompt = buildUserPrompt(
+      brief({ schedule: { goal: 'Reply to jane@example.com', recentSubjects: [] } })
+    )
+
+    expect(prompt).not.toContain('jane@example.com')
+  })
+
+  test('adds nothing for a hand-made campaign', () => {
+    expect(buildUserPrompt(brief())).not.toContain('NEWSLETTER BRIEF')
+  })
+})
+

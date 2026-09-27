@@ -1,3 +1,5 @@
+import type { ConsentStream } from '@/lib/db/types'
+
 import { CAMPAIGN_COPY_FIELDS } from './mergeFields'
 
 /**
@@ -50,7 +52,7 @@ discount that expires.`
 export const COMPLIANCE_REQUIREMENT = `This is a commercial electronic message under the
 Australian Spam Act 2003. Do not claim the reader requested this, do not reference a
 prior conversation, purchase or relationship that has not been established, and do not
-imply consent beyond a newsletter subscription.`
+imply consent beyond what the AUDIENCE section says the readers opted in to.`
 
 export type AudienceBrief = {
   /** Segment name, as the operator wrote it. */
@@ -72,6 +74,65 @@ export type CampaignBrief = {
   notes?: string | null
   /** Overrides `DEFAULT_BRAND_VOICE` when the client has tuned it. */
   brandVoice?: string | null
+  /** Which consent the audience holds. Defaults to the newsletter. */
+  consentStream?: ConsentStream
+  /** Present only for an issue drafted by a newsletter schedule. */
+  schedule?: ScheduleBrief
+}
+
+/**
+ * What an operator wrote on a newsletter schedule, plus the recent subjects the runner
+ * looked up. Everything but the goal is optional; all of it is redacted before use.
+ */
+export type ScheduleBrief = {
+  goal: string
+  tone?: string | null
+  /** The next unused topic in the queue, or absent when the queue is empty. */
+  topic?: { title: string; details?: string | null } | null
+  cta?: string | null
+  mustInclude?: string | null
+  avoid?: string | null
+  /** Subjects of this schedule's latest issues, newest first. */
+  recentSubjects: string[]
+}
+
+function scheduleLines(schedule: ScheduleBrief): string[] {
+  const lines = ['', 'NEWSLETTER BRIEF', `- Goal: ${redactPii(schedule.goal.trim())}`]
+  const optional: Array<[string, string | null | undefined]> = [
+    ['Tone', schedule.tone],
+    ['Call to action', schedule.cta],
+    ['Must include', schedule.mustInclude],
+    ['Avoid', schedule.avoid],
+  ]
+
+  if (schedule.topic?.title.trim()) {
+    lines.push(`- Topic: ${redactPii(schedule.topic.title.trim())}`)
+
+    if (schedule.topic.details?.trim()) {
+      lines.push(`  ${redactPii(schedule.topic.details.trim())}`)
+    }
+  } else {
+    lines.push('- No topic queued: choose a fresh topic that serves the goal.')
+  }
+
+  for (const [label, value] of optional) {
+    if (value?.trim()) lines.push(`- ${label}: ${redactPii(value.trim())}`)
+  }
+
+  if (schedule.recentSubjects.length > 0) {
+    lines.push('', 'RECENT ISSUES (do not repeat these subjects or angles)')
+    for (const subject of schedule.recentSubjects) {
+      lines.push(`- ${redactPii(subject)}`)
+    }
+  }
+
+  return lines
+}
+
+/** What each stream's audience actually agreed to, in the words the model is given. */
+const CONSENT_DESCRIPTION: Record<ConsentStream, string> = {
+  newsletter: 'all subscribed to the newsletter',
+  programs: 'all opted in to emails about courses and training',
 }
 
 const EMAIL_PATTERN = /[\w.+-]+@[\w-]+\.[\w.-]+/g
@@ -139,7 +200,7 @@ export function buildUserPrompt(brief: CampaignBrief): string {
     '',
     'AUDIENCE',
     `- Segment: ${redactPii(audience.segmentName)}`,
-    `- Size: ${audience.size} contacts, all subscribed to the newsletter`,
+    `- Size: ${audience.size} contacts, ${CONSENT_DESCRIPTION[brief.consentStream ?? 'newsletter']}`,
   ]
 
   if (audience.segmentDescription?.trim()) {
@@ -160,6 +221,10 @@ export function buildUserPrompt(brief: CampaignBrief): string {
 
   if (brief.notes?.trim()) {
     lines.push('', 'CAMPAIGN NOTES', redactPii(brief.notes.trim()))
+  }
+
+  if (brief.schedule) {
+    lines.push(...scheduleLines(brief.schedule))
   }
 
   lines.push(

@@ -11,12 +11,14 @@ const TEMPLATES: TemplateOption[] = [
     name: 'August free courses',
     description: null,
     provider_automation_id: 'auto-1',
+    consent_stream: 'newsletter',
   },
   {
     id: 't2',
     name: 'Welcome sequence',
     description: null,
     provider_automation_id: 'auto-2',
+    consent_stream: 'newsletter',
   },
 ]
 
@@ -123,7 +125,7 @@ describe('AutomationConnectionField', () => {
 
   it('ignores a template with no automation id, which cannot send', () => {
     renderField({
-      templates: [{ id: 't3', name: 'Half-registered', description: null, provider_automation_id: null }],
+      templates: [{ id: 't3', name: 'Half-registered', description: null, provider_automation_id: null, consent_stream: 'newsletter' }],
     })
 
     expect(screen.queryByRole('option', { name: 'Half-registered' })).not.toBeInTheDocument()

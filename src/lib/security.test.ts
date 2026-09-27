@@ -4,7 +4,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 
-import { PUBLIC_PATHS, WEBHOOK_PATHS } from '@/lib/auth/routes'
+import { CRON_PATHS, PUBLIC_PATHS, WEBHOOK_PATHS } from '@/lib/auth/routes'
 
 /**
  * Structural security invariants.
@@ -59,6 +59,16 @@ function isWebhookRoute(route: RouteFile): boolean {
   return (WEBHOOK_PATHS as readonly string[]).includes(route.urlPath)
 }
 
+/** True when the route is a documented scheduled-job endpoint. */
+function isCronRoute(route: RouteFile): boolean {
+  return (CRON_PATHS as readonly string[]).includes(route.urlPath)
+}
+
+/** A cron route's only gate: the shared secret, compared in constant time. */
+function verifiesCronSecret(route: RouteFile): boolean {
+  return /process\.env\.CRON_SECRET/.test(route.content) && /timingSafeEqual\s*\(/.test(route.content)
+}
+
 /** True when the route is a documented public endpoint. */
 function isPublicRoute(route: RouteFile): boolean {
   return (PUBLIC_PATHS as readonly string[]).some(
@@ -82,10 +92,12 @@ describe('API route authentication', () => {
   it.each(routeFiles.map((route) => [route.urlPath, route] as const))(
     '%s authenticates its caller',
     (_path, route) => {
-      // Exactly one of three must hold: a session check, a webhook signature check,
-      // or membership of the documented public allowlist.
+      // Exactly one of four must hold: a session check, a webhook signature check, a
+      // cron secret check, or membership of the documented public allowlist.
       const authenticated =
-        checksSession(route) || (isWebhookRoute(route) && verifiesSignature(route))
+        checksSession(route) ||
+        (isWebhookRoute(route) && verifiesSignature(route)) ||
+        (isCronRoute(route) && verifiesCronSecret(route))
 
       expect(authenticated || isPublicRoute(route)).toBe(true)
     }
@@ -112,6 +124,16 @@ describe('API route authentication', () => {
     expect(route.content).toMatch(/await\s+request\.text\(\)/)
   })
 
+  it.each(
+    routeFiles
+      .filter((route) => isCronRoute(route))
+      .map((route) => [route.urlPath, route] as const)
+  )('%s checks CRON_SECRET, since it has no session', (_path, route) => {
+    // Exempt from the session gate and writing with the service-role key: without the
+    // secret check anyone could trigger it.
+    expect(verifiesCronSecret(route)).toBe(true)
+  })
+
   it('keeps the public API surface small and deliberate', () => {
     const publicRoutes = routeFiles.filter(
       (route) => isPublicRoute(route) && !checksSession(route)
@@ -133,12 +155,12 @@ describe('API route authentication', () => {
 describe('service-role usage', () => {
   const adminUsers = routeFiles.filter((route) => route.content.includes('getAdminClient'))
 
-  it('is confined to webhooks and documented public routes', () => {
+  it('is confined to webhooks, scheduled jobs and documented public routes', () => {
     // The service-role client bypasses Row Level Security entirely. Anything acting on
     // behalf of a signed-in user must go through the session-bound client so RLS still
-    // applies.
+    // applies. Scheduled jobs have no user, like webhooks.
     const offenders = adminUsers
-      .filter((route) => !isWebhookRoute(route) && !isPublicRoute(route))
+      .filter((route) => !isWebhookRoute(route) && !isCronRoute(route) && !isPublicRoute(route))
       .map((route) => route.urlPath)
 
     expect(offenders).toEqual([])
