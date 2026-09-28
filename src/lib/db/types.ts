@@ -1,11 +1,10 @@
 // Database types for the CRM schema.
 //
-// Hand-written to match supabase/migrations as of 20260901000000. Regenerate from the
-// live schema once the migration is applied:
+// Hand-written to match supabase/migrations as of 20261001030000.
 //
-//   npm run db:types
-//
-// which runs: supabase gen types typescript --project-id <ref> --schema public
+// `npm run db:types` (supabase gen types) would overwrite this file with the generated
+// shape, which exports no row aliases (ContactRow, SegmentRow, ...) that the whole app
+// imports. Keep it hand-written, and add columns here when a migration adds them.
 //
 // Excluded from coverage (see jest.config.ts) — types only, no runtime behaviour.
 

@@ -41,7 +41,7 @@ const publicProjects = browserDefinitions.map(({ name, device }) => ({
 
 const authenticatedProjects = browserDefinitions.map(({ name, device }) => ({
   name: `authenticated-${name}`,
-  testMatch: /smoke\.spec\.ts/,
+  testMatch: /(smoke|archive)\.spec\.ts/,
   grepInvert: SIGN_OUT_TEST,
   dependencies: hasCredentials ? ['auth-setup'] : [],
   use: {
@@ -103,7 +103,7 @@ export default defineConfig({
       ? [
           {
             name: 'authenticated-sign-out',
-            testMatch: /smoke\.spec\.ts/,
+            testMatch: /(smoke|archive)\.spec\.ts/,
             grep: SIGN_OUT_TEST,
             dependencies: browserDefinitions.map(({ name }) => `authenticated-${name}`),
             use: {
