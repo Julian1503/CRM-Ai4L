@@ -131,10 +131,12 @@ begin
   set used_at = now(), campaign_id = v_campaign_id
   where id = v_topic_id;
 
+  -- Topics used to be deletable while unused. Since 20261001000000 removing one is a
+  -- soft delete, a CHECK keeps a used topic from being removed, and no delete policy
+  -- remains (see verify_20261001000000.sql).
   assert (select count(*) from pg_policies
-          where schemaname='public' and tablename='newsletter_topics'
-            and cmd='DELETE' and qual like '%used_at IS NULL%') = 1,
-         'deleting topics must be limited to unused ones';
+          where schemaname='public' and tablename='newsletter_topics' and cmd='DELETE') = 0,
+         'topics must not be physically deletable';
 
   raise notice 'All newsletter schedule checks passed.';
 end $$;

@@ -209,14 +209,18 @@ begin
     {"email":"revive__p0verify@example.com","first_name":"New","last_name":"Record"}
   ]$json$::jsonb) into v_result;
 
-  assert (v_result->>'inserted')::int = 1,
-         'importing an archived email should create a new live row';
+  -- Since 20260901010000 the address is held back and reported, not duplicated: the
+  -- archived contact can still be restored, and a second live record would split its
+  -- history. (20261001000000 lets a *removed* contact's address through; see
+  -- verify_20261001000000.sql.)
+  assert (v_result->>'inserted')::int = 0 and (v_result->>'archived_collisions')::int = 1,
+         'importing an archived email should be held back as a collision';
   assert (select count(*) from public.contacts
           where email='revive__p0verify@example.com' and deleted_at is not null) = 1,
          'the archived row must stay archived';
   assert (select count(*) from public.active_contacts
-          where email='revive__p0verify@example.com') = 1,
-         'exactly one live row expected after importing an archived email';
+          where email='revive__p0verify@example.com') = 0,
+         'no live row expected after importing an archived email';
 
   ----------------------------------------------------------------------------
   raise notice '13. organisation names are unique case-insensitively';

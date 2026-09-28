@@ -5,7 +5,9 @@ import React, { useCallback, useEffect, useState } from 'react'
 import type { ConsentStream } from '@/lib/db/types'
 import { CONSENT_STREAM_LABELS, parseConsentStream } from '@/lib/marketing/consentStream'
 
+import LifecycleActions from '@/components/ui/LifecycleActions'
 import Pagination from '@/components/ui/Pagination'
+import { campaignLifecycle } from '@/lib/lifecycle/entityLifecycle'
 
 import AudienceModal, { type Audience } from './AudienceModal'
 import AutomationConnectionField, {
@@ -1027,6 +1029,18 @@ You will approve it again before anything leaves, and EmailOctopus only delivers
                     </button>
                   </>
                 )}
+                <div className={styles.campaignLifecycle}>
+                  <LifecycleActions
+                    endpoint={`/api/campaigns/${campaign.id}`}
+                    noun="campaign"
+                    name={campaign.name}
+                    archived={false}
+                    // The list only holds live campaigns, so only the status can block.
+                    lifecycle={campaignLifecycle({ status: campaign.status, archived_at: null, removed_at: null })}
+                    onChanged={load}
+                    testId={`campaign-${campaign.id}`}
+                  />
+                </div>
               </div>
 
               {COPY_EDITABLE_STATUSES.has(campaign.status) && (

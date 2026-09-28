@@ -237,6 +237,10 @@ async function changeLifecycle(id: string, action: LifecycleAction, userId: stri
 
     // Restoring a draft whose segment has since been archived, or a race the trigger caught.
     if (isArchiveRuleError(error)) return conflict(error?.message ?? 'The campaign cannot change right now.')
+    // Restoring a scheduled issue whose date has been drafted again since.
+    if (error?.code === '23505') {
+      return conflict('Another issue of this newsletter already exists for the same date. Archive that one first.')
+    }
     if (error) throw new Error(error.message)
     if (!data) return conflict('This campaign changed while you were looking at it. Reload and try again.')
 

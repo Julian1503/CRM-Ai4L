@@ -73,8 +73,9 @@ export function applyContactFilters<T extends Filterable>(
   let result: Filterable = query
 
   if (filters.includeArchived) {
-    // The archive screen shows archived contacts *only*, not everything.
-    result = result.not('deleted_at', 'is', null)
+    // The archive screen shows archived contacts *only*, not everything — and never a
+    // removed one, which is gone from the application for good.
+    result = result.not('deleted_at', 'is', null).is('removed_at', null)
   }
 
   if (filters.ids !== null) {
@@ -348,7 +349,7 @@ export async function archiveContact(
   }
 }
 
-/** Restores an archived contact. */
+/** Restores an archived contact. A removed one is final and is left alone. */
 export async function restoreContact(
   db: SupabaseClient<Database>,
   id: string
@@ -358,6 +359,7 @@ export async function restoreContact(
     .update({ deleted_at: null, status: 'prospect' })
     .eq('id', id)
     .not('deleted_at', 'is', null)
+    .is('removed_at', null)
 
   if (error) {
     // contacts_email_active_idx only covers live rows, so restoring a contact whose

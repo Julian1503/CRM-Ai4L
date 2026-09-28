@@ -87,7 +87,7 @@ describe('PATCH /api/newsletter-schedules/[id]', () => {
   it('answers 409 when restoring a schedule whose segment was archived meanwhile', async () => {
     const tables = setup()
     tables.newsletter_schedules = createQueryBuilderMock([
-      { data: EXISTING, error: null },
+      { data: { id: 's1', name: 'Monthly', archived_at: '2026-09-01T00:00:00.000Z', removed_at: null }, error: null },
       { data: null, error: { code: 'CRM01', message: 'Segment is archived. Choose another segment or restore it first.' } },
     ])
 
@@ -95,6 +95,25 @@ describe('PATCH /api/newsletter-schedules/[id]', () => {
 
     expect(response.status).toBe(409)
     expect((await response.json()).error).toContain('Segment is archived')
+  })
+
+  it('removes a schedule by hiding it, recording who', async () => {
+    const tables = setup({ id: 's1', name: 'Monthly', archived_at: null, removed_at: null })
+
+    expect((await patch({ removed: true })).status).toBe(200)
+    expect(tables.newsletter_schedules.argsFor('update')?.[0]).toMatchObject({
+      archived_at: expect.any(String),
+      removed_at: expect.any(String),
+      removed_by: 'u1',
+    })
+  })
+
+  it('treats a removed schedule as not found, for edits too', async () => {
+    setup({ ...EXISTING, removed_at: '2026-09-02T00:00:00.000Z' })
+    expect((await patch({ tone: 'Plain' })).status).toBe(404)
+
+    setup({ id: 's1', name: 'Monthly', archived_at: 'a', removed_at: 'b' })
+    expect((await patch({ archived: false })).status).toBe(404)
   })
 
   it('answers 404 for an unknown schedule', async () => {

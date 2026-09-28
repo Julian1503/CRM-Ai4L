@@ -273,6 +273,7 @@ async function nextTopic(db: Db, scheduleId: string): Promise<QueuedTopic | null
     .select('id, title, details')
     .eq('schedule_id', scheduleId)
     .is('used_at', null)
+    .is('removed_at', null)
     .order('position', { ascending: true })
     .order('created_at', { ascending: true })
     .limit(1)

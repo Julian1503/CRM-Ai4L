@@ -256,18 +256,22 @@ export async function applyNewsletterEvent(
     return { action: 'updated', contactId: active.id, archivedMatchExists: false }
   }
 
+  // Only an archived contact someone could still restore and merge counts. A removed
+  // one is gone from the application. Limited rather than `.maybeSingle()`: one address
+  // can have several archived rows, and more than one would make that call fail.
   const { data: archived, error: archivedError } = await db
     .from('contacts')
     .select('id')
     .eq('email', event.email)
     .not('deleted_at', 'is', null)
-    .maybeSingle()
+    .is('removed_at', null)
+    .limit(1)
 
   if (archivedError) {
     throw new Error(`Newsletter lookup failed: ${archivedError.message}`)
   }
 
-  const archivedMatchExists = Boolean(archived)
+  const archivedMatchExists = (archived ?? []).length > 0
 
   // Nothing to unsubscribe. Acknowledge rather than inventing a record.
   if (!subscribed) {

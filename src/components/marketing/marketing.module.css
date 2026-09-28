@@ -1093,6 +1093,20 @@
   gap: var(--space-md);
 }
 
+.drawerHeaderActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+}
+
+/* Archive / Remove sit apart from the status actions: they end a campaign's life, the
+   others move it along. */
+.campaignLifecycle {
+  margin-left: auto;
+}
+
 .drawerBody {
   display: flex;
   flex: 1 1 auto;

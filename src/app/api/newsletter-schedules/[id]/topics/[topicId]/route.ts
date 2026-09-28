@@ -21,7 +21,8 @@ const USED_OR_MISSING = 'That topic does not exist or has already been used.'
  * Edits or removes a queued topic.
  *
  * Only while unused: a used topic is the record of what an issue was about, and editing
- * it afterwards would rewrite that history. The delete policy enforces the same rule.
+ * it afterwards would rewrite that history. Removing is a soft delete — the row stays,
+ * and a CHECK keeps a used topic from ever being removed or a removed one from being used.
  */
 export async function PATCH(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
   const guard = await requireSessionOr401()
@@ -44,6 +45,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
       .eq('id', topicId)
       .eq('schedule_id', id)
       .is('used_at', null)
+      .is('removed_at', null)
       .select('*')
       .maybeSingle()
 
@@ -66,10 +68,11 @@ export async function DELETE(_request: NextRequest, { params }: RouteContext): P
     const db = await createSupabaseServerClient()
     const { data, error } = await db
       .from('newsletter_topics')
-      .delete()
+      .update({ removed_at: new Date().toISOString(), removed_by: guard.session.userId })
       .eq('id', topicId)
       .eq('schedule_id', id)
       .is('used_at', null)
+      .is('removed_at', null)
       .select('id')
 
     if (error) throw new Error(error.message)

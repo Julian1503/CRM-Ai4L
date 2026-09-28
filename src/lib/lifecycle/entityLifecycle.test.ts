@@ -1,6 +1,14 @@
 import { createDbMock, createQueryBuilderMock } from '@/test/supabaseMock'
 
-import { campaignLifecycle, findSegmentUsers, segmentLifecycle } from './entityLifecycle'
+import {
+  campaignLifecycle,
+  contactLifecycle,
+  findSegmentUsers,
+  findTemplateUsers,
+  scheduleLifecycle,
+  segmentLifecycle,
+  templateLifecycle,
+} from './entityLifecycle'
 
 const LIVE = { archived_at: null, removed_at: null }
 const ARCHIVED = { archived_at: '2026-09-01T00:00:00.000Z', removed_at: null }
@@ -100,5 +108,73 @@ describe('findSegmentUsers', () => {
     const db = createDbMock(() => failing)
 
     await expect(findSegmentUsers(db as never, 'seg-1')).rejects.toThrow('boom')
+  })
+})
+
+describe('contactLifecycle', () => {
+  it('lets a live contact be archived or removed', () => {
+    expect(contactLifecycle({ deleted_at: null, removed_at: null })).toMatchObject({
+      canArchive: true,
+      canRemove: true,
+      canRestore: false,
+    })
+  })
+
+  it('reads the archive from deleted_at', () => {
+    expect(contactLifecycle({ deleted_at: ARCHIVED.archived_at, removed_at: null })).toMatchObject({
+      canRestore: true,
+      canRemove: true,
+    })
+  })
+
+  it('offers nothing for a removed contact', () => {
+    expect(contactLifecycle({ deleted_at: ARCHIVED.archived_at, removed_at: REMOVED.removed_at })).toMatchObject({
+      canArchive: false,
+      canRestore: false,
+      canRemove: false,
+    })
+  })
+})
+
+describe('scheduleLifecycle', () => {
+  it('never blocks a schedule, which only drafts', () => {
+    expect(scheduleLifecycle(LIVE)).toMatchObject({ canArchive: true, canRemove: true })
+    expect(scheduleLifecycle(ARCHIVED)).toMatchObject({ canRestore: true, canRemove: true })
+    expect(scheduleLifecycle(REMOVED)).toMatchObject({ canRestore: false, canRemove: false })
+  })
+})
+
+describe('templateLifecycle', () => {
+  it('blocks a template a live schedule drafts with, naming it', () => {
+    const lifecycle = templateLifecycle(LIVE, ['Monthly'])
+
+    expect(lifecycle).toMatchObject({ canArchive: false, canRemove: false })
+    expect(lifecycle.reason).toContain('"Monthly"')
+  })
+
+  it('lets an unused template be archived, and an archived one restored or removed', () => {
+    expect(templateLifecycle(LIVE, [])).toMatchObject({ canArchive: true, canRemove: true })
+    expect(templateLifecycle(ARCHIVED, [])).toMatchObject({ canRestore: true, canRemove: true })
+    expect(templateLifecycle(REMOVED, [])).toMatchObject({ canRemove: false })
+  })
+})
+
+describe('findTemplateUsers', () => {
+  it('lists live schedules on the template', async () => {
+    const schedules = createQueryBuilderMock({ data: [{ name: 'Monthly' }], error: null })
+
+    await expect(findTemplateUsers(createDbMock(() => schedules) as never, 'tpl-1')).resolves.toEqual(['Monthly'])
+    expect(schedules.calls).toEqual(
+      expect.arrayContaining([
+        { method: 'eq', args: ['template_id', 'tpl-1'] },
+        { method: 'is', args: ['archived_at', null] },
+      ])
+    )
+  })
+
+  it('surfaces a failed lookup', async () => {
+    const failing = createQueryBuilderMock({ data: null, error: { message: 'boom' } })
+
+    await expect(findTemplateUsers(createDbMock(() => failing) as never, 'tpl-1')).rejects.toThrow('boom')
   })
 })

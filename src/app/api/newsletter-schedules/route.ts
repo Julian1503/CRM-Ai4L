@@ -28,6 +28,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     let query = db
       .from('newsletter_schedules')
       .select('*')
+      // Removed schedules are gone from the application, archived view or not.
+      .is('removed_at', null)
       .order('next_run_at', { ascending: true })
       .limit(100)
 

@@ -33,7 +33,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   try {
     const db = await createSupabaseServerClient()
-    let query = db.from('campaign_templates').select('*').order('created_at', { ascending: true })
+    // Removed templates are gone from the application, archived view or not.
+    let query = db
+      .from('campaign_templates')
+      .select('*')
+      .is('removed_at', null)
+      .order('created_at', { ascending: true })
 
     if (!includeArchived) {
       query = query.is('archived_at', null)

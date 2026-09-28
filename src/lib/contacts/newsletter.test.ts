@@ -270,7 +270,7 @@ describe('applyNewsletterEvent', () => {
     // deliberately archived. A new lead is created and the collision is reported.
     const { builder, db } = dbReturning(
       { data: null, error: null },
-      { data: { id: 'c-archived' }, error: null },
+      { data: [{ id: 'c-archived' }], error: null },
       { data: { id: 'c-new' }, error: null }
     )
 
@@ -284,6 +284,23 @@ describe('applyNewsletterEvent', () => {
       'apply_contact_consent',
       expect.objectContaining({ p_contact_id: 'c-new' })
     )
+  })
+
+  it('does not report a removed contact as a collision to merge', async () => {
+    // A removed contact is gone from the application, so there is nobody to merge the
+    // new lead into. The lookup asks only for restorable archived rows, and tolerates
+    // several of them rather than failing on the second.
+    const { builder, db } = dbReturning(
+      { data: null, error: null },
+      { data: [], error: null },
+      { data: { id: 'c-new' }, error: null }
+    )
+
+    const result = await applyNewsletterEvent(db as never, event)
+
+    expect(result).toMatchObject({ action: 'created', archivedMatchExists: false })
+    expect(builder.allFor('is').map((call) => call.args)).toContainEqual(['removed_at', null])
+    expect(builder.allFor('maybeSingle')).toHaveLength(1)
   })
 
   it('records the unsubscribe against an existing contact', async () => {

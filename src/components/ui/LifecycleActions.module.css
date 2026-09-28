@@ -1,0 +1,76 @@
+.wrap {
+  display: grid;
+  gap: 0.375rem;
+  justify-items: end;
+}
+
+.buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-xs);
+}
+
+.quiet,
+.remove {
+  padding: 0.4rem 0.75rem;
+  font-family: var(--font-body);
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 150ms ease, border-color 150ms ease, background 150ms ease;
+}
+
+.quiet {
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+
+.quiet:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--primary);
+}
+
+/* Quiet until hovered: it sits next to everyday buttons and must not compete with
+   them, but it should look like what it is once the pointer is on it. */
+.remove {
+  color: var(--danger);
+  border: 1px solid transparent;
+}
+
+.remove:hover:not(:disabled) {
+  background: var(--danger-bg);
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+.quiet:disabled,
+.remove:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.quiet:focus-visible,
+.remove:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.note,
+.error {
+  max-width: 28rem;
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  text-align: right;
+}
+
+.note {
+  color: var(--text-muted);
+}
+
+.error {
+  color: #8a1c1c;
+}

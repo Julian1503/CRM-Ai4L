@@ -94,3 +94,59 @@ export function campaignLifecycle(state: LifecycleState & { status: CampaignStat
 
   return { canArchive: true, canRestore: false, canRemove: true, reason: null }
 }
+
+/** A contact's archive is `deleted_at`; otherwise the same states as everything else. */
+export function contactLifecycle(state: { deleted_at: string | null; removed_at: string | null }): Lifecycle {
+  if (state.removed_at) return REMOVED
+  if (state.deleted_at) return ARCHIVED
+
+  // Nothing about a contact is in flight: its sends, bookings and consent history stay
+  // where they are, and segments simply stop resolving it.
+  return { canArchive: true, canRestore: false, canRemove: true, reason: null }
+}
+
+/** A schedule only drafts; archiving it just stops the next run. */
+export function scheduleLifecycle(state: LifecycleState): Lifecycle {
+  if (state.removed_at) return REMOVED
+  if (state.archived_at) return ARCHIVED
+
+  return { canArchive: true, canRestore: false, canRemove: true, reason: null }
+}
+
+/**
+ * A template is in use while a live schedule drafts with it. Campaigns do not count:
+ * they copied the automation id when they were created.
+ */
+export function templateLifecycle(state: LifecycleState, schedules: readonly string[]): Lifecycle {
+  if (state.removed_at) return REMOVED
+  if (state.archived_at) return ARCHIVED
+
+  if (schedules.length > 0) {
+    const names = schedules.map((name) => `"${name}"`).join(', ')
+
+    return {
+      canArchive: false,
+      canRestore: false,
+      canRemove: false,
+      reason: `This template is used by newsletter schedule ${names}. Archive that first.`,
+    }
+  }
+
+  return { canArchive: true, canRestore: false, canRemove: true, reason: null }
+}
+
+export async function findTemplateUsers(
+  db: SupabaseClient<Database>,
+  templateId: string
+): Promise<string[]> {
+  const { data, error } = await db
+    .from('newsletter_schedules')
+    .select('name')
+    .eq('template_id', templateId)
+    .is('archived_at', null)
+    .limit(USER_LIMIT)
+
+  if (error) throw new Error(`Could not check whether the template is in use: ${error.message}`)
+
+  return (data ?? []).map((row) => row.name)
+}

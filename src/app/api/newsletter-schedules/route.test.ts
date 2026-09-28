@@ -68,7 +68,10 @@ describe('/api/newsletter-schedules', () => {
     const response = await GET(new NextRequest('https://crm.example.com/api/newsletter-schedules'))
 
     expect(response.status).toBe(200)
-    expect(tables.newsletter_schedules.argsFor('is')).toEqual(['archived_at', null])
+    expect(tables.newsletter_schedules.allFor('is').map((call) => call.args)).toEqual([
+      ['removed_at', null],
+      ['archived_at', null],
+    ])
     expect(tables.newsletter_schedules.argsFor('order')).toEqual(['next_run_at', { ascending: true }])
   })
 

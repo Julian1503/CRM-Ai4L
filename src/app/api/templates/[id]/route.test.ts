@@ -82,15 +82,51 @@ describe('PATCH /api/templates/[id]', () => {
   it('archives and un-archives rather than deleting', async () => {
     // A sent campaign still points at its template; deleting the row would leave its
     // copy uninterpretable, which is why the table grants no delete policy.
-    const archiving = withBuilder({ data: { id: 't1' }, error: null })
-    await patch({ archived: true })
+    const LIVE = { id: 't1', name: 'August', archived_at: null, removed_at: null }
+    const ARCHIVED = { ...LIVE, archived_at: '2026-09-01T00:00:00.000Z' }
+
+    // Loaded, checked for live schedules, then written.
+    const archiving = withBuilder([
+      { data: LIVE, error: null },
+      { data: [], error: null },
+      { data: { id: 't1' }, error: null },
+    ])
+    expect((await patch({ archived: true })).status).toBe(200)
     expect(archiving.argsFor('update')?.[0]).toMatchObject({
       archived_at: expect.any(String),
     })
 
-    const restoring = withBuilder({ data: { id: 't1' }, error: null })
-    await patch({ archived: false })
+    const restoring = withBuilder([{ data: ARCHIVED, error: null }, { data: { id: 't1' }, error: null }])
+    expect((await patch({ archived: false })).status).toBe(200)
     expect(restoring.argsFor('update')?.[0]).toMatchObject({ archived_at: null })
+
+    const removing = withBuilder([{ data: ARCHIVED, error: null }, { data: { id: 't1' }, error: null }])
+    expect((await patch({ removed: true })).status).toBe(200)
+    expect(removing.argsFor('update')?.[0]).toMatchObject({ removed_at: expect.any(String), removed_by: 'u1' })
+    expect(removing.argsFor('delete')).toBeUndefined()
+  })
+
+  it('refuses to archive a template a live schedule drafts with, naming it', async () => {
+    const builder = withBuilder([
+      { data: { id: 't1', name: 'August', archived_at: null, removed_at: null }, error: null },
+      { data: [{ name: 'Monthly' }], error: null },
+    ])
+
+    const response = await patch({ archived: true })
+
+    expect(response.status).toBe(409)
+    expect((await response.json()).error).toContain('"Monthly"')
+    expect(builder.argsFor('update')).toBeUndefined()
+  })
+
+  it('treats a removed template as not found', async () => {
+    withBuilder({ data: { id: 't1', name: 'x', archived_at: 'a', removed_at: 'b' }, error: null })
+
+    expect((await patch({ archived: false })).status).toBe(404)
+  })
+
+  it('refuses an archive flag mixed with an edit', async () => {
+    expect((await patch({ archived: true, name: 'x' })).status).toBe(400)
   })
 
   it('refuses to blank a name or an automation id', async () => {

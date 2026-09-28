@@ -43,6 +43,8 @@ export function buildContactRow(overrides: Partial<ContactRow> = {}): ContactRow
     subscribed_to_programs: false,
     deleted_at: null,
     archive_reason: null,
+    removed_at: null,
+    removed_by: null,
     source: null,
     created_at: '2026-01-01T00:00:00.000Z',
     ...overrides,

@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 
 import {
   badRequest,
+  conflict,
   notFound,
   ok,
   readJsonBody,
@@ -10,6 +11,14 @@ import {
   serverError,
 } from '@/lib/api/responses'
 import type { CampaignTemplateRow } from '@/lib/db/types'
+import { findTemplateUsers, templateLifecycle } from '@/lib/lifecycle/entityLifecycle'
+import {
+  isArchiveRuleError,
+  lifecyclePatch,
+  readLifecycleAction,
+  refusal,
+  type LifecycleAction,
+} from '@/lib/lifecycle/lifecycle'
 import { parseConsentStream } from '@/lib/marketing/consentStream'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 
@@ -20,13 +29,15 @@ type RouteContext = { params: Promise<{ id: string }> }
 const NO_STORE = { 'Cache-Control': 'private, no-store' }
 
 /**
- * Renames a template, re-points it at another automation, moves it to another consent
- * stream, or archives it.
+ * Renames a template, re-points it at another automation or moves it to another consent
+ * stream; or, on its own, archives, restores or removes it (`{ archived: boolean }`,
+ * `{ removed: true }`).
  *
  * There is no DELETE, and the table grants no delete policy: a campaign that has
  * already sent still references the template its copy was written for, and dropping
- * the row would make that copy uninterpretable. `archived: true` retires it from the
- * pickers instead, and is reversible.
+ * the row would make that copy uninterpretable. Archiving retires it from the pickers
+ * and is reversible; removing also hides it from the registry, for good. Both are
+ * refused while a live newsletter schedule drafts with it.
  */
 export async function PATCH(
   request: NextRequest,
@@ -39,6 +50,11 @@ export async function PATCH(
   const body = await readJsonBody(request)
 
   if (!body) return badRequest('Expected a JSON object.')
+
+  const lifecycle = readLifecycleAction(body)
+
+  if (lifecycle.kind === 'invalid') return badRequest(lifecycle.error)
+  if (lifecycle.kind !== 'none') return changeLifecycle(id, lifecycle.kind, guard.session.userId)
 
   const patch: Partial<CampaignTemplateRow> = {}
 
@@ -74,10 +90,6 @@ export async function PATCH(
     patch.consent_stream = consentStream
   }
 
-  if (typeof body.archived === 'boolean') {
-    patch.archived_at = body.archived ? new Date().toISOString() : null
-  }
-
   if (Object.keys(patch).length === 0) {
     return badRequest('Nothing to update.')
   }
@@ -93,6 +105,7 @@ export async function PATCH(
       .from('campaign_templates')
       .update(patch)
       .eq('id', id)
+      .is('removed_at', null)
       .select('*')
       .maybeSingle()
 
@@ -112,5 +125,42 @@ export async function PATCH(
     return ok({ template: data })
   } catch (error) {
     return serverError(error, 'Could not update the email template.')
+  }
+}
+
+async function changeLifecycle(id: string, action: LifecycleAction, userId: string): Promise<NextResponse> {
+  try {
+    const db = await createSupabaseServerClient()
+    const { data: template, error: loadError } = await db
+      .from('campaign_templates')
+      .select('id, name, archived_at, removed_at')
+      .eq('id', id)
+      .maybeSingle()
+
+    if (loadError) throw new Error(loadError.message)
+    if (!template || template.removed_at) return notFound('Template not found.')
+
+    const schedules = template.archived_at ? [] : await findTemplateUsers(db, id)
+    const refused = refusal(action, templateLifecycle(template, schedules))
+
+    if (refused) return conflict(refused)
+
+    const { data, error } = await db
+      .from('campaign_templates')
+      .update({ ...lifecyclePatch(action, template, userId), updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select('*')
+      .maybeSingle()
+
+    if (isArchiveRuleError(error)) return conflict(error?.message ?? 'The template is in use.')
+    if (error?.code === '23505') {
+      return conflict(`A template named "${template.name}" already exists. Rename that one before restoring this.`)
+    }
+    if (error) throw new Error(error.message)
+    if (!data) return notFound('Template not found.')
+
+    return ok({ template: data })
+  } catch (error) {
+    return serverError(error, 'Could not change the email template.')
   }
 }

@@ -44,8 +44,8 @@ begin
          'campaign_status should have exactly six labels';
 
   assert (select count(*) from pg_indexes
-          where schemaname='public' and indexname='campaign_sends_unique_recipient_idx') = 1,
-         'campaign_sends_unique_recipient_idx missing - a retry can double-send';
+          where schemaname='public' and indexname='campaign_sends_unique_recipient_run_idx') = 1, -- per send run since 20260827000000
+         'campaign_sends_unique_recipient_run_idx missing - a retry can double-send';
 
   assert (select count(*) from pg_indexes
           where schemaname='public' and indexname='segments_name_ci_idx') = 1,
@@ -159,17 +159,18 @@ begin
          'sending -> sent should be allowed';
 
   ----------------------------------------------------------------------------
-  raise notice '8. sent is terminal';
+  raise notice '8. sent only leads back to draft';
   ----------------------------------------------------------------------------
-  -- Mail is out. Re-opening a sent campaign would let it be edited and re-sent while
-  -- its ledger still claims the first send, so there is no route out of this state.
+  -- sent used to be terminal. Since 20260827000000 it can be re-opened to draft (see
+  -- verify_20260827000000.sql), but never straight back to approved: the human gate is
+  -- crossed again.
   v_failed := false;
   begin
-    update public.campaigns set status='draft' where id = v_campaign_id;
+    update public.campaigns set status='approved' where id = v_campaign_id;
   exception when others then
     v_failed := true;
   end;
-  assert v_failed, 'a sent campaign was reopened';
+  assert v_failed, 'a sent campaign skipped the approval gate';
 
   ----------------------------------------------------------------------------
   raise notice '9. a recipient cannot be queued twice for one campaign';

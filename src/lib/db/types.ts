@@ -198,6 +198,9 @@ export type NewsletterScheduleRow = {
   avoid: string | null
   is_active: boolean
   archived_at: string | null
+  /** Removed: hidden everywhere, never physically deleted. See 20261001000000. */
+  removed_at: string | null
+  removed_by: string | null
   created_by: string | null
   created_at: string
   updated_at: string
@@ -212,6 +215,9 @@ export type NewsletterTopicRow = {
   position: number
   used_at: string | null
   campaign_id: string | null
+  /** Removed from the queue. Only an unused topic can be; a used one is history. */
+  removed_at: string | null
+  removed_by: string | null
   created_at: string
 }
 
@@ -234,6 +240,9 @@ export type CampaignTemplateRow = {
   brief: string | null
   /** Retired from the pickers, but kept: sent campaigns still reference it. */
   archived_at: string | null
+  /** Removed: hidden everywhere, never physically deleted. See 20261001000000. */
+  removed_at: string | null
+  removed_by: string | null
   created_at: string
   updated_at: string
 }
@@ -278,6 +287,9 @@ export type ContactRow = {
   deleted_at: string | null
   /** Null while active; set by the database whenever `deleted_at` is. */
   archive_reason: ArchiveReason | null
+  /** Removed: hidden everywhere, never physically deleted. Implies `deleted_at`. */
+  removed_at: string | null
+  removed_by: string | null
   /** newsletter | import | manual. Null for rows predating the column. */
   source: string | null
   created_at: string

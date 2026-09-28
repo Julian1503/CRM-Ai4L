@@ -47,8 +47,12 @@ export async function POST(_request: NextRequest, { params }: RouteContext): Pro
     }
 
     if (report.status === 'failed') {
-      return report.reason === 'template_unusable'
-        ? conflict('This schedule’s template can no longer send a newsletter. Choose another template.')
+      if (report.reason === 'template_unusable') {
+        return conflict('This schedule’s template can no longer send a newsletter. Choose another template.')
+      }
+
+      return report.reason === 'segment_archived'
+        ? conflict('This schedule’s segment has been archived. Choose another segment.')
         : serverError(new Error(report.reason ?? 'The run failed.'))
     }
 

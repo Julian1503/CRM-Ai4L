@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useState } from 'react'
 
+import LifecycleActions from '@/components/ui/LifecycleActions'
 import Portal from '@/components/ui/Portal'
+import type { Lifecycle } from '@/lib/lifecycle/lifecycle'
 
 import styles from './marketing.module.css'
 import SegmentAddPeopleTab from './SegmentAddPeopleTab'
@@ -18,6 +20,7 @@ type Detail = {
   counts: { newsletter: number; programs: number }
   overrides: { included: number; excluded: number }
   lockedBy: Array<{ id: string; name: string; status: string }>
+  lifecycle?: Lifecycle
 }
 
 type Tab = 'members' | 'decisions' | 'add' | 'filters'
@@ -152,9 +155,25 @@ export default function SegmentDrawer({
                 </p>
               )}
             </div>
-            <button type="button" className={styles.secondaryBtn} onClick={onClose} data-testid="close-segment">
-              Close
-            </button>
+            <div className={styles.drawerHeaderActions}>
+              {detail && (
+                <LifecycleActions
+                  endpoint={`/api/segments/${segmentId}`}
+                  noun="segment"
+                  name={detail.segment.name}
+                  archived={false}
+                  lifecycle={detail.lifecycle}
+                  onChanged={() => {
+                    // Archived or removed, it has left the list this drawer was opened from.
+                    onChanged()
+                    onClose()
+                  }}
+                />
+              )}
+              <button type="button" className={styles.secondaryBtn} onClick={onClose} data-testid="close-segment">
+                Close
+              </button>
+            </div>
           </header>
 
           {locked && detail && (

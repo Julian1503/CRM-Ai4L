@@ -66,7 +66,10 @@ describe('/api/templates', () => {
 
       await get()
 
-      expect(builder.argsFor('is')).toEqual(['archived_at', null])
+      expect(builder.allFor('is').map((call) => call.args)).toEqual([
+        ['removed_at', null],
+        ['archived_at', null],
+      ])
     })
 
     it('includes archived templates only when asked', async () => {
@@ -74,7 +77,8 @@ describe('/api/templates', () => {
 
       await get('https://crm.example.com/api/templates?includeArchived=true')
 
-      expect(builder.allFor('is')).toHaveLength(0)
+      // Archived ones join the list; removed ones never do.
+      expect(builder.allFor('is').map((call) => call.args)).toEqual([['removed_at', null]])
     })
 
     it('reports a database failure instead of an empty list', async () => {

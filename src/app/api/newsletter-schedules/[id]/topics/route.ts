@@ -28,6 +28,7 @@ export async function GET(_request: NextRequest, { params }: RouteContext): Prom
       .from('newsletter_topics')
       .select('*')
       .eq('schedule_id', id)
+      .is('removed_at', null)
       .order('used_at', { ascending: false, nullsFirst: true })
       .order('position', { ascending: true })
       .order('created_at', { ascending: true })
@@ -61,6 +62,7 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
       .from('newsletter_schedules')
       .select('id')
       .eq('id', id)
+      .is('removed_at', null)
       .maybeSingle()
 
     if (scheduleError) throw new Error(scheduleError.message)

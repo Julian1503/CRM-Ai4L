@@ -101,6 +101,7 @@ describe('newsletter topics', () => {
 
     expect(response.status).toBe(409)
     expect(tables.newsletter_topics.argsFor('is')).toEqual(['used_at', null])
+    expect(tables.newsletter_topics.argsFor('delete')).toBeUndefined()
   })
 
   describe('editing a queued topic', () => {
@@ -141,8 +142,8 @@ describe('newsletter topics', () => {
     })
   })
 
-  it('removes an unused topic', async () => {
-    setup([{ data: [{ id: 't1' }], error: null }])
+  it('removes an unused topic by hiding it, never deleting the row', async () => {
+    const tables = setup([{ data: [{ id: 't1' }], error: null }])
 
     const response = await DELETE(
       new NextRequest('https://crm.example.com/api/newsletter-schedules/s1/topics/t1', {
@@ -152,5 +153,22 @@ describe('newsletter topics', () => {
     )
 
     expect(response.status).toBe(200)
+    expect(tables.newsletter_topics.argsFor('delete')).toBeUndefined()
+    expect(tables.newsletter_topics.argsFor('update')?.[0]).toMatchObject({
+      removed_at: expect.any(String),
+      removed_by: 'u1',
+    })
+    expect(tables.newsletter_topics.allFor('is').map((call) => call.args)).toEqual([
+      ['used_at', null],
+      ['removed_at', null],
+    ])
+  })
+
+  it('never lists a removed topic', async () => {
+    const tables = setup([{ data: [], error: null }])
+
+    await GET(new NextRequest('https://crm.example.com/api/newsletter-schedules/s1/topics'), params)
+
+    expect(tables.newsletter_topics.allFor('is').map((call) => call.args)).toContainEqual(['removed_at', null])
   })
 })
