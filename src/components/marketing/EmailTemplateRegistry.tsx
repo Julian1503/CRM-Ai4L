@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 
+import LifecycleActions from '@/components/ui/LifecycleActions'
 import type { CampaignTemplateRow, ConsentStream } from '@/lib/db/types'
 import { CONSENT_STREAM_LABELS, parseConsentStream } from '@/lib/marketing/consentStream'
 
@@ -140,29 +141,6 @@ export default function EmailTemplateRegistry() {
     } catch (createError) {
       setError(
         createError instanceof Error ? createError.message : 'Could not register the template.'
-      )
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  const setArchived = async (template: Template, archived: boolean) => {
-    setError(null)
-    setBusy(template.id)
-
-    try {
-      const response = await fetch(`/api/templates/${template.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ archived }),
-      })
-
-      if (!response.ok) throw new Error(await readError(response))
-
-      await load()
-    } catch (archiveError) {
-      setError(
-        archiveError instanceof Error ? archiveError.message : 'Could not update the template.'
       )
     } finally {
       setBusy(null)
@@ -319,15 +297,17 @@ export default function EmailTemplateRegistry() {
                 >
                   Re-check
                 </button>
-                <button
-                  type="button"
-                  className={styles.secondaryBtn}
-                  onClick={() => setArchived(template, !template.archived_at)}
-                  disabled={busy !== null}
-                  data-testid={`archive-${template.id}`}
-                >
-                  {template.archived_at ? 'Restore' : 'Archive'}
-                </button>
+                {/* Archived templates stay listed here, so this is also where they come back
+                    from. A template a live schedule drafts with is refused by the server,
+                    which names the schedule. */}
+                <LifecycleActions
+                  endpoint={`/api/templates/${template.id}`}
+                  noun="template"
+                  name={template.name}
+                  archived={Boolean(template.archived_at)}
+                  onChanged={load}
+                  testId={`template-${template.id}`}
+                />
               </div>
             </li>
           )

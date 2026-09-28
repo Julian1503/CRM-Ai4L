@@ -47,7 +47,8 @@ import FilterBar, { type StatusFilter } from '@/components/contacts/FilterBar';
 import MarketingView from '@/components/marketing/MarketingView';
 import EmailTemplateRegistry from '@/components/marketing/EmailTemplateRegistry';
 import NewsletterSchedules from '@/components/marketing/NewsletterSchedules';
-import ArchiveView from '@/components/contacts/ArchiveView';
+import ArchiveHub from '@/components/archive/ArchiveHub';
+import { requestLifecycle } from '@/lib/lifecycle/client';
 import BookingsView from '@/components/bookings/BookingsView';
 import OperationsPanel from '@/components/operations/OperationsPanel';
 import Pagination from '@/components/ui/Pagination';
@@ -885,6 +886,16 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
     }
   };
 
+  // Remove Contact Handler
+  //
+  // A soft delete as well: the contact is archived and hidden everywhere, the archive
+  // included, but the row and its history stay. Errors are rethrown for the drawer's
+  // confirmation dialog to show, rather than alerted.
+  const handleRemoveContact = async (id: string) => {
+    await requestLifecycle(`/api/contacts/${id}`, 'remove');
+    await refreshData();
+  };
+
   const handleSaveSettings = async () => {
     try {
       const db = getSupabaseClient();
@@ -1164,14 +1175,15 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
                   <span className={styles.eyebrowDot} />
                   Retained Records
                 </div>
-                <h1 className={styles.pageTitle}>Archived contacts</h1>
+                <h1 className={styles.pageTitle}>Archive</h1>
                 <span className={styles.pageSubtitle}>
-                  Archived records are kept, never deleted, and can be restored.
+                  Archived records are kept and can be restored. Removing one takes it out of the
+                  CRM for good, but nothing is ever deleted.
                 </span>
               </div>
             </header>
 
-            <ArchiveView />
+            <ArchiveHub />
           </>
         )}
 
@@ -1803,6 +1815,7 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
         onClose={() => setSelectedContact(null)}
         onSave={handleSaveContact}
         onDelete={handleArchiveContact}
+        onRemove={handleRemoveContact}
         availableServices={services}
         jobTypes={jobTypes}
       />

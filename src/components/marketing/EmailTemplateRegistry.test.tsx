@@ -196,7 +196,7 @@ describe('EmailTemplateRegistry', () => {
   it('archives rather than deletes, because sent campaigns still reference it', async () => {
     render(<EmailTemplateRegistry />)
 
-    fireEvent.click(await screen.findByTestId('archive-t1'))
+    fireEvent.click(await screen.findByTestId('template-t1-archive'))
 
     await waitFor(() =>
       expect(bodyOf(callTo('/api/templates/t1', 'PATCH')!)).toEqual({ archived: true })
@@ -214,11 +214,25 @@ describe('EmailTemplateRegistry', () => {
 
     render(<EmailTemplateRegistry />)
 
-    fireEvent.click(await screen.findByTestId('archive-t1'))
+    fireEvent.click(await screen.findByTestId('template-t1-restore'))
 
     await waitFor(() =>
       expect(bodyOf(callTo('/api/templates/t1', 'PATCH')!)).toEqual({ archived: false })
     )
+  })
+
+  it('removes a template only after asking, and never with DELETE', async () => {
+    render(<EmailTemplateRegistry />)
+
+    fireEvent.click(await screen.findByTestId('template-t1-remove'))
+    expect(callTo('/api/templates/t1', 'PATCH')).toBeUndefined()
+
+    fireEvent.click(screen.getByTestId('confirm-dialog-confirm'))
+
+    await waitFor(() =>
+      expect(bodyOf(callTo('/api/templates/t1', 'PATCH')!)).toEqual({ removed: true })
+    )
+    expect(callTo('/api/templates/t1', 'DELETE')).toBeUndefined()
   })
 
   it('does not spend a check on an archived template', async () => {

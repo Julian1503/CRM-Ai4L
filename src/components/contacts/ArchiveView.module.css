@@ -142,6 +142,35 @@
   cursor: not-allowed;
 }
 
+/* Quiet beside Restore: the everyday action here is bringing someone back. */
+.removeBtn {
+  margin-left: var(--space-xs);
+  padding: 0.375rem 0.625rem;
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--danger);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.removeBtn:hover:not(:disabled) {
+  background: var(--danger-bg);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.removeBtn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.removeBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .srOnly {
   position: absolute;
   width: 1px;

@@ -1,5 +1,6 @@
--- Verification for migrations 20261001000000_archive_and_remove_phase2.sql and
--- 20261001010000_refresh_active_contacts_view.sql
+-- Verification for migrations 20261001000000_archive_and_remove_phase2.sql,
+-- 20261001010000_refresh_active_contacts_view.sql and
+-- 20261001030000_import_removed_cap_insert_only.sql
 --
 -- Non-destructive: the whole script runs inside a transaction that is ROLLED BACK at
 -- the end. Every fixture carries the suffix `__arch2verify`.
@@ -95,6 +96,21 @@ begin
   assert (select not subscribed_to_newsletter and not subscribed_to_programs
           from public.active_contacts where email = 'gone__arch2verify@example.com'),
          'the new contact must not hold more consent than the removed one did';
+
+  -- 20261001030000: the cap is for new rows only. The contact just imported is live;
+  -- once they re-subscribe, re-importing their address must not lower their consent
+  -- to the removed record's.
+  update public.contacts set subscribed_to_newsletter = true
+  where email = 'gone__arch2verify@example.com' and deleted_at is null;
+
+  select public.import_contacts($json$[
+    {"email":"gone__arch2verify@example.com","first_name":"Back","last_name":"Verify"}
+  ]$json$::jsonb) into v_result;
+
+  assert (v_result->>'updated')::int = 1, format('expected an update, got %s', v_result);
+  assert (select subscribed_to_newsletter from public.active_contacts
+          where email = 'gone__arch2verify@example.com'),
+         'a removed record must not lower the consent of a live contact on re-import';
 
   ----------------------------------------------------------------------------
   raise notice '5. a template a live schedule uses cannot be archived';

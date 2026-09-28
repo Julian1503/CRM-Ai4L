@@ -257,6 +257,25 @@
   box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2);
 }
 
+/* Beside Archive, quieter than it: removing is the rarer, final step. The auto margin
+   stays on Archive, so both sit on the left, away from Save. */
+.removeBtn {
+  margin-left: calc(-1 * var(--space-sm, 8px));
+  margin-right: auto;
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid transparent;
+}
+
+.removeBtn:hover {
+  background-color: var(--danger-bg);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.deleteBtn:has(+ .removeBtn) {
+  margin-right: 0;
+}
+
 @media (max-width: 768px) {
   .drawer {
     top: 0;
@@ -303,6 +322,12 @@
     margin-right: 0;
     width: 100%;
     order: 3; /* Push delete button to the bottom of the stack on mobile */
+  }
+
+  .removeBtn {
+    margin: 0;
+    width: 100%;
+    order: 4;
   }
 }
 

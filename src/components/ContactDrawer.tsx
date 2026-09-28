@@ -8,12 +8,18 @@ import { gsap } from 'gsap';
 import { useGSAP } from '@gsap/react';
 
 import { prefersReducedMotion } from '@/lib/motion';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
 
 interface ContactDrawerProps {
   contact: TableContact | null;
   onClose: () => void;
   onSave: (data: ContactFormData) => Promise<void>;
   onDelete?: (id: string) => Promise<void>;
+  /**
+   * Removes the contact for good from the application: a soft delete that hides it
+   * everywhere, the archive included. Nothing is deleted from the database.
+   */
+  onRemove?: (id: string) => Promise<void>;
   availableServices: { id: string; name: string }[];
   /**
    * Job types available to assign.
@@ -48,6 +54,7 @@ export default function ContactDrawer({
   onClose,
   onSave,
   onDelete,
+  onRemove,
   availableServices,
   jobTypes,
 }: ContactDrawerProps) {
@@ -55,6 +62,27 @@ export default function ContactDrawer({
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
+  const [isRemoving, setIsRemoving] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
+
+  const removeContact = async () => {
+    const contactId = formData.id;
+    if (!contactId || !onRemove) return;
+
+    setIsRemoving(true);
+    setRemoveError(null);
+
+    try {
+      await onRemove(contactId);
+      setConfirmingRemove(false);
+      onClose();
+    } catch (error) {
+      setRemoveError(error instanceof Error ? error.message : 'Could not remove this contact.');
+    } finally {
+      setIsRemoving(false);
+    }
+  };
   const scrollAreaRef = useRef<HTMLFormElement>(null);
   const drawerRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -675,6 +703,19 @@ export default function ContactDrawer({
               Archive
             </button>
           )}
+          {formData.id && onRemove && (
+            <button
+              type="button"
+              className={`${styles.button} ${styles.removeBtn}`}
+              onClick={() => {
+                setRemoveError(null);
+                setConfirmingRemove(true);
+              }}
+              data-testid="remove-contact"
+            >
+              Remove
+            </button>
+          )}
           <button 
             type="button" 
             className={`${styles.button} ${styles.cancelBtn}`} 
@@ -693,6 +734,29 @@ export default function ContactDrawer({
           </button>
         </div>
       </div>
+
+      {confirmingRemove && (
+        <ConfirmDialog
+          title="Remove this contact?"
+          subject={[formData.firstName, formData.lastName].filter(Boolean).join(' ') || formData.email}
+          confirmLabel="Remove contact"
+          busyLabel="Removing…"
+          busy={isRemoving}
+          error={removeError}
+          onConfirm={() => void removeContact()}
+          onClose={() => setConfirmingRemove(false)}
+        >
+          <p>
+            They disappear from every list, segment and the archive, and cannot be brought
+            back from here.
+          </p>
+          <p>
+            Nothing is deleted: past sends, bookings and consent history stay on record. If the
+            same address is imported later it starts a new contact, never with more consent than
+            this one had.
+          </p>
+        </ConfirmDialog>
+      )}
     </>
   );
 }

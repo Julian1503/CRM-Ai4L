@@ -226,6 +226,47 @@ describe('MarketingView', () => {
     )
   })
 
+  it('archives a campaign in review and reloads the list', async () => {
+    routeFetch({ ...defaultHandlers, 'PATCH /api/campaigns/camp-1': jsonResponse({ campaign: {} }) })
+    render(<MarketingView jobTypes={jobTypes} />)
+
+    fireEvent.click(await screen.findByTestId('campaign-camp-1-archive'))
+
+    await waitFor(() =>
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/campaigns/camp-1',
+        expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ archived: true }) })
+      )
+    )
+    await waitFor(() =>
+      expect(mockFetch.mock.calls.filter(([url]) => String(url).startsWith('/api/campaigns?')).length).toBeGreaterThan(1)
+    )
+  })
+
+  it('will not archive or remove an approved campaign, and says why', async () => {
+    routeFetch({
+      ...defaultHandlers,
+      'GET /api/campaigns': jsonResponse({
+        campaigns: [
+          {
+            id: 'camp-1',
+            name: 'August offer',
+            status: 'approved',
+            segment_id: 'seg-1',
+            provider_automation_id: 'auto-1',
+            segment: { name: 'NSW leads' },
+          },
+        ],
+      }),
+    })
+
+    render(<MarketingView jobTypes={jobTypes} />)
+
+    expect(await screen.findByTestId('campaign-camp-1-archive')).toBeDisabled()
+    expect(screen.getByTestId('campaign-camp-1-remove')).toBeDisabled()
+    expect(screen.getByTestId('campaign-camp-1-blocked')).toHaveTextContent('approved')
+  })
+
   it('checks the live audience before sending', async () => {
     routeFetch({
       ...defaultHandlers,

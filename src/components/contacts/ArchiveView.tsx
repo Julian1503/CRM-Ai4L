@@ -2,8 +2,10 @@
 
 import React, { useCallback, useEffect, useState } from 'react'
 
+import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Pagination from '@/components/ui/Pagination'
 import type { ArchiveReason } from '@/lib/db/types'
+import { requestLifecycle } from '@/lib/lifecycle/client'
 
 import styles from './ArchiveView.module.css'
 
@@ -56,6 +58,9 @@ export default function ArchiveView() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [restoringId, setRestoringId] = useState<string | null>(null)
+  const [removing, setRemoving] = useState<ArchivedContact | null>(null)
+  const [isRemoving, setIsRemoving] = useState(false)
+  const [removeError, setRemoveError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setIsLoading(true)
@@ -129,6 +134,30 @@ export default function ArchiveView() {
       setError(restoreError instanceof Error ? restoreError.message : 'Could not restore.')
     } finally {
       setRestoringId(null)
+    }
+  }
+
+  // Removing takes the contact out of this list too, for good. Asked in a dialog rather
+  // than window.confirm because it is final, and the dialog can say what is kept.
+  const remove = async () => {
+    if (!removing) return
+
+    setIsRemoving(true)
+    setRemoveError(null)
+
+    try {
+      await requestLifecycle(`/api/contacts/${removing.id}`, 'remove')
+      setRemoving(null)
+
+      if (contacts.length === 1 && page > 1) {
+        setPage(page - 1)
+      } else {
+        await load()
+      }
+    } catch (error) {
+      setRemoveError(error instanceof Error ? error.message : 'Could not remove this contact.')
+    } finally {
+      setIsRemoving(false)
     }
   }
 
@@ -267,6 +296,18 @@ export default function ArchiveView() {
                   >
                     {restoringId === contact.id ? 'Restoring…' : 'Restore'}
                   </button>
+                  <button
+                    type="button"
+                    className={styles.removeBtn}
+                    onClick={() => {
+                      setRemoveError(null)
+                      setRemoving(contact)
+                    }}
+                    disabled={restoringId !== null}
+                    data-testid={`remove-${contact.id}`}
+                  >
+                    Remove
+                  </button>
                 </td>
               </tr>
             ))}
@@ -288,6 +329,26 @@ export default function ArchiveView() {
         isLoading={isLoading}
         testId="archive-pagination"
       />
+
+      {removing && (
+        <ConfirmDialog
+          title="Remove this contact?"
+          subject={`${removing.first_name} ${removing.last_name} · ${removing.email}`}
+          confirmLabel="Remove contact"
+          busyLabel="Removing…"
+          busy={isRemoving}
+          error={removeError}
+          onConfirm={() => void remove()}
+          onClose={() => setRemoving(null)}
+        >
+          <p>They leave the archive too, and cannot be restored from the CRM.</p>
+          <p>
+            Nothing is deleted: past sends, bookings and consent history stay on record. If the
+            same address is imported later it starts a new contact, never with more consent than
+            this one had.
+          </p>
+        </ConfirmDialog>
+      )}
     </div>
   )
 }

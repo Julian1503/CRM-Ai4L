@@ -226,3 +226,43 @@ describe('SegmentDrawer', () => {
     expect(onClose).toHaveBeenCalledTimes(2)
   })
 })
+
+describe('SegmentDrawer archive and remove', () => {
+  beforeEach(() => mockFetch.mockReset())
+
+  it('archives from the header, then refreshes the list and closes', async () => {
+    routeFetch({ ...defaults, 'PATCH /api/segments/seg-1': jsonResponse({ segment: {} }) })
+    const onChanged = jest.fn()
+    const onClose = jest.fn()
+
+    render(<SegmentDrawer segmentId="seg-1" jobTypes={[]} onClose={onClose} onChanged={onChanged} />)
+
+    fireEvent.click(await screen.findByTestId('segment-archive'))
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    expect(onChanged).toHaveBeenCalled()
+    expect(calls('/api/segments/seg-1', 'PATCH')[0][1].body).toBe(JSON.stringify({ archived: true }))
+  })
+
+  it('disables both and says why while the segment is in use', async () => {
+    routeFetch({
+      ...defaults,
+      'GET /api/segments/seg-1': jsonResponse({
+        ...DETAIL,
+        lifecycle: {
+          canArchive: false,
+          canRestore: false,
+          canRemove: false,
+          reason: 'This segment is used by campaign "August offer". Archive those first.',
+        },
+      }),
+    })
+
+    render(<SegmentDrawer segmentId="seg-1" jobTypes={[]} onClose={jest.fn()} onChanged={jest.fn()} />)
+
+    expect(await screen.findByTestId('segment-blocked')).toHaveTextContent('"August offer"')
+    expect(screen.getByTestId('segment-archive')).toBeDisabled()
+    expect(screen.getByTestId('segment-remove')).toBeDisabled()
+  })
+})
+

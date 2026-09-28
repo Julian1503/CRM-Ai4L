@@ -203,6 +203,51 @@ describe('ContactDrawer', () => {
     })
   })
 
+  describe('removing', () => {
+    it('offers Remove only when the page can remove', () => {
+      setup()
+      expect(screen.queryByTestId('remove-contact')).toBeNull()
+    })
+
+    it('asks first, then removes and closes', async () => {
+      const onRemove = jest.fn().mockResolvedValue(undefined)
+      const { onClose } = setup({ onRemove })
+
+      fireEvent.click(screen.getByTestId('remove-contact'))
+
+      expect(screen.getByTestId('confirm-dialog')).toHaveTextContent('Nothing is deleted')
+      expect(onRemove).not.toHaveBeenCalled()
+
+      fireEvent.click(screen.getByTestId('confirm-dialog-confirm'))
+
+      await waitFor(() => expect(onRemove).toHaveBeenCalledWith('c1'))
+      expect(onClose).toHaveBeenCalled()
+    })
+
+    it('closes only the question on Escape, keeping the drawer and its edits', () => {
+      const onRemove = jest.fn()
+      const { onClose } = setup({ onRemove })
+
+      fireEvent.click(screen.getByTestId('remove-contact'))
+      fireEvent.keyDown(document, { key: 'Escape' })
+
+      expect(screen.queryByTestId('confirm-dialog')).toBeNull()
+      expect(onClose).not.toHaveBeenCalled()
+      expect(onRemove).not.toHaveBeenCalled()
+    })
+
+    it('keeps the drawer open and explains a failure', async () => {
+      const onRemove = jest.fn().mockRejectedValue(new Error('Contact not found.'))
+      const { onClose } = setup({ onRemove })
+
+      fireEvent.click(screen.getByTestId('remove-contact'))
+      fireEvent.click(screen.getByTestId('confirm-dialog-confirm'))
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('Contact not found.')
+      expect(onClose).not.toHaveBeenCalled()
+    })
+  })
+
   it('closes on cancel without saving', () => {
     const { onClose, onSave } = setup()
 

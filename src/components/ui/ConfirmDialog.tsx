@@ -26,8 +26,10 @@ const FOCUSABLE = 'button:not([disabled]), [href], input, select, textarea, [tab
  * A modal question with one destructive answer.
  *
  * Focus starts on Cancel, so a stray Enter backs out rather than confirming, and is
- * handed back to whatever opened the dialog when it closes. Escape closes it without
- * reaching a drawer underneath, which listens for Escape on `window`.
+ * handed back to whatever opened the dialog when it closes. Escape closes only the
+ * dialog: it is caught on `window` in the capture phase, before any drawer underneath
+ * sees it — whether that drawer listens on `window` (SegmentDrawer) or on `document`
+ * (ContactDrawer) — and stopped there.
  */
 export default function ConfirmDialog({
   title,
@@ -59,8 +61,8 @@ export default function ConfirmDialog({
       if (!busy) onClose()
     }
 
-    document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
   }, [busy, onClose])
 
   const trapFocus = (event: ReactKeyboardEvent) => {

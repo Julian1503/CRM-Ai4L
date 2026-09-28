@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 
+import LifecycleActions from '@/components/ui/LifecycleActions'
 import type { CampaignTemplateRow, NewsletterScheduleRow } from '@/lib/db/types'
 
 import styles from './marketing.module.css'
@@ -202,15 +203,15 @@ export default function NewsletterSchedules() {
               >
                 {schedule.is_active ? 'Pause' : 'Resume'}
               </button>
-              <button
-                type="button"
-                className={styles.secondaryBtn}
-                onClick={() => patch(schedule, { archived: true })}
-                disabled={busy !== null}
-                data-testid={`archive-schedule-${schedule.id}`}
-              >
-                Archive
-              </button>
+              {/* Archived schedules leave this list; they are restored from Archive. */}
+              <LifecycleActions
+                endpoint={`/api/newsletter-schedules/${schedule.id}`}
+                noun="schedule"
+                name={schedule.name}
+                archived={false}
+                onChanged={load}
+                testId={`schedule-${schedule.id}`}
+              />
             </div>
 
             {openTopics === schedule.id && <NewsletterTopicQueue scheduleId={schedule.id} />}
