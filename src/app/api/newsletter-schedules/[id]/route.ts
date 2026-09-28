@@ -9,6 +9,7 @@ import {
   requireSessionOr401,
   serverError,
 } from '@/lib/api/responses'
+import { isArchiveRuleError } from '@/lib/lifecycle/lifecycle'
 import { newsletterTemplateProblem } from '@/lib/marketing/schedules/templateCheck'
 import { parseScheduleInput } from '@/lib/marketing/schedules/validate'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
@@ -67,6 +68,10 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
       .select('*')
       .maybeSingle()
 
+    // Its segment is archived: chosen here, or archived while this schedule was.
+    if (isArchiveRuleError(error)) {
+      return NextResponse.json({ error: error?.message }, { status: 409, headers: NO_STORE })
+    }
     if (error?.code === '23505') {
       return NextResponse.json(
         { error: `A schedule named "${parsed.value.name}" already exists.` },

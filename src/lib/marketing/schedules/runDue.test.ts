@@ -232,6 +232,17 @@ describe('runDueSchedules', () => {
     expect(mockGenerate).not.toHaveBeenCalled()
   })
 
+  it('reports an archived segment by name instead of an opaque failure', async () => {
+    const { db } = setup({
+      campaigns: [{ data: null, error: { code: 'CRM01', message: 'Segment is archived.' } }],
+    })
+
+    const [report] = await run(db)
+
+    expect(report).toMatchObject({ status: 'failed', reason: 'segment_archived' })
+    expect(mockGenerate).not.toHaveBeenCalled()
+  })
+
   it.each([
     ['archived', { ...TEMPLATE, archived_at: '2026-09-01T00:00:00Z' }],
     ['a courses template', { ...TEMPLATE, consent_stream: 'programs' }],

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { Database, NewsletterScheduleRow } from '@/lib/db/types'
+import { isArchiveRuleError } from '@/lib/lifecycle/lifecycle'
 import type { MessagesApi } from '@/lib/marketing/generateCampaign'
 import { generateForCampaign } from '@/lib/marketing/generateForCampaign'
 import type { ScheduleBrief } from '@/lib/marketing/prompt'
@@ -113,7 +114,8 @@ async function runOne(
 
     const campaign = await draftCampaign(deps.db, schedule, template, occurrence.scheduledFor)
 
-    if (!campaign) return { scheduleId, status: 'skipped', reason: 'already_drafted' }
+    if (campaign === 'already_drafted') return { scheduleId, status: 'skipped', reason: 'already_drafted' }
+    if (campaign === 'segment_archived') return { scheduleId, status: 'failed', reason: 'segment_archived' }
 
     return await writeAndSubmit(deps, schedule, campaign, occurrence.scheduledFor)
   } catch (error) {
@@ -169,13 +171,16 @@ async function loadUsableTemplate(db: Db, templateId: string): Promise<UsableTem
 
 type DraftedCampaign = { id: string; name: string }
 
-/** Returns null when this occurrence already has a campaign. */
+/**
+ * Names the reason instead of a campaign when this occurrence already has one, or when
+ * the schedule's segment has been archived (the database refuses a draft for it).
+ */
 async function draftCampaign(
   db: Db,
   schedule: NewsletterScheduleRow,
   template: UsableTemplate,
   scheduledFor: string
-): Promise<DraftedCampaign | null> {
+): Promise<DraftedCampaign | 'already_drafted' | 'segment_archived'> {
   const { data, error } = await db
     .from('campaigns')
     .insert({
@@ -191,7 +196,8 @@ async function draftCampaign(
     .select('id, name')
     .single()
 
-  if (error?.code === '23505') return null
+  if (error?.code === '23505') return 'already_drafted'
+  if (isArchiveRuleError(error)) return 'segment_archived'
   if (error) throw new Error(`Could not draft the campaign: ${error.message}`)
 
   return data as DraftedCampaign

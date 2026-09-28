@@ -84,6 +84,19 @@ describe('PATCH /api/newsletter-schedules/[id]', () => {
     expect((await patch({ templateId: 'tpl-courses' })).status).toBe(400)
   })
 
+  it('answers 409 when restoring a schedule whose segment was archived meanwhile', async () => {
+    const tables = setup()
+    tables.newsletter_schedules = createQueryBuilderMock([
+      { data: EXISTING, error: null },
+      { data: null, error: { code: 'CRM01', message: 'Segment is archived. Choose another segment or restore it first.' } },
+    ])
+
+    const response = await patch({ archived: false })
+
+    expect(response.status).toBe(409)
+    expect((await response.json()).error).toContain('Segment is archived')
+  })
+
   it('answers 404 for an unknown schedule', async () => {
     setup(null)
 

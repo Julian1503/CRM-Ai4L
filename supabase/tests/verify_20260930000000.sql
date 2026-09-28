@@ -1,4 +1,5 @@
--- Verification for migration 20260930000000_archive_and_remove.sql
+-- Verification for migrations 20260930000000_archive_and_remove.sql and
+-- 20260930010000_archive_rules_hardening.sql
 --
 -- Non-destructive: the whole script runs inside a transaction that is ROLLED BACK at
 -- the end. Every fixture carries the suffix `__archverify`.
@@ -123,6 +124,17 @@ begin
     v_failed := true;
   end;
   assert v_failed, 'a new campaign must not target an archived segment';
+
+  -- 20260930010000: a live schedule cannot be pointed at an archived segment either.
+  v_failed := false;
+  begin
+    update public.newsletter_schedules set segment_id = v_segment_id
+    where id = (select id from public.newsletter_schedules where archived_at is null limit 1);
+  exception when sqlstate 'CRM01' then
+    v_failed := true;
+  end;
+  assert v_failed or not exists (select 1 from public.newsletter_schedules where archived_at is null),
+         'a live schedule must not target an archived segment';
 
   ----------------------------------------------------------------------------
   raise notice '9. an archived segment name can be reused';
