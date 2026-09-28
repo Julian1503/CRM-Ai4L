@@ -13,6 +13,14 @@ import {
 import { canTransition } from '@/lib/marketing/campaignStatus'
 import { validateCampaignCopy } from '@/lib/marketing/mergeFields'
 import type { CampaignRow, CampaignStatus } from '@/lib/db/types'
+import { campaignLifecycle } from '@/lib/lifecycle/entityLifecycle'
+import {
+  isArchiveRuleError,
+  lifecyclePatch,
+  readLifecycleAction,
+  refusal,
+  type LifecycleAction,
+} from '@/lib/lifecycle/lifecycle'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 
 export const runtime = 'nodejs'
@@ -46,15 +54,21 @@ export async function GET(
       .maybeSingle()
 
     if (error) throw new Error(error.message)
-    if (!data) return notFound('Campaign not found.')
+    if (!data || data.removed_at) return notFound('Campaign not found.')
 
-    return ok({ campaign: data })
+    return ok({ campaign: data, lifecycle: campaignLifecycle(data) })
   } catch (error) {
     return serverError(error, 'Could not load campaign.')
   }
 }
 
-/** Updates campaign details, and moves it between draft and review. */
+/**
+ * Updates campaign details, and moves it between draft and review; or, on its own,
+ * archives, restores or removes it (`{ archived: boolean }`, `{ removed: true }`).
+ *
+ * An archived campaign is frozen until it is restored, and an approved or sending one
+ * cannot be archived. The database triggers in 20260930000000 guarantee both.
+ */
 export async function PATCH(
   request: NextRequest,
   { params }: RouteContext
@@ -69,17 +83,23 @@ export async function PATCH(
     return badRequest('Expected a JSON object.')
   }
 
+  const lifecycle = readLifecycleAction(body)
+
+  if (lifecycle.kind === 'invalid') return badRequest(lifecycle.error)
+  if (lifecycle.kind !== 'none') return changeLifecycle(id, lifecycle.kind, guard.session.userId)
+
   try {
     const db = await createSupabaseServerClient()
 
     const { data: existing, error: loadError } = await db
       .from('campaigns')
-      .select('id, status, consent_stream')
+      .select('id, status, consent_stream, archived_at, removed_at')
       .eq('id', id)
       .maybeSingle()
 
     if (loadError) throw new Error(loadError.message)
-    if (!existing) return notFound('Campaign not found.')
+    if (!existing || existing.removed_at) return notFound('Campaign not found.')
+    if (existing.archived_at) return conflict('This campaign is archived. Restore it before changing it.')
 
     const updates: Partial<CampaignRow> = {}
 
@@ -179,10 +199,49 @@ export async function PATCH(
       .select('*')
       .single()
 
+    // An archived segment, chosen here or archived since.
+    if (isArchiveRuleError(error)) return conflict(error?.message ?? 'That segment is archived.')
     if (error) throw new Error(error.message)
 
     return ok({ campaign: data })
   } catch (error) {
     return serverError(error, 'Could not update campaign.')
+  }
+}
+
+async function changeLifecycle(id: string, action: LifecycleAction, userId: string): Promise<NextResponse> {
+  try {
+    const db = await createSupabaseServerClient()
+    const { data: campaign, error: loadError } = await db
+      .from('campaigns')
+      .select('id, status, archived_at, removed_at')
+      .eq('id', id)
+      .maybeSingle()
+
+    if (loadError) throw new Error(loadError.message)
+    if (!campaign || campaign.removed_at) return notFound('Campaign not found.')
+
+    const refused = refusal(action, campaignLifecycle(campaign))
+
+    if (refused) return conflict(refused)
+
+    const { data, error } = await db
+      .from('campaigns')
+      .update({ ...lifecyclePatch(action, campaign, userId), updated_at: new Date().toISOString() })
+      .eq('id', id)
+      // Conditioned on the status it was checked at, so an approval landing in between
+      // is not archived out from under the send.
+      .eq('status', campaign.status)
+      .select('*')
+      .maybeSingle()
+
+    // Restoring a draft whose segment has since been archived, or a race the trigger caught.
+    if (isArchiveRuleError(error)) return conflict(error?.message ?? 'The campaign cannot change right now.')
+    if (error) throw new Error(error.message)
+    if (!data) return conflict('This campaign changed while you were looking at it. Reload and try again.')
+
+    return ok({ campaign: data })
+  } catch (error) {
+    return serverError(error, 'Could not change the campaign.')
   }
 }

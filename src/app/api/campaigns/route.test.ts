@@ -270,4 +270,24 @@ describe('/api/campaigns', () => {
       })
     })
   })
+
+  it('lists only live campaigns by default, and only unremoved archived ones when asked', async () => {
+    const { campaigns } = setup({ data: [], error: null, count: 0 })
+
+    await get()
+    expect(campaigns.allFor('is').map((call) => call.args)).toEqual([['archived_at', null]])
+
+    campaigns.calls.length = 0
+    await get('?archived=true')
+    expect(campaigns.argsFor('not')).toEqual(['archived_at', 'is', null])
+    expect(campaigns.allFor('is').map((call) => call.args)).toEqual([['removed_at', null]])
+  })
+
+  it('answers 409 when the chosen segment is archived', async () => {
+    setup({ data: null, error: { code: 'CRM01', message: 'Segment is archived.' } })
+
+    const response = await post({ name: 'Launch', templateId: 'tpl-1', segmentId: 'seg-old' })
+
+    expect(response.status).toBe(409)
+  })
 })

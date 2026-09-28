@@ -56,7 +56,8 @@ export async function POST(
       .maybeSingle()
 
     if (loadError) throw new Error(loadError.message)
-    if (!campaign) return notFound('Campaign not found.')
+    if (!campaign || campaign.removed_at) return notFound('Campaign not found.')
+    if (campaign.archived_at) return conflict('This campaign is archived. Restore it before sending it.')
 
     const alreadySending = campaign.status === 'sending'
     const retryingFailed = campaign.status === 'failed'

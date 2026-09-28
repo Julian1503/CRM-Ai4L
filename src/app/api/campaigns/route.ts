@@ -1,8 +1,16 @@
 import type { NextRequest } from 'next/server'
 import type { NextResponse } from 'next/server'
 
-import { badRequest, ok, readJsonBody, requireSessionOr401, serverError } from '@/lib/api/responses'
+import {
+  badRequest,
+  conflict,
+  ok,
+  readJsonBody,
+  requireSessionOr401,
+  serverError,
+} from '@/lib/api/responses'
 import type { CampaignStatus, ConsentStream } from '@/lib/db/types'
+import { isArchiveRuleError } from '@/lib/lifecycle/lifecycle'
 import { CAMPAIGN_TRANSITIONS } from '@/lib/marketing/campaignStatus'
 import { parseConsentStream } from '@/lib/marketing/consentStream'
 import { buildPageMeta, getPageRange, readPageParams } from '@/lib/pagination'
@@ -24,6 +32,9 @@ function readStatusFilter(value: string | null): CampaignStatus | null {
  *
  * `?stream=` and `?status=` narrow the list. An unrecognised value is ignored rather
  * than answered with an empty page, which would read as "there are none".
+ *
+ * Live campaigns by default; `?archived=true` lists the archived ones instead. Removed
+ * campaigns are never listed.
  */
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const guard = await requireSessionOr401()
@@ -38,6 +49,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const status = readStatusFilter(request.nextUrl.searchParams.get('status'))
 
     let query = db.from('campaigns').select('*, segment:segments(name)', { count: 'exact' })
+
+    query =
+      request.nextUrl.searchParams.get('archived') === 'true'
+        ? query.not('archived_at', 'is', null).is('removed_at', null)
+        : query.is('archived_at', null)
 
     if (stream) query = query.eq('consent_stream', stream)
     if (status) query = query.eq('status', status)
@@ -156,6 +172,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       .select('*')
       .single()
 
+    if (isArchiveRuleError(error)) return conflict(error?.message ?? 'That segment is archived.')
     if (error) throw new Error(error.message)
 
     return ok({ campaign: data })

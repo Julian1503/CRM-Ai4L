@@ -228,7 +228,8 @@ begin
   end;
   assert v_failed, 'a segment referenced by a campaign was deleted';
 
-  -- An unreferenced segment still deletes, which is what the delete policy is for.
+  -- As the owner an unreferenced segment still deletes. The application role cannot:
+  -- 20260930000000 dropped the delete policy, and the app archives instead.
   insert into public.segments (name) values ('Unused __p4verify') returning id into v_segment2_id;
   delete from public.segments where id = v_segment2_id;
   assert (select count(*) from public.segments where id = v_segment2_id) = 0,
@@ -248,14 +249,12 @@ begin
     format('expected select/insert/update policies on all three tables (9), found %s', v_count);
 
   ----------------------------------------------------------------------------
-  raise notice '14. only segments may be deleted by an authenticated user';
+  raise notice '14. nothing here may be deleted by an authenticated user';
   ----------------------------------------------------------------------------
-  assert (select count(*) from pg_policies
-          where schemaname='public' and tablename='segments' and cmd='DELETE') = 1,
-         'segments should be deletable';
-
+  -- Segments used to be deletable; since 20260930000000 they are archived or removed
+  -- (a soft delete) instead, and no delete policy remains.
   select count(*) into v_count from pg_policies
-  where schemaname='public' and tablename in ('campaigns','campaign_sends') and cmd='DELETE';
+  where schemaname='public' and tablename in ('segments','campaigns','campaign_sends') and cmd='DELETE';
   assert v_count = 0,
     format('campaigns / campaign_sends must not be deletable - that is the send history (%s policies found)', v_count);
 

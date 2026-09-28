@@ -92,6 +92,11 @@ export type SegmentRow = {
   name: string
   description: string | null
   definition: Record<string, unknown>
+  /** Archived: hidden from lists and pickers, restorable. See 20260930000000. */
+  archived_at: string | null
+  /** Removed: hidden everywhere, never physically deleted. Implies archived_at. */
+  removed_at: string | null
+  removed_by: string | null
   created_at: string
   updated_at: string
 }
@@ -124,6 +129,11 @@ export type CampaignRow = {
   schedule_id: string | null
   /** The occurrence (a local date) this campaign was drafted for. Unique per schedule. */
   scheduled_for: string | null
+  /** Archived: hidden from lists and pickers, restorable. See 20260930000000. */
+  archived_at: string | null
+  /** Removed: hidden everywhere, never physically deleted. Implies archived_at. */
+  removed_at: string | null
+  removed_by: string | null
   created_at: string
   updated_at: string
 }

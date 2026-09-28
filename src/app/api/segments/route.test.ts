@@ -147,4 +147,17 @@ describe('/api/segments', () => {
 
     expect((await post({ name: 'x' })).status).toBe(500)
   })
+
+  it('lists only live segments by default, and only unremoved archived ones when asked', async () => {
+    const { segments } = setup()
+    segments.calls.length = 0
+
+    await get()
+    expect(segments.allFor('is').map((call) => call.args)).toEqual([['archived_at', null]])
+
+    segments.calls.length = 0
+    await get('?archived=true')
+    expect(segments.argsFor('not')).toEqual(['archived_at', 'is', null])
+    expect(segments.allFor('is').map((call) => call.args)).toEqual([['removed_at', null]])
+  })
 })

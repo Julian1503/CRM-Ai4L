@@ -10,7 +10,12 @@ import { createSupabaseServerClient } from '@/lib/supabase/server'
 
 export const runtime = 'nodejs'
 
-/** Lists segments, newest first, bounded to one page. */
+/**
+ * Lists segments, newest first, bounded to one page.
+ *
+ * Live segments by default; `?archived=true` lists the archived ones instead. Removed
+ * segments are never listed.
+ */
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const guard = await requireSessionOr401()
   if ('response' in guard) return guard.response
@@ -20,9 +25,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const pageParams = readPageParams(request.nextUrl.searchParams)
     const { from, to } = getPageRange(pageParams)
 
-    const { data, error, count } = await db
-      .from('segments')
-      .select('*', { count: 'exact' })
+    const archived = request.nextUrl.searchParams.get('archived') === 'true'
+
+    let query = db.from('segments').select('*', { count: 'exact' })
+
+    query = archived
+      ? query.not('archived_at', 'is', null).is('removed_at', null)
+      : query.is('archived_at', null)
+
+    const { data, error, count } = await query
       .order('created_at', { ascending: false })
       .range(from, to)
 

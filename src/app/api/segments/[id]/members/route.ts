@@ -31,6 +31,7 @@ export async function GET(request: NextRequest, { params }: RouteContext): Promi
       .from('segments')
       .select('definition')
       .eq('id', id)
+      .is('removed_at', null)
       .maybeSingle()
 
     if (error) throw new Error(error.message)

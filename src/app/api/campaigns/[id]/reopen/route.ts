@@ -8,6 +8,7 @@ import {
   requireSessionOr401,
   serverError,
 } from '@/lib/api/responses'
+import { isArchiveRuleError } from '@/lib/lifecycle/lifecycle'
 import { canReopen } from '@/lib/marketing/campaignStatus'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 
@@ -47,12 +48,13 @@ export async function POST(
 
     const { data: campaign, error: loadError } = await db
       .from('campaigns')
-      .select('id, status, send_run')
+      .select('id, status, send_run, archived_at, removed_at')
       .eq('id', id)
       .maybeSingle()
 
     if (loadError) throw new Error(loadError.message)
-    if (!campaign) return notFound('Campaign not found.')
+    if (!campaign || campaign.removed_at) return notFound('Campaign not found.')
+    if (campaign.archived_at) return conflict('This campaign is archived. Restore it before re-sending it.')
 
     if (!canReopen(campaign.status)) {
       return conflict(
@@ -81,6 +83,8 @@ export async function POST(
       .select('id, status, send_run')
       .maybeSingle()
 
+    // Its segment was archived since it went out.
+    if (isArchiveRuleError(reopenError)) return conflict(reopenError?.message ?? 'The segment is archived.')
     if (reopenError) throw new Error(reopenError.message)
     if (!reopened) return conflict('This campaign was already re-opened.')
 

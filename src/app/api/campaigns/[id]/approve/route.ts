@@ -9,6 +9,7 @@ import {
   requireSessionOr401,
   serverError,
 } from '@/lib/api/responses'
+import { isArchiveRuleError } from '@/lib/lifecycle/lifecycle'
 import { checkApprovable } from '@/lib/marketing/campaignStatus'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 
@@ -42,12 +43,13 @@ export async function POST(
 
     const { data: campaign, error: loadError } = await db
       .from('campaigns')
-      .select('id, status, provider_automation_id, segment_id')
+      .select('id, status, provider_automation_id, segment_id, archived_at, removed_at')
       .eq('id', id)
       .maybeSingle()
 
     if (loadError) throw new Error(loadError.message)
-    if (!campaign) return notFound('Campaign not found.')
+    if (!campaign || campaign.removed_at) return notFound('Campaign not found.')
+    if (campaign.archived_at) return conflict('This campaign is archived. Restore it before approving it.')
 
     const check = checkApprovable({
       status: campaign.status,
@@ -73,6 +75,8 @@ export async function POST(
       .select('*')
       .single()
 
+    // Its segment was archived: the trigger refuses to approve a send to it.
+    if (isArchiveRuleError(error)) return conflict(error?.message ?? 'The segment is archived.')
     if (error) throw new Error(error.message)
 
     return ok({ campaign: data })
