@@ -1,7 +1,7 @@
 # Production audit remediation plan
 
 Date: 2026-09-28  
-Status: Proposed implementation plan; no fixes implemented by this document.  
+Status: Implementation in progress — see the tracker in section 15.  
 Source: Comprehensive repository and application audit in the accompanying conversation.
 
 ## 1. Purpose and scope
@@ -634,16 +634,16 @@ All items start pending. Mark an item complete only with merged implementation, 
 
 | ID | Finding | Plan section | Status |
 | --- | --- | --- | --- |
-| C1 | Public signup and missing approved membership | 5.1 | Pending |
-| H1 | Browser-readable integration credentials | 5.2 | Pending |
-| H2 | Vulnerable production dependencies | 5.3 | Pending |
-| H3 | Duplicate sends and ignored ledger failures | 6.3 | Pending |
-| H4 | Missing dispatch-time consent check | 6.4 | Pending |
-| H5 | Consent/provider synchronization gap | 6.5 | Pending |
-| H6 | Failed campaign edits bypass renewed approval | 6.1 | Pending |
-| H7 | Audience truncation | 6.2 | Pending |
-| H8 | Non-atomic contact edits | 7.1 | Pending |
-| H9 | Unmapped import status overwrites customers | 7.2 | Pending |
+| C1 | Public signup and missing approved membership | 5.1 | Implemented; locally verified (`db:verify -- membership`, E2E). Deploy: disable signup, bootstrap admin — docs/ACCESS_CONTROL.md |
+| H1 | Browser-readable integration credentials | 5.2 | Implemented; locally verified. Deploy: rotate EmailOctopus key after release |
+| H2 | Vulnerable production dependencies | 5.3 | Implemented: Next.js 16.3.6, SheetJS 0.20.3 (CDN, lockfile integrity); `npm audit --omit=dev` = 0 |
+| H3 | Duplicate sends and ignored ledger failures | 6.3 | Implemented: atomic leased claims, owner-only outcomes, `uncertain` state, checked writes, cron-driven resume — docs/CAMPAIGN_DELIVERY.md |
+| H4 | Missing dispatch-time consent check | 6.4 | Implemented: eligibility re-checked atomically at dispatch; withdrawal/archive skips queued rows |
+| H5 | Consent/provider synchronization gap | 6.5 | Implemented: transactional consent outbox, current-state convergence, inline + cron workers; backfill queues withdrawn contacts |
+| H6 | Failed campaign edits bypass renewed approval | 6.1 | Implemented: content revisions, revision-bound approval, optimistic edits, failed-edit → draft |
+| H7 | Audience truncation | 6.2 | Implemented: resumable keyset materialisation past the row cap; >10k refused at approval and send |
+| H8 | Non-atomic contact edits | 7.1 | Implemented: transactional validated `save_contact`, revision conflicts, drawer keeps draft — docs/IMPORTS.md. Deploy: manual service-link review |
+| H9 | Unmapped import status overwrites customers | 7.2 | Implemented: tri-state yes/no parsing, presence-aware `is_customer`/status, blank never clears, duplicates reported |
 | H10 | Payment return/webhook race | 8.2 | Pending |
 | H11 | Webhook claim lost after process failure | 8.1 | Pending |
 | H12 | Schedule advances before durable work | 8.4 | Pending |
@@ -653,15 +653,15 @@ All items start pending. Mark an item complete only with merged implementation, 
 | M4 | Calendly rescheduling/event ordering | 8.3 | Pending |
 | M5 | Insufficient contrast | 9.4 | Pending |
 | M6 | Spreadsheet parser in initial bundle | 10.1 | Pending |
-| M7 | Incomplete readiness checks | 5.4 | Pending |
+| M7 | Incomplete readiness checks | 5.4 | Implemented: feature-aware preflight + online access/contract checks; `npm run test:scripts` |
 | L1 | Unnamed Notes field | 9.4 | Pending |
 | P1 | Mobile task controls below statistics | 9.5 | Pending |
 | P2 | Workspace/filter state lost on refresh | 9.6 | Pending |
-| P3 | Import change preview | 7.3 | Pending |
+| P3 | Import change preview | 7.3 | Implemented: database-computed change preview, rejected-rows CSV, token-checked commit |
 | A1 | Business writes in oversized client shell | 10.2 | Pending |
-| A2 | Per-campaign report requests | 10.3 | Pending |
-| T1 | Authenticated CI and obsolete smoke tests | 4.1 | Pending |
-| T2 | Missing concurrency/integration protection | 4.2 and phase acceptance tests | Pending |
+| A2 | Per-campaign report requests | 10.3 | Implemented: SQL batch summaries in the list response + bounded batch endpoint |
+| T1 | Authenticated CI and obsolete smoke tests | 4.1 | Implemented: CI `integration` job on local Supabase; seeded identities; smoke specs updated |
+| T2 | Missing concurrency/integration protection | 4.2 and phase acceptance tests | In progress: migration replay, guarded `db:verify`, membership + delivery suites, Postgres integration tests (race, row cap, fault injection) |
 
 ### Definition of done
 

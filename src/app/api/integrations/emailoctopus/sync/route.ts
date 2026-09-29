@@ -1,12 +1,9 @@
 import { NextResponse, type NextRequest } from 'next/server'
 
 import { getSession } from '@/lib/auth/dal'
-import { syncContactToEmailOctopus, type SubscriptionStatus } from '@/lib/emailOctopus'
-import {
-  CONSENT_STATE_MERGE_FIELDS,
-  PREFERENCES_URL_MERGE_FIELD,
-} from '@/lib/marketing/mergeFields'
-import { preferencesUrl } from '@/lib/preferences/token'
+import { loadEmailOctopusCredentials } from '@/lib/marketing/providers/credentials'
+import { preferencesOrigin, providerContactFields, providerStatus } from '@/lib/contacts/providerSync'
+import { syncContactToEmailOctopus } from '@/lib/emailOctopus'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 
 export const runtime = 'nodejs'
@@ -28,49 +25,11 @@ type SyncContact = {
   subscribedToPrograms?: boolean
 }
 
-const [NEWSLETTER_FIELD, COURSES_FIELD] = CONSENT_STATE_MERGE_FIELDS
-
-/**
- * The custom fields written with every contact.
- *
- * Two jobs the list status cannot do. `Newsletter` / `Courses` record *which* consent
- * the contact holds, so a newsletter sent from the EmailOctopus dashboard can be
- * segmented on it rather than going to everyone we are allowed to email. `PrefsUrl` is
- * their permanent preference-centre link, stored on the contact so that any template —
- * including ones this codebase never sees — can carry a working unsubscribe.
- *
- * The link is omitted rather than faked when it cannot be signed. A field holding a
- * broken URL is worse than an absent one: the absent field shows up in the setup
- * checker, the broken link only shows up as a reader who could not unsubscribe.
- */
-function contactFields(contact: SyncContact, origin: string | null): Record<string, string> {
-  const fields: Record<string, string> = {
-    [NEWSLETTER_FIELD]: contact.subscribedToNewsletter ? 'yes' : 'no',
-    [COURSES_FIELD]: contact.subscribedToPrograms ? 'yes' : 'no',
-  }
-
-  if (contact.id && origin) {
-    fields[PREFERENCES_URL_MERGE_FIELD] = preferencesUrl(origin, contact.id)
-  }
-
-  return fields
-}
-
 type SyncPayload = {
-  apiKey?: unknown
-  listId?: unknown
   contacts?: unknown
   offset?: unknown
 }
 
-function isSyncContact(value: unknown): value is SyncContact {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    typeof (value as SyncContact).email === 'string' &&
-    (value as SyncContact).email.trim() !== ''
-  )
-}
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Unknown error'
@@ -118,26 +77,6 @@ async function fetchSyncContactChunk(offset: number): Promise<{
 }
 
 /**
- * Where preference links should point, or null when they cannot be signed.
- *
- * A missing PREFERENCES_SECRET is a deployment fault. It is logged once and the field
- * is skipped, rather than aborting a sync that is otherwise correct — the contacts
- * still need their consent state pushed, and the setup checker reports the gap.
- */
-function readPreferencesOrigin(request: NextRequest): string | null {
-  try {
-    // Signing a throwaway id is the cheapest way to ask "is the secret configured"
-    // without duplicating that knowledge here.
-    preferencesUrl('https://example.invalid', '00000000-0000-4000-8000-000000000000')
-  } catch (error) {
-    console.error('Preference links are not configured, syncing without them:', error)
-    return null
-  }
-
-  return process.env.NEXT_PUBLIC_APP_URL?.trim() || request.nextUrl.origin
-}
-
-/**
  * Pushes contacts to an EmailOctopus list.
  *
  * Acts on behalf of a signed-in user, so unlike the webhook it is *not* exempt from the
@@ -154,53 +93,47 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   try {
-    const payload = (await request.json()) as SyncPayload
+    const payload = (await request.json().catch(() => ({}))) as SyncPayload
 
-    const apiKey = typeof payload?.apiKey === 'string' ? payload.apiKey.trim() : ''
-    const listId = typeof payload?.listId === 'string' ? payload.listId.trim() : ''
-
-    // `contacts` is optional: omitting it means "sync everything", which the server
-    // reads itself. The client cannot supply the full list any more — it only holds the
-    // page of contacts currently on screen.
-    const syncAll = payload.contacts === undefined
-    const requested = Array.isArray(payload.contacts) ? payload.contacts : []
+    // Server-read only. This route used to accept a contact list from the browser, which
+    // let any caller push arbitrary consent state for arbitrary addresses to the
+    // provider. Single-contact changes now travel through the consent outbox (audit H5);
+    // this is the full reconciliation, reading the database itself.
+    if (payload.contacts !== undefined) {
+      return NextResponse.json(
+        { error: 'Contact lists are not accepted. Consent changes are synchronised by the server.' },
+        { status: 400, headers: NO_STORE }
+      )
+    }
     const offset =
       typeof payload.offset === 'number' && Number.isInteger(payload.offset) && payload.offset >= 0
         ? payload.offset
         : 0
 
-    if (!apiKey || !listId || (!syncAll && !Array.isArray(payload.contacts))) {
+    // Read server-side only (audit H1). The browser can no longer see the key, and a
+    // key it supplied would let any caller push the CRM's contacts to their own list.
+    const credentials = await loadEmailOctopusCredentials()
+    if (!credentials) {
       return NextResponse.json(
-        { error: 'Missing required sync parameters' },
-        { status: 400, headers: NO_STORE }
+        { error: 'EmailOctopus is not configured. An administrator can connect it in Settings.' },
+        { status: 409, headers: NO_STORE }
       )
     }
+    const { apiKey, listId } = credentials
 
-    const chunk = syncAll
-      ? await fetchSyncContactChunk(offset)
-      : { contacts: requested.filter(isSyncContact), hasMore: false }
+    const chunk = await fetchSyncContactChunk(offset)
 
     // Same resolution the booking links use, so both kinds of link in an email point at
     // the same deployment. Null when the preference link cannot be signed at all — a
     // missing secret is a deployment fault, and it must not stop the sync, only leave
     // the field out until it is fixed.
-    const origin = readPreferencesOrigin(request)
+    const origin = preferencesOrigin(request.nextUrl.origin)
     const contacts = chunk.contacts
     const errors: Array<{ email: string; error: string }> = []
     let syncedCount = 0
 
     for (const contact of contacts) {
-      // The provider's list status is a single switch, so it answers the broader
-      // question: may we email this person at all? A contact who takes courses but not
-      // the newsletter must stay SUBSCRIBED here, or EmailOctopus refuses to queue the
-      // course automation for them and the second consent is unusable.
-      //
-      // The two consents are told apart on our side, where the campaign's own stream
-      // gates the audience — see segmentDefinitionToFilters.
-      const status: SubscriptionStatus =
-        contact.subscribedToNewsletter || contact.subscribedToPrograms
-          ? 'SUBSCRIBED'
-          : 'UNSUBSCRIBED'
+      const status = providerStatus(contact)
 
       try {
         await syncContactToEmailOctopus(
@@ -210,7 +143,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           contact.firstName || '',
           contact.lastName || '',
           status,
-          { fields: contactFields(contact, origin) }
+          { fields: providerContactFields(contact, origin) }
         )
         syncedCount += 1
       } catch (error: unknown) {
@@ -223,7 +156,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({
       success: true,
       syncedCount,
-      skippedCount: syncAll ? 0 : requested.length - contacts.length,
       errorsCount: errors.length,
       errors: errors.length > 0 ? errors : undefined,
       hasMore: chunk.hasMore,

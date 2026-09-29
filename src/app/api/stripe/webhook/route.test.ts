@@ -3,27 +3,28 @@
  */
 import { NextRequest } from 'next/server'
 
-import { createDbMock, createQueryBuilderMock } from '@/test/supabaseMock'
-
 const mockGetAdminClient = jest.fn()
 const mockConstructEvent = jest.fn()
+const mockRetrieve = jest.fn()
 const mockGetStripeConfig = jest.fn()
 const mockStartIntegrationDelivery = jest.fn().mockResolvedValue('delivery-1')
 const mockCompleteIntegrationDelivery = jest.fn().mockResolvedValue(undefined)
-const mockSendBookingPaidEmail = jest.fn()
+const mockProcessNotifications = jest.fn()
 
 jest.mock('@/lib/supabase/admin', () => ({ getAdminClient: () => mockGetAdminClient() }))
 jest.mock('@/lib/stripe/client', () => ({
   getStripeConfig: () => mockGetStripeConfig(),
-  getStripeClient: () => ({ webhooks: { constructEvent: mockConstructEvent } }),
+  getStripeClient: () => ({
+    webhooks: { constructEvent: mockConstructEvent },
+    checkout: { sessions: { retrieve: mockRetrieve } },
+  }),
 }))
 jest.mock('@/lib/operations/deliveries', () => ({
   startIntegrationDelivery: (...args: unknown[]) => mockStartIntegrationDelivery(...args),
   completeIntegrationDelivery: (...args: unknown[]) => mockCompleteIntegrationDelivery(...args),
 }))
-
-jest.mock('@/lib/booking/paidEmail', () => ({
-  sendBookingPaidEmail: (...args: unknown[]) => mockSendBookingPaidEmail(...args),
+jest.mock('@/lib/booking/notifications', () => ({
+  processNotifications: (...args: unknown[]) => mockProcessNotifications(...args),
 }))
 
 import { POST } from './route'
@@ -46,23 +47,33 @@ const completedEvent = {
       status: 'complete',
       payment_status: 'no_payment_required',
       amount_total: 0,
+      currency: 'aud',
       metadata: { booking_id: 'b1' },
     },
   },
 }
 
-function setupDb(claimed = true) {
-  const webhookEvents = createQueryBuilderMock(
-    claimed ? { data: null, error: null } : { data: null, error: { code: '23505', message: 'dup' } }
-  )
-  const bookings = createQueryBuilderMock({ data: [{ id: 'b1' }], error: null })
+type RpcAnswers = {
+  claim?: { outcome: string; claim_token: string | null }
+  payment?: string | { error: string }
+}
 
-  const db = createDbMock((table: string) =>
-    table === 'webhook_events' ? webhookEvents : bookings
-  )
-  mockGetAdminClient.mockReturnValue(db)
-
-  return { bookings, webhookEvents }
+/** The ledger and payment RPCs, answering as the database would. */
+function setupDb(answers: RpcAnswers = {}) {
+  const rpc = jest.fn(async (fn: string) => {
+    if (fn === 'claim_webhook_event') {
+      return { data: [answers.claim ?? { outcome: 'claimed', claim_token: 'tok-1' }], error: null }
+    }
+    if (fn === 'apply_checkout_payment') {
+      const payment = answers.payment ?? 'applied'
+      return typeof payment === 'string'
+        ? { data: payment, error: null }
+        : { data: null, error: { message: payment.error } }
+    }
+    return { data: true, error: null }
+  })
+  mockGetAdminClient.mockReturnValue({ rpc })
+  return { rpc }
 }
 
 describe('POST /api/stripe/webhook', () => {
@@ -75,7 +86,7 @@ describe('POST /api/stripe/webhook', () => {
       webhookSecret: 'whsec_1',
     })
     mockConstructEvent.mockReturnValue(completedEvent)
-    mockSendBookingPaidEmail.mockResolvedValue({ status: 'sent', emailId: 'email_1' })
+    mockProcessNotifications.mockResolvedValue({ claimed: 1, sent: 1, skipped: 0, retried: 0 })
     setupDb()
   })
 
@@ -130,105 +141,111 @@ describe('POST /api/stripe/webhook', () => {
   })
 
   describe('processing', () => {
-    it('marks the booking paid with the charged amount', async () => {
-      const { bookings } = setupDb()
+    it('applies the payment and completes the event in one database call (H10, H11)', async () => {
+      const { rpc } = setupDb()
 
       const response = await POST(request())
 
       expect(response.status).toBe(200)
-      const update = bookings.argsFor('update') as [Record<string, unknown>]
-      expect(update[0]).toMatchObject({ status: 'paid', charged_amount_cents: 0 })
-      expect(bookings.allFor('eq')).toContainEqual({
-        method: 'eq',
-        args: ['stripe_session_id', 'cs_1'],
+      expect(rpc).toHaveBeenCalledWith('apply_checkout_payment', {
+        p_booking_id: 'b1',
+        p_session_id: 'cs_1',
+        p_amount: 0,
+        p_currency: 'aud',
+        p_provider: 'stripe',
+        p_event_id: 'evt_1',
+        p_event_token: 'tok-1',
       })
-      expect(bookings.allFor('eq')).toContainEqual({ method: 'eq', args: ['id', 'b1'] })
     })
 
-    it('emails the scheduling link once the booking is paid', async () => {
-      await POST(request())
-
-      expect(mockSendBookingPaidEmail).toHaveBeenCalledWith(
-        expect.anything(),
-        completedEvent.data.object,
-        'b1'
-      )
-    })
-
-    it('does not email when the session matched no pending booking', async () => {
-      const bookings = createQueryBuilderMock({ data: [], error: null })
-      mockGetAdminClient.mockReturnValue(
-        createDbMock((table: string) =>
-          table === 'webhook_events'
-            ? createQueryBuilderMock({ data: null, error: null })
-            : bookings
-        )
-      )
-
-      await POST(request())
-
-      expect(mockSendBookingPaidEmail).not.toHaveBeenCalled()
-    })
-
-    it('still acknowledges the event when the email fails to send', async () => {
-      // The booking is already paid; a 500 would retry into a transition that no
-      // longer matches, turning an email hiccup into a failed delivery.
-      mockSendBookingPaidEmail.mockRejectedValue(new Error('Resend down'))
-      const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
+    it('sends the queued confirmation email straight away, but does not depend on it', async () => {
+      mockProcessNotifications.mockRejectedValue(new Error('Resend down'))
+      jest.spyOn(console, 'error').mockImplementation(() => undefined)
 
       const response = await POST(request())
 
       expect(response.status).toBe(200)
-      expect(errorSpy).toHaveBeenCalledWith(
-        'Booking confirmation email failed',
-        expect.objectContaining({ bookingId: 'b1', message: 'Resend down' })
-      )
-      errorSpy.mockRestore()
+      expect(mockProcessNotifications).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ limit: 1 }))
     })
 
-    it('acknowledges event types it does not act on', async () => {
-      mockConstructEvent.mockReturnValue({ id: 'evt_2', type: 'payment_intent.created' })
+    it('acknowledges a completed duplicate without touching the booking', async () => {
+      const { rpc } = setupDb({ claim: { outcome: 'completed', claim_token: null } })
+
+      const response = await POST(request())
+
+      expect(await response.json()).toEqual({ status: 'duplicate' })
+      expect(rpc).not.toHaveBeenCalledWith('apply_checkout_payment', expect.anything())
+    })
+
+    it('answers retryable while another delivery is processing the same event', async () => {
+      setupDb({ claim: { outcome: 'in_progress', claim_token: null } })
+
+      expect((await POST(request())).status).toBe(503)
+    })
+
+    it('treats a repeat of the same checkout as success', async () => {
+      setupDb({ payment: 'already_applied' })
 
       const response = await POST(request())
 
       expect(response.status).toBe(200)
-      await expect(response.json()).resolves.toMatchObject({ status: 'ignored' })
+      expect(await response.json()).toMatchObject({ status: 'duplicate' })
     })
 
-    it('skips a replayed event', async () => {
-      // Stripe retries aggressively; a replay must not re-run the transition.
-      const { bookings } = setupDb(false)
+    it.each(['mismatch', 'not_found'])('acknowledges and records a %s checkout without retrying', async (outcome) => {
+      jest.spyOn(console, 'warn').mockImplementation(() => undefined)
+      setupDb({ payment: outcome })
 
       const response = await POST(request())
 
-      await expect(response.json()).resolves.toMatchObject({ status: 'duplicate' })
-      expect(bookings.allFor('update')).toHaveLength(0)
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({ status: 'rejected' })
     })
 
-    it('returns 500 so Stripe retries when processing fails', async () => {
-      const failing = createQueryBuilderMock({ data: null, error: { message: 'db down' } })
-      mockGetAdminClient.mockReturnValue(
-        createDbMock((table: string) =>
-          table === 'webhook_events'
-            ? createQueryBuilderMock({ data: null, error: null })
-            : failing
-        )
-      )
+    it('asks Stripe to retry when the booking has not recorded its checkout yet', async () => {
+      jest.spyOn(console, 'error').mockImplementation(() => undefined)
+      const { rpc } = setupDb({ payment: 'not_ready' })
 
       const response = await POST(request())
 
       expect(response.status).toBe(500)
+      expect(rpc).toHaveBeenCalledWith('complete_webhook_event', expect.objectContaining({ p_status: 'failed_retryable' }))
     })
 
-    it('releases a claimed event when processing fails so Stripe can retry it', async () => {
-      const webhookEvents = createQueryBuilderMock({ data: null, error: null })
-      const failing = createQueryBuilderMock({ data: null, error: { message: 'db down' } })
-      mockGetAdminClient.mockReturnValue(
-        createDbMock((table: string) => (table === 'webhook_events' ? webhookEvents : failing))
-      )
+    it('records a database failure as retryable instead of deleting the claim', async () => {
+      jest.spyOn(console, 'error').mockImplementation(() => undefined)
+      const { rpc } = setupDb({ payment: { error: 'connection reset' } })
 
-      expect((await POST(request())).status).toBe(500)
-      expect(webhookEvents.allFor('delete')).toHaveLength(1)
+      const response = await POST(request())
+
+      expect(response.status).toBe(500)
+      expect(rpc).toHaveBeenCalledWith('complete_webhook_event', expect.objectContaining({
+        p_event_id: 'evt_1',
+        p_token: 'tok-1',
+        p_status: 'failed_retryable',
+      }))
+    })
+
+    it('terminally records a checkout that is not complete', async () => {
+      mockConstructEvent.mockReturnValue({
+        ...completedEvent,
+        data: { object: { ...completedEvent.data.object, status: 'open' } },
+      })
+      const { rpc } = setupDb()
+
+      const response = await POST(request())
+
+      expect(await response.json()).toEqual({ status: 'rejected' })
+      expect(rpc).toHaveBeenCalledWith('complete_webhook_event', expect.objectContaining({ p_status: 'failed_terminal' }))
+      expect(rpc).not.toHaveBeenCalledWith('apply_checkout_payment', expect.anything())
+    })
+
+    it('acknowledges event types it does not act on', async () => {
+      mockConstructEvent.mockReturnValue({ ...completedEvent, type: 'payment_intent.created' })
+      const { rpc } = setupDb()
+
+      expect(await (await POST(request())).json()).toMatchObject({ status: 'ignored' })
+      expect(rpc).not.toHaveBeenCalled()
     })
   })
 })

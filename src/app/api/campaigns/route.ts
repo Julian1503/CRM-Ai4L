@@ -13,6 +13,7 @@ import type { CampaignStatus, ConsentStream } from '@/lib/db/types'
 import { isArchiveRuleError } from '@/lib/lifecycle/lifecycle'
 import { CAMPAIGN_TRANSITIONS } from '@/lib/marketing/campaignStatus'
 import { parseConsentStream } from '@/lib/marketing/consentStream'
+import { readCampaignSendSummaries } from '@/lib/marketing/sendStatus'
 import { buildPageMeta, getPageRange, readPageParams } from '@/lib/pagination'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 
@@ -36,6 +37,9 @@ function readStatusFilter(value: string | null): CampaignStatus | null {
  * Live campaigns by default; `?archived=true` lists the archived ones instead. Removed
  * campaigns are never listed.
  */
+/** Campaign statuses whose ledger the list reports. */
+const REPORTED_STATUSES = new Set(['sending', 'failed'])
+
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const guard = await requireSessionOr401()
   if ('response' in guard) return guard.response
@@ -64,7 +68,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
     if (error) throw new Error(error.message)
 
-    return ok({ campaigns: data ?? [], ...buildPageMeta(pageParams, count ?? 0) })
+    // Ledger figures for the page's live sends, in the same response (audit A2): one
+    // aggregate query instead of one request per campaign row.
+    const reported = (data ?? []).filter((campaign) => REPORTED_STATUSES.has(campaign.status)).map((campaign) => campaign.id)
+    const sendReports = Object.fromEntries(await readCampaignSendSummaries(db, reported))
+
+    return ok({ campaigns: data ?? [], sendReports, ...buildPageMeta(pageParams, count ?? 0) })
   } catch (error) {
     return serverError(error, 'Could not load campaigns.')
   }

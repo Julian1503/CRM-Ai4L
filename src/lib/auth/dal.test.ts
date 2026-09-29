@@ -17,7 +17,16 @@ jest.mock('next/navigation', () => ({
   redirect: (path: string) => mockRedirect(path),
 }))
 
+import { ACTIVE_ADMIN, ACTIVE_OPERATOR, membershipFrom, type MembershipRow } from '@/test/membership'
+
 const ORIGINAL_ENV = process.env
+
+function withMembership(row: MembershipRow, error: unknown = null) {
+  mockCreateServerClient.mockResolvedValue({
+    auth: { getUser: mockGetUser },
+    from: membershipFrom(row, error),
+  })
+}
 
 async function loadDal() {
   let mod: typeof import('./dal')
@@ -35,7 +44,7 @@ describe('auth/dal', () => {
       NEXT_PUBLIC_SUPABASE_URL: 'https://test.supabase.co',
       NEXT_PUBLIC_SUPABASE_ANON_KEY: 'anon-key',
     }
-    mockCreateServerClient.mockResolvedValue({ auth: { getUser: mockGetUser } })
+    withMembership(ACTIVE_ADMIN)
   })
 
   afterAll(() => {
@@ -54,6 +63,35 @@ describe('auth/dal', () => {
       await expect(getSession()).resolves.toEqual({
         userId: 'user-1',
         email: 'admin@example.com',
+        role: 'admin',
+      })
+    })
+
+    describe('approved membership (audit C1)', () => {
+      beforeEach(() => {
+        mockGetUser.mockResolvedValue({
+          data: { user: { id: 'user-1', email: 'someone@example.com' } },
+          error: null,
+        })
+      })
+
+      it('carries the operator role from crm_members', async () => {
+        withMembership(ACTIVE_OPERATOR)
+        const { getSession } = await loadDal()
+
+        await expect(getSession()).resolves.toMatchObject({ role: 'operator' })
+      })
+
+      it.each([
+        ['a self-registered account with no membership row', null, null],
+        ['a disabled member', { role: 'admin', active: false }, null],
+        ['an unknown role', { role: 'superuser', active: true }, null],
+        ['a failed membership lookup', ACTIVE_ADMIN, { message: 'permission denied' }],
+      ])('denies %s', async (_label, row, error) => {
+        withMembership(row as MembershipRow, error)
+        const { getSession } = await loadDal()
+
+        await expect(getSession()).resolves.toBeNull()
       })
     })
 
@@ -119,6 +157,7 @@ describe('auth/dal', () => {
       await expect(requireSession()).resolves.toEqual({
         userId: 'user-1',
         email: 'admin@example.com',
+        role: 'admin',
       })
       expect(mockRedirect).not.toHaveBeenCalled()
     })

@@ -13,7 +13,7 @@ import { getAdminClient } from '@/lib/supabase/admin'
 import {
   claimWebhookEvent,
   deriveEventId,
-  releaseWebhookEvent,
+  completeWebhookEvent,
 } from '@/lib/webhooks/idempotency'
 import { verifyWebhookSignature } from '@/lib/webhooks/verify'
 
@@ -59,17 +59,23 @@ async function processEvent(
   // event id is used whenever it is present.
   const eventId = deriveEventId(JSON.stringify(event), event.id)
 
-  let claimed = false
+  const claimed = await claimWebhookEvent(db, PROVIDER, eventId, event.providerType)
+
+  if (claimed.outcome === 'completed') {
+    counts.duplicate += 1
+    return
+  }
+  if (claimed.outcome === 'in_progress') {
+    // Another delivery is applying it now. Failing the batch makes EmailOctopus retry,
+    // by which time this event is either completed (acknowledged) or reclaimable.
+    throw new Error('Another delivery is still processing this event.')
+  }
+
+  const claim = { provider: PROVIDER, eventId, token: claimed.token }
 
   try {
-    claimed = await claimWebhookEvent(db, PROVIDER, eventId, event.providerType)
-
-    if (!claimed) {
-      counts.duplicate += 1
-      return
-    }
-
     const result = await applyNewsletterEvent(db, event)
+    await completeWebhookEvent(db, claim, 'completed')
     counts[result.action] += 1
 
     const summary =
@@ -85,10 +91,8 @@ async function processEvent(
         : summary
     )
   } catch (error) {
-    if (claimed) {
-      await releaseWebhookEvent(db, PROVIDER, eventId)
-    }
-
+    // Recorded as retryable rather than deleted: the redelivery takes it over (H11).
+    await completeWebhookEvent(db, claim, 'failed_retryable', error instanceof Error ? error.message : 'failed')
     throw error
   }
 }

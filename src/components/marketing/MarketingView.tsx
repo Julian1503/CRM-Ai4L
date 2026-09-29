@@ -36,6 +36,8 @@ type Campaign = {
   provider_automation_id: string | null
   consent_stream: ConsentStream
   merge_fields: Record<string, string>
+  /** Moves on every content change; approvals and edits name the one they saw (H6). */
+  revision: number
   segment?: { name: string } | null
 }
 
@@ -51,6 +53,10 @@ type SendReport = {
   sent: number
   failed: number
   pending: number
+  /** Not sent because the contact withdrew consent or was archived before dispatch. */
+  skipped: number
+  /** EmailOctopus may or may not have queued these; a person must settle them. */
+  uncertain: number
   failureReason: string | null
   stallReason: string | null
 }
@@ -129,19 +135,31 @@ function describeStall(chunk: SendChunk): string {
 
 /** A one-line summary of a campaign's ledger, for the row itself. */
 function describeReport(report: SendReport): string {
+  // "Accepted" rather than "delivered": EmailOctopus took the request, nothing more.
+  const skipped =
+    (report.skipped ?? 0) > 0 ? `, ${report.skipped} skipped (consent withdrawn or archived)` : ''
+
+  if ((report.uncertain ?? 0) > 0) {
+    return (
+      `${report.uncertain} of ${report.total} recipients have an unknown outcome — EmailOctopus did ` +
+      'not confirm whether it queued them. Check the automation activity, then settle them below' +
+      skipped
+    )
+  }
+
   if (report.failed > 0) {
     const reason = report.failureReason ? ` — ${report.failureReason}` : ''
 
-    return `${report.failed} of ${report.total} recipients failed${reason}`
+    return `${report.failed} of ${report.total} recipients failed${reason}${skipped}`
   }
 
   if (report.pending > 0) {
     const reason = report.stallReason ? ` — ${report.stallReason}` : ''
 
-    return `${report.sent} of ${report.total} sent, ${report.pending} still to go${reason}`
+    return `${report.sent} of ${report.total} sent, ${report.pending} still to go${reason}${skipped}`
   }
 
-  return `${report.sent} of ${report.total} sent`
+  return `${report.sent} of ${report.total} sent${skipped}`
 }
 
 /** Campaign statuses whose copy can still be rewritten, mirroring the generate route. */
@@ -339,31 +357,20 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
   const loadSendReports = useCallback(async (targets: Campaign[]) => {
     if (targets.length === 0) return
 
-    const entries = await Promise.all(
-      targets.map(async (campaign) => {
-        try {
-          const response = await fetch(`/api/campaigns/${campaign.id}/send`)
+    // One bounded batch request, not one per campaign (audit A2).
+    try {
+      const ids = targets.map((campaign) => campaign.id).join(',')
+      const response = await fetch(`/api/campaigns/summaries?ids=${ids}`)
+      if (!response.ok) return
 
-          if (!response.ok) return null
+      const body = await response.json()
+      const summaries = (body?.summaries ?? {}) as Record<string, SendReport>
+      if (Object.keys(summaries).length === 0) return
 
-          const body = await response.json()
-
-          // The endpoint answers with counts; anything else is a routing accident and
-          // must not render as "0 of 0 sent".
-          if (typeof body?.total !== 'number') return null
-
-          return [campaign.id, body as SendReport] as const
-        } catch {
-          return null
-        }
-      })
-    )
-
-    const found = entries.filter((entry): entry is [string, SendReport] => entry !== null)
-
-    if (found.length === 0) return
-
-    setSendReports((current) => ({ ...current, ...Object.fromEntries(found) }))
+      setSendReports((current) => ({ ...current, ...summaries }))
+    } catch {
+      // A report already on screen survives a refresh whose request fails.
+    }
   }, [])
 
   const load = useCallback(async () => {
@@ -390,9 +397,10 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
         void checkAutomations(
           loaded.map((item) => item.provider_automation_id ?? '')
         )
-        // Only for the campaigns that have something to report — a draft has no ledger,
-        // and a request per row would be a page of requests for nothing.
-        void loadSendReports(loaded.filter((item) => REPORTED_STATUSES.has(item.status)))
+        // The list response carries the ledger figures for its live sends (audit A2).
+        if (body.sendReports && typeof body.sendReports === 'object') {
+          setSendReports((current) => ({ ...current, ...(body.sendReports as Record<string, SendReport>) }))
+        }
       }
       if (pickerResponse.ok) {
         const body = await pickerResponse.json()
@@ -597,6 +605,7 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
         body: JSON.stringify({
           segmentId: edit.segmentId,
           providerAutomationId: edit.automationId,
+          expectedRevision: campaign.revision,
         }),
       })
       if (!response.ok) throw new Error(await readError(response))
@@ -637,6 +646,35 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
     }
   }
 
+  /**
+   * Settles recipients whose provider outcome is unknown, after the operator has checked
+   * EmailOctopus. Never automatic: re-sending someone who already has the email is the
+   * failure this exists to prevent (audit H3).
+   */
+  const reconcile = async (campaign: Campaign, resolution: 'sent' | 'retry') => {
+    const question =
+      resolution === 'sent'
+        ? 'Record these recipients as sent? Only do this if EmailOctopus shows the automation queued them.'
+        : 'Queue these recipients again? Only do this if EmailOctopus shows they were NOT queued, otherwise they get the email twice.'
+    if (!window.confirm(question)) return
+
+    setError(null)
+    setBusy(campaign.id)
+    try {
+      const response = await fetch(`/api/campaigns/${campaign.id}/uncertain`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resolution }),
+      })
+      if (!response.ok) throw new Error(await readError(response))
+      await loadSendReports([campaign])
+    } catch (reconcileError) {
+      setError(reconcileError instanceof Error ? reconcileError.message : 'Could not settle the recipients.')
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const act = async (
     campaign: Campaign,
     action: 'draft' | 'review' | 'approve' | 'send' | 'reopen'
@@ -659,7 +697,13 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
       }
 
       if (action === 'approve') {
-        const response = await fetch(`/api/campaigns/${campaign.id}/approve`, { method: 'POST' })
+        // Names the revision on screen: if the campaign changed since, the server refuses
+        // rather than approving content nobody reviewed (audit H6).
+        const response = await fetch(`/api/campaigns/${campaign.id}/approve`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ revision: campaign.revision }),
+        })
         if (!response.ok) throw new Error(await readError(response))
       }
 
@@ -921,6 +965,29 @@ You will approve it again before anything leaves, and EmailOctopus only delivers
                 </p>
               )}
 
+              {campaign.status === 'failed' && (sendReports[campaign.id]?.uncertain ?? 0) > 0 && (
+                <div className={styles.actions} data-testid={`reconcile-${campaign.id}`}>
+                  <button
+                    type="button"
+                    className={styles.secondaryBtn}
+                    onClick={() => void reconcile(campaign, 'sent')}
+                    disabled={busy !== null}
+                    data-testid={`reconcile-sent-${campaign.id}`}
+                  >
+                    They received it
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.secondaryBtn}
+                    onClick={() => void reconcile(campaign, 'retry')}
+                    disabled={busy !== null}
+                    data-testid={`reconcile-retry-${campaign.id}`}
+                  >
+                    They did not, queue again
+                  </button>
+                </div>
+              )}
+
               <div className={styles.actions}>
                 <button
                   type="button"
@@ -1098,10 +1165,11 @@ You will approve it again before anything leaves, and EmailOctopus only delivers
                   audienceSize={reviewingAudience}
                   editable={COPY_EDITABLE_STATUSES.has(campaign.status)}
                   mergeFields={campaign.merge_fields ?? {}}
-                  onSaved={(mergeFields, status) => {
-                    // Take the status from the server rather than assuming. Generating
-                    // copy moves a campaign back to draft; plainly saving an edit does
-                    // not, and a failed campaign stays failed either way.
+                  revision={campaign.revision}
+                  onSaved={(mergeFields, status, revision) => {
+                    // Take status and revision from the server rather than assuming.
+                    // Generating copy moves a campaign back to draft, and so does editing
+                    // a failed one: changed content needs a fresh approval (audit H6).
                     setCampaigns((current) =>
                       current.map((item) =>
                         item.id === campaign.id
@@ -1109,6 +1177,7 @@ You will approve it again before anything leaves, and EmailOctopus only delivers
                               ...item,
                               merge_fields: mergeFields,
                               status: (status as Campaign['status']) ?? item.status,
+                              revision: revision ?? item.revision,
                             }
                           : item
                       )

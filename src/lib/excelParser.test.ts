@@ -4,6 +4,7 @@ import {
   mapAndValidateRows,
   isSupportedSpreadsheetName,
   SUPPORTED_SPREADSHEET_EXTENSIONS,
+  parseYesNo,
 } from './excelParser';
 
 // Helper function to create a mock excel file buffer
@@ -216,3 +217,39 @@ describe('excelParser - isSupportedSpreadsheetName', () => {
     expect(SUPPORTED_SPREADSHEET_EXTENSIONS).toContain('.numbers');
   });
 });
+
+describe('yes/no columns keep "said nothing" apart from "no" (audit H9)', () => {
+  const base = { 'First Name': 'Ada', 'Last Name': 'L', Email: 'ada@example.com' }
+  const mapping = { firstName: 'First Name', lastName: 'Last Name', email: 'Email', isCustomer: 'Customer', subscribedToNewsletter: 'News' }
+
+  it('reads an unmapped customer column as no information', () => {
+    const [row] = mapAndValidateRows([base], { firstName: 'First Name', lastName: 'Last Name', email: 'Email' })
+    expect(row.data?.isCustomer).toBeUndefined()
+  })
+
+  it('reads a blank cell as no information, never as "no"', () => {
+    const [row] = mapAndValidateRows([{ ...base, Customer: ' ', News: '' }], mapping)
+    expect(row.data?.isCustomer).toBeUndefined()
+    expect(row.data?.subscribedToNewsletter).toBeUndefined()
+  })
+
+  it('reads explicit answers', () => {
+    const [yes] = mapAndValidateRows([{ ...base, Customer: 'Yes', News: 'n' }], mapping)
+    expect(yes.data).toMatchObject({ isCustomer: true, subscribedToNewsletter: false })
+  })
+
+  it('rejects an unrecognised answer instead of treating it as "no"', () => {
+    const [row] = mapAndValidateRows([{ ...base, Customer: 'maybe' }], mapping)
+    expect(row.isValid).toBe(false)
+    expect(row.errors?.join(' ')).toMatch(/Customer must be yes or no/)
+  })
+
+  it.each([
+    ['', {}],
+    ['TRUE', { value: true }],
+    ['0', { value: false }],
+    ['perhaps', { invalid: true }],
+  ])('parseYesNo(%p)', (input, expected) => {
+    expect(parseYesNo(input)).toEqual(expected)
+  })
+})

@@ -7,6 +7,9 @@ export type IntegrationDeliveryErrorCode =
   | 'malformed_json'
   | 'invalid_payload'
   | 'processing_failed'
+  | 'unexpected_checkout'
+  | 'checkout_mismatch'
+  | 'checkout_not_found'
 
 type Completion = {
   status: Exclude<IntegrationDeliveryStatus, 'processing'>

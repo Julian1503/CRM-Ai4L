@@ -24,7 +24,11 @@ export interface MappedContactRow {
     jobTypeName?: string;
     department?: string;
     position?: string;
-    isCustomer: boolean;
+    /**
+     * Undefined when the column is unmapped or the cell is blank: the spreadsheet said
+     * nothing, so an existing contact's status is kept (audit H9).
+     */
+    isCustomer?: boolean;
     /**
      * Undefined when the spreadsheet has no column for this consent — which is not the
      * same as `false`, and the import RPC reads the difference. Absent says nothing
@@ -125,11 +129,24 @@ export function parseExcelBuffer(buffer: Buffer): RawParsedSpreadsheet {
   return { headers, rows };
 }
 
-function parseBoolean(val: unknown): boolean {
-  if (typeof val === 'boolean') return val;
-  if (val === undefined || val === null) return false;
+const TRUE_VALUES = new Set(['yes', 'true', '1', 'y']);
+const FALSE_VALUES = new Set(['no', 'false', '0', 'n']);
+
+/**
+ * A yes/no cell, keeping three answers apart (audit H9):
+ *   blank            undefined — the spreadsheet says nothing; existing data is kept
+ *   yes/true/1/y     true
+ *   no/false/0/n     false — an explicit change
+ * Anything else is `invalid`, so a typo cannot silently read as "no".
+ */
+export function parseYesNo(val: unknown): { value?: boolean; invalid?: true } {
+  if (typeof val === 'boolean') return { value: val };
+  if (val === undefined || val === null) return {};
   const str = String(val).trim().toLowerCase();
-  return str === 'yes' || str === 'true' || str === '1' || str === 'y';
+  if (str === '') return {};
+  if (TRUE_VALUES.has(str)) return { value: true };
+  if (FALSE_VALUES.has(str)) return { value: false };
+  return { invalid: true };
 }
 
 export function mapAndValidateRows(
@@ -178,13 +195,16 @@ export function mapAndValidateRows(
     const department = getValue('department') || undefined;
     const position = getValue('position') || undefined;
     
-    const isCustomer = parseBoolean(mapping.isCustomer ? row[mapping.isCustomer] : false);
-    const subscribedToNewsletter = mapping.subscribedToNewsletter
-      ? parseBoolean(row[mapping.subscribedToNewsletter])
-      : undefined;
-    const subscribedToPrograms = mapping.subscribedToPrograms
-      ? parseBoolean(row[mapping.subscribedToPrograms])
-      : undefined;
+    // Unmapped and blank both mean "no information": never a demotion or a withdrawal.
+    const yesNo = (key: string, label: string): boolean | undefined => {
+      if (!mapping[key]) return undefined;
+      const parsed = parseYesNo(row[mapping[key]]);
+      if (parsed.invalid) errors.push(`${label} must be yes or no (got "${row[mapping[key]]}")`);
+      return parsed.value;
+    };
+    const isCustomer = yesNo('isCustomer', 'Customer');
+    const subscribedToNewsletter = yesNo('subscribedToNewsletter', 'Newsletter');
+    const subscribedToPrograms = yesNo('subscribedToPrograms', 'Courses');
 
     // Validation checks
     if (!firstName || (!lastName && !mapping.fullName)) {

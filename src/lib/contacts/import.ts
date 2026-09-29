@@ -4,6 +4,7 @@ import type {
   Database,
   ImportContactPayloadRow,
   ImportContactsResult,
+  ImportPreview,
 } from '@/lib/db/types'
 import type { MappedContactRow } from '@/lib/excelParser'
 
@@ -62,10 +63,11 @@ export function toImportPayload(rows: MappedContactRow[]): ImportContactPayloadR
         email: data.email.trim(),
         first_name: data.firstName.trim(),
         last_name: data.lastName.trim(),
-        // Always sent: on import the spreadsheet is authoritative for the lifecycle
-        // flag. Consent is not — see setConsentIfPresent.
-        is_customer: Boolean(data.isCustomer),
       }
+
+      // Only when the spreadsheet actually said yes or no. Sending `false` for an
+      // unmapped column demoted every existing customer in the file (audit H9).
+      if (typeof data.isCustomer === 'boolean') payload.is_customer = data.isCustomer
 
       setConsentIfPresent(payload, 'subscribed_to_newsletter', data.subscribedToNewsletter)
       setConsentIfPresent(payload, 'subscribed_to_programs', data.subscribedToPrograms)
@@ -94,9 +96,36 @@ export function toImportPayload(rows: MappedContactRow[]): ImportContactPayloadR
  *
  * @throws when the RPC reports an error or returns no result.
  */
-export async function importContacts(
+/** Thrown when contacts matched by a preview changed before the import committed. */
+export class ImportPreviewStaleError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ImportPreviewStaleError'
+  }
+}
+
+/**
+ * What importing these rows would change, computed by the database with the same rules
+ * the import uses, without writing anything (audit P3).
+ */
+export async function previewContactImport(
   db: SupabaseClient<Database>,
   rows: MappedContactRow[]
+): Promise<ImportPreview> {
+  const payload = toImportPayload(rows)
+  const { data, error } = await db.rpc('preview_import_contacts', { payload })
+
+  if (error) throw new Error(`Could not preview the import: ${error.message}`)
+  if (!data) throw new Error('The import preview returned nothing.')
+
+  return data as ImportPreview
+}
+
+export async function importContacts(
+  db: SupabaseClient<Database>,
+  rows: MappedContactRow[],
+  /** From previewContactImport: the import refuses if the preview has gone stale. */
+  previewToken: string | null = null
 ): Promise<ImportContactsResult> {
   const payload = toImportPayload(rows)
 
@@ -111,8 +140,9 @@ export async function importContacts(
     }
   }
 
-  const { data, error } = await db.rpc('import_contacts', { payload })
+  const { data, error } = await db.rpc('import_contacts', { payload, p_preview_token: previewToken })
 
+  if (error?.code === 'CRM08') throw new ImportPreviewStaleError(error.message)
   if (error) {
     throw new Error(`Contact import failed: ${error.message}`)
   }

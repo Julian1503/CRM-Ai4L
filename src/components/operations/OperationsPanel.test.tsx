@@ -103,6 +103,42 @@ describe('OperationsPanel', () => {
     expect(screen.getByText('7 booked')).toBeInTheDocument()
   })
 
+  describe('stuck work', () => {
+    it('lists each kind of stuck work with what to do about it', async () => {
+      routeFetch({
+        summary: () =>
+          jsonResponse({
+            summary: {
+              ...SUMMARY,
+              attention: { uncertainSends: 2, expiredSendClaims: 1, consentSyncPending: 4, consentSyncFailed: 3 },
+            },
+          }),
+      })
+      render(<OperationsPanel />)
+
+      const list = await screen.findByTestId('attention-list')
+      expect(list).toHaveTextContent(/2 campaign recipient\(s\) have an unknown delivery outcome/)
+      expect(list).toHaveTextContent(/1 recipient claim\(s\) expired/)
+      expect(list).toHaveTextContent(/3 consent change\(s\) could not reach EmailOctopus/)
+      expect(list).toHaveTextContent(/4 consent change\(s\) are waiting/)
+    })
+
+    it('says plainly when nothing is waiting', async () => {
+      routeFetch({
+        summary: () =>
+          jsonResponse({
+            summary: {
+              ...SUMMARY,
+              attention: { uncertainSends: 0, expiredSendClaims: 0, consentSyncPending: 0, consentSyncFailed: 0 },
+            },
+          }),
+      })
+      render(<OperationsPanel />)
+
+      expect(await screen.findByTestId('attention-clear')).toBeInTheDocument()
+    })
+  })
+
   it('fetches an uncached aggregate', async () => {
     render(<OperationsPanel />)
 

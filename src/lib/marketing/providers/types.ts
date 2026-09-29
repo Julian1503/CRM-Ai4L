@@ -48,6 +48,12 @@ export type SendOutcome =
       retryable: boolean
       /** Provider-requested backoff, from Retry-After. */
       retryAfterMs?: number
+      /**
+       * The provider may have acted on the request even though no success came back:
+       * a timeout, a dropped connection, or a 5xx on a call that is not idempotent.
+       * Never retried automatically — see `uncertain` in campaign_sends (audit H3).
+       */
+      ambiguous?: boolean
     }
 
 export type PersonalisationFields = Record<string, string>

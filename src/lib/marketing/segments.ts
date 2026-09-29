@@ -156,21 +156,28 @@ export async function resolveSegmentAudience(
   }
 }
 
-/** The whole audience a send would reach, up to the cap. */
-export async function resolveSegmentMembers(
+/**
+ * How many contacts a send would reach right now, and whether that is over the cap.
+ *
+ * Deliberately returns no member list. The function this replaced read "the whole
+ * audience" with one `range(0, 9999)` request, which PostgREST silently truncates at
+ * its max-rows setting (audit H7). A send's recipients are materialised page by page
+ * in src/lib/marketing/runs.ts instead.
+ */
+export async function measureSegmentAudience(
   db: SupabaseClient<Database>,
   segment: SegmentRef,
   stream: ConsentStream
-): Promise<SegmentMembers> {
-  const { members, total, truncated } = await resolveSegmentAudience(db, {
+): Promise<{ total: number; truncated: boolean }> {
+  const { total } = await resolveSegmentAudience(db, {
     segmentId: segment.id,
     definition: segment.definition,
     stream,
     page: 1,
-    pageSize: SEGMENT_MEMBER_CAP,
+    pageSize: 1,
   })
 
-  return { members, total, truncated }
+  return { total, truncated: total > SEGMENT_MEMBER_CAP }
 }
 
 /** One page of the audience, for screens that show who a campaign will reach. */

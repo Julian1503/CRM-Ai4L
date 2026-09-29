@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
+import { fetchActiveRole } from '@/lib/auth/membership'
 import { isApiPath, isCronPath, isPublicPath, isWebhookPath } from '@/lib/auth/routes'
 import { getSupabaseConfig } from '@/lib/supabase/config'
 
@@ -75,6 +76,14 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
 
   if (!user) {
     return deny(request)
+  }
+
+  // A verified identity without an active crm_members row is not staff (audit C1).
+  // Page navigations only: every API route re-checks membership through the DAL next to
+  // the data, and database policies enforce it again, so repeating the lookup here
+  // would add a round trip to each API call without adding protection.
+  if (!isApiPath(pathname) && !(await fetchActiveRole(supabase, user.id))) {
+    return deny(request, 'not-approved')
   }
 
   // Responses here may carry refreshed Set-Cookie headers; a shared CDN cache must

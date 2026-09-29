@@ -17,7 +17,8 @@ const config: Config = {
   // fails, just later.
   testTimeout: 20000,
   // src/e2e holds Playwright specs; importing @playwright/test under jsdom throws.
-  testPathIgnorePatterns: ['<rootDir>/node_modules/', '<rootDir>/src/e2e/'],
+  // scripts/ holds node:test suites (npm run test:scripts), not Jest ones.
+  testPathIgnorePatterns: ['<rootDir>/node_modules/', '<rootDir>/src/e2e/', '<rootDir>/scripts/'],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
     // `server-only` throws on import outside the react-server condition, which Jest

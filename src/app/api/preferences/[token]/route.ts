@@ -1,5 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server'
 
+import { processConsentOutbox } from '@/lib/consent/outbox'
+import { preferencesOrigin } from '@/lib/contacts/providerSync'
+import { loadEmailOctopusCredentials } from '@/lib/marketing/providers/credentials'
 import { MissingPreferencesSecretError, readPreferencesToken } from '@/lib/preferences/token'
 import { getAdminClient } from '@/lib/supabase/admin'
 
@@ -25,6 +28,25 @@ export const runtime = 'nodejs'
  */
 
 const NO_STORE = { 'Cache-Control': 'private, no-store' }
+
+async function syncNow(
+  db: ReturnType<typeof getAdminClient>,
+  contactId: string,
+  origin: string
+): Promise<'done' | 'pending'> {
+  try {
+    const result = await processConsentOutbox(db, {
+      credentials: await loadEmailOctopusCredentials(db),
+      origin: preferencesOrigin(origin),
+      contactId,
+      limit: 1,
+    })
+    return result.claimed > 0 && result.failed === 0 ? 'done' : 'pending'
+  } catch (error) {
+    console.error('Inline consent sync failed; left queued:', error)
+    return 'pending'
+  }
+}
 
 /** Null means "the reader said nothing about this stream", which the RPC leaves alone. */
 function readConsent(value: unknown): boolean | null {
@@ -129,8 +151,14 @@ export async function POST(
 
     if (readError) throw new Error(readError.message)
 
+    // The change is already queued for the provider in the same transaction (audit H5).
+    // Draining it now just makes it immediate; a failure here leaves it queued for the
+    // scheduled worker and is reported as "pending", never as an error to the reader.
+    const providerSync = await syncNow(db, contactId, request.nextUrl.origin)
+
     return NextResponse.json(
       {
+        providerSync,
         // A token for a contact who no longer exists is answered as though the change
         // applied. Nothing useful can be done about it, and reporting it would tell a
         // stranger holding an old link whether the person is still in the database.

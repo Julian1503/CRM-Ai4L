@@ -151,6 +151,15 @@ end $$;
 ----------------------------------------------------------------------------
 -- 11. As the application role: no physical delete, and no un-remove.
 ----------------------------------------------------------------------------
+-- Act as an approved CRM member (20261002000000_crm_membership): a bare `authenticated`
+-- role with no crm_members row can no longer see or change anything.
+insert into auth.users (id, email)
+  values ('00000000-0000-4000-8000-00000000a11c', 'member__archverify@example.invalid');
+insert into public.crm_members (user_id, role)
+  values ('00000000-0000-4000-8000-00000000a11c', 'operator');
+select set_config('request.jwt.claims',
+  '{"sub":"00000000-0000-4000-8000-00000000a11c","role":"authenticated"}', true);
+
 set local role authenticated;
 
 do $$

@@ -3,7 +3,6 @@ import type { NextRequest, NextResponse } from 'next/server'
 import { badRequest, conflict, ok, readJsonBody, requireSessionOr401, serverError } from '@/lib/api/responses'
 import { loadEmailOctopusCredentials } from '@/lib/marketing/providers/credentials'
 import { verifyAutomation, type AutomationCheck } from '@/lib/marketing/providers/emailOctopus'
-import { createSupabaseServerClient } from '@/lib/supabase/server'
 
 export const runtime = 'nodejs'
 
@@ -50,8 +49,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (ids.length > MAX_IDS) return badRequest(`Check at most ${MAX_IDS} automations at a time.`)
 
   try {
-    const db = await createSupabaseServerClient()
-    const credentials = await loadEmailOctopusCredentials(db)
+    const credentials = await loadEmailOctopusCredentials()
 
     if (!credentials) {
       return conflict('EmailOctopus credentials are not configured in Settings.')

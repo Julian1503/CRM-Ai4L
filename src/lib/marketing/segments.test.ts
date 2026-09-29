@@ -3,7 +3,7 @@ import { createDbMock, createQueryBuilderMock, type QueryBuilderMock } from '@/t
 import {
   SEGMENT_MEMBER_CAP,
   resolveSegmentAudience,
-  resolveSegmentMembers,
+  measureSegmentAudience,
 } from './segments'
 
 const CONTACTS = [
@@ -138,16 +138,16 @@ describe('resolveSegmentAudience', () => {
   })
 })
 
-describe('resolveSegmentMembers', () => {
+describe('measureSegmentAudience', () => {
   const segment = { id: 'seg-1', definition: {} }
 
-  it('reads the whole audience up to the cap', async () => {
-    const { db, contacts } = setup()
+  it('counts without reading the audience, which a row cap would truncate (audit H7)', async () => {
+    const { db, contacts } = setup({ data: CONTACTS, error: null, count: 12_345 })
 
-    const result = await resolveSegmentMembers(db as never, segment, 'newsletter')
+    const result = await measureSegmentAudience(db as never, segment, 'newsletter')
 
-    expect(contacts.argsFor('range')).toEqual([0, SEGMENT_MEMBER_CAP - 1])
-    expect(result.members).toHaveLength(2)
+    expect(contacts.argsFor('range')).toEqual([0, 0])
+    expect(result).toEqual({ total: 12_345, truncated: true })
   })
 
   it('reports when the cap truncated the segment', async () => {
@@ -155,13 +155,13 @@ describe('resolveSegmentMembers', () => {
     // successful full send.
     const { db } = setup({ data: CONTACTS, error: null, count: SEGMENT_MEMBER_CAP + 500 })
 
-    expect((await resolveSegmentMembers(db as never, segment, 'newsletter')).truncated).toBe(true)
+    expect((await measureSegmentAudience(db as never, segment, 'newsletter')).truncated).toBe(true)
   })
 
   it('honours the segment’s overrides, because it reads through its id', async () => {
     const { db } = setup()
 
-    await resolveSegmentMembers(db as never, segment, 'newsletter')
+    await measureSegmentAudience(db as never, segment, 'newsletter')
 
     expect((db.rpc as jest.Mock).mock.calls[0][1]).toEqual({ p_segment_id: 'seg-1' })
   })

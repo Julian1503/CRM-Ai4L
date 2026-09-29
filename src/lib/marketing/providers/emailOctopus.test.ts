@@ -144,12 +144,30 @@ describe('triggerSend', () => {
     expect(result).toMatchObject({ ok: false, retryable: true, retryAfterMs: 4000 })
   })
 
-  it('marks a 5xx retryable', async () => {
+  it('marks a 5xx on the queue call ambiguous, never retryable', async () => {
+    // The queue call is not idempotent: a 5xx may follow acceptance (audit H3).
     const fetchImpl = jest.fn().mockResolvedValue(response(503))
 
     const result = await provider(fetchImpl).triggerSend(params)
 
-    expect(result).toMatchObject({ ok: false, retryable: true })
+    expect(result).toMatchObject({ ok: false, retryable: false, ambiguous: true })
+  })
+
+  it('marks a network failure or timeout ambiguous rather than throwing', async () => {
+    const fetchImpl = jest.fn().mockRejectedValue(Object.assign(new Error('timed out'), { name: 'TimeoutError' }))
+
+    const result = await provider(fetchImpl).triggerSend(params)
+
+    expect(result).toMatchObject({ ok: false, retryable: false, ambiguous: true })
+    expect((result as { error: string }).error).toMatch(/may or may not have been queued/)
+  })
+
+  it('bounds the queue call with a timeout', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue(new Response(null, { status: 204 }))
+
+    await provider(fetchImpl).triggerSend(params)
+
+    expect(fetchImpl.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal)
   })
 
   it('marks a 4xx non-retryable', async () => {

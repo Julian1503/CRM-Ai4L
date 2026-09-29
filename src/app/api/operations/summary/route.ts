@@ -1,6 +1,7 @@
 import type { NextResponse } from 'next/server'
 
 import { ok, requireSessionOr401, serverError } from '@/lib/api/responses'
+import { readAttentionCounts } from '@/lib/operations/attention'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 
 export const runtime = 'nodejs'
@@ -22,7 +23,7 @@ export async function GET(): Promise<NextResponse> {
       throw new Error('Operations summary returned no data.')
     }
 
-    return ok({ summary: data })
+    return ok({ summary: { ...data, attention: await readAttentionCounts(db) } })
   } catch (error) {
     return serverError(error, 'Could not load operational health.')
   }

@@ -1,6 +1,8 @@
 import type { Metadata } from 'next'
 
-import { findBookingByToken, markBookingPaid } from '@/lib/booking/repository'
+import { processNotifications } from '@/lib/booking/notifications'
+import { applyCheckoutPayment, isCompletedCheckout } from '@/lib/booking/payment'
+import { findBookingByToken } from '@/lib/booking/repository'
 import { getStripeClient, getStripeConfig } from '@/lib/stripe/client'
 import { getAdminClient } from '@/lib/supabase/admin'
 import { isSupabaseConfigured } from '@/lib/supabase/config'
@@ -54,21 +56,24 @@ export default async function ScheduledPage({
         const stripeConfig = getStripeConfig()
 
         if (stripeConfig) {
-          const session = await getStripeClient(stripeConfig.secretKey).checkout.sessions.retrieve(
-            requestedSession
-          )
-          const paymentConfirmed =
-            session.status === 'complete' &&
-            (session.payment_status === 'paid' ||
-              session.payment_status === 'no_payment_required') &&
-            session.amount_total === 0 &&
-            session.metadata?.booking_id === booking.id
+          const stripe = getStripeClient(stripeConfig.secretKey)
+          const session = await stripe.checkout.sessions.retrieve(requestedSession)
 
-          if (paymentConfirmed) {
-            confirmed =
-              booking.status === 'paid' ||
-              booking.status === 'booked' ||
-              (await markBookingPaid(db, session.id, 0, booking.id))
+          if (isCompletedCheckout(session) && session.metadata?.booking_id === booking.id) {
+            // The same operation the webhook uses, so whichever arrives first wins and
+            // the other is a no-op (audit H10). It checks the checkout, the amount and
+            // the currency itself, and never moves a booking backwards.
+            const outcome = await applyCheckoutPayment(db, { bookingId: booking.id, session })
+            confirmed = outcome === 'applied' || outcome === 'already_applied'
+
+            if (outcome === 'applied') {
+              // The confirmation email is queued with the payment; this only sends it
+              // sooner. A failure leaves it for the scheduled worker.
+              await processNotifications(db, {
+                retrieveCheckout: (id) => stripe.checkout.sessions.retrieve(id),
+                limit: 1,
+              }).catch((emailError) => console.error('Confirmation email left queued:', emailError))
+            }
           }
         }
       }

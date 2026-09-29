@@ -306,7 +306,7 @@ describe('CampaignCopyEditor', () => {
       fireEvent.click(screen.getByTestId('generate-copy'))
 
       await waitFor(() =>
-        expect(onSaved).toHaveBeenCalledWith(expect.any(Object), 'draft')
+        expect(onSaved).toHaveBeenCalledWith(expect.any(Object), 'draft', undefined)
       )
     })
 
@@ -372,7 +372,8 @@ describe('CampaignCopyEditor', () => {
       await waitFor(() =>
         expect(onSaved).toHaveBeenCalledWith(
           expect.objectContaining({ Headline: 'Sound copy' }),
-          'failed'
+          'failed',
+          undefined
         )
       )
     })

@@ -58,7 +58,9 @@ test.describe('CRM shell', () => {
   })
 
   test('exposes the status filter controls', async ({ page }) => {
-    for (const label of ['All List', 'Customers', 'Prospects', 'Subscribed']) {
+    // One tab per consent stream: a single "Subscribed" tab could only answer for one of
+    // the two independent consents while looking like it answered for both.
+    for (const label of ['All List', 'Leads', 'Customers', 'Prospects', 'Newsletter', 'Courses']) {
       await expect(page.getByRole('button', { name: label })).toBeVisible()
     }
   })
@@ -139,15 +141,26 @@ test.describe('CRM shell', () => {
     await expect(page.getByText(/Started via API/)).toBeVisible()
   })
 
-  test('requires an automation ID before a campaign can be approved', async ({ page }) => {
+  test('offers the automation connection in the campaign form', async ({ page }) => {
+    // The automation is chosen from registered templates or pasted by ID; the ID field
+    // sits behind a disclosure until asked for. Approval without one is refused by the
+    // database trigger, which the unit and database suites cover.
     await page.getByTestId('nav-item-campaigns').click()
 
+    await expect(page.getByTestId('campaign-automation-picker')).toBeVisible()
+    // Labelled "Automation ID" when no template is registered, "Use a different
+    // automation ID" otherwise.
+    await page
+      .locator('summary', { hasText: /Automation ID|Use a different automation ID/ })
+      .first()
+      .click()
     await expect(page.getByTestId('campaign-automation')).toBeVisible()
     await expect(page.getByTestId('campaign-automation')).toHaveAttribute(
       'placeholder',
-      /Required before approval/
+      /EmailOctopus automation ID/
     )
   })
+
 
   test('signs the user out and blocks the dashboard afterwards', async ({ page }) => {
     await page.getByTestId('sign-out').click()

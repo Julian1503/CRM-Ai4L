@@ -25,6 +25,7 @@ export function buildContactRow(overrides: Partial<ContactRow> = {}): ContactRow
     last_name: `Last${n}`,
     preferred_name: null,
     email: `contact${n}@example.com`,
+    consent_version: 0,
     mobile_number: null,
     work_phone: null,
     address: null,

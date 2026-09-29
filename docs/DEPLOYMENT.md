@@ -211,6 +211,17 @@ npm run preflight
 npm run preflight -- --online
 ```
 
+Each feature is reported as **ready**, **intentionally disabled** (listed in
+`CRM_DISABLED_FEATURES`), or **misconfigured**; only misconfigured fails. `core` and
+`email-consent` (preference-link signing, consent webhooks) cannot be disabled. A missing
+`PREFERENCES_SECRET` or `CRON_SECRET` used to pass silently; it now fails its feature.
+Diagnostics name variables, never their values.
+
+The online mode also proves the access boundary: public signup is disabled
+(`/auth/v1/settings`), anonymous reads of `contacts`, `credentials` and `crm_members` are
+refused, membership enforcement is installed, and an active administrator exists. It checks
+the `active_contacts` column contract rather than just table existence.
+
 The online mode confirms every required table and aggregate exists, the EmailOctopus list
 is reachable, the Stripe Price is active at $500 AUD, the coupon is valid at 100% off for
 one use, and the Calendly scheduling page resolves. It is read-only. After deployment,
@@ -252,17 +263,37 @@ npm run verify:deployment http://127.0.0.1:3100
 
 ---
 
+## 5a. Environments
+
+| Target | Supabase | Used by |
+| --- | --- | --- |
+| Local | `npx supabase start` (Docker), `supabase/config.toml`, signup disabled | development, `npm run db:verify`, E2E |
+| CI | same local stack inside the runner | `.github/workflows/ci.yml` |
+| Preview / production | hosted projects | deployment only |
+
+`NEXT_PUBLIC_*` values are inlined at **build** time; server secrets are read at
+**runtime**. Tests never read `.env.local` credentials for mutation: `scripts/seed-e2e.mjs`
+refuses any non-local Supabase URL, and `npm run db:verify` refuses the linked project
+without explicit confirmation.
+
 ## 6. Order of operations
 
 1. Client creates the Vercel project and points the subdomain at it.
-2. Apply migrations with `npx supabase db push`, then run `npm run db:verify`.
+2. Disable public signup (docs/ACCESS_CONTROL.md). Apply migrations with
+   `npx supabase db push`; it stops at `20261002000100_crm_membership_enforce` until an
+   administrator is bootstrapped with `npm run db:member -- grant <email> admin`, then push
+   again. Run the verification scripts against an isolated rehearsal database —
+   `npm run db:verify` targets the local stack by default and refuses the linked project
+   unless `DB_VERIFY_TARGET=linked DB_VERIFY_LINKED_REF=<ref>` confirms it.
 3. Set every variable from §3, `NEXT_PUBLIC_APP_URL` to the final host.
 4. Run `npm run preflight -- --online`; provider or schema failures block deployment.
 5. Deploy. Confirm TLS and that the subdomain resolves.
 6. Run both `npm run preflight -- --online https://<host>` and
    `npm run verify:deployment https://<host>` before going further.
-7. `npm run db:create-admin` if the admin account does not exist yet, and sign in.
-8. Enter the EmailOctopus API key and list id in the app's settings screen.
+7. `npm run db:create-admin` if the admin account does not exist yet (it also grants admin
+   membership), and sign in. Grant other staff with `npm run db:member`.
+8. As an administrator, enter the EmailOctopus API key and list id in the settings screen.
+   The key is write-only and is never shown again.
 9. Register the three webhooks (§4), then run the newsletter canary.
 10. `npm run db:sync-job-types -- --dry-run` to confirm the contact book is classified.
 11. Only then: create a segment, generate copy, approve, and send to a **test list of two

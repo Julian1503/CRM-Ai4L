@@ -10,7 +10,6 @@ import {
 } from '@/lib/marketing/mergeFields'
 import { loadEmailOctopusCredentials } from '@/lib/marketing/providers/credentials'
 import { createMergeField, listMergeTags } from '@/lib/marketing/providers/emailOctopus'
-import { createSupabaseServerClient } from '@/lib/supabase/server'
 
 export const runtime = 'nodejs'
 
@@ -37,7 +36,7 @@ const LABELS: Record<string, string> = {
 }
 
 async function loadCredentials() {
-  return loadEmailOctopusCredentials(await createSupabaseServerClient())
+  return loadEmailOctopusCredentials()
 }
 
 export async function GET(): Promise<NextResponse> {

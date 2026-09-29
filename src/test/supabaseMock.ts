@@ -17,6 +17,8 @@ const CHAINABLE = [
   'in',
   'lte',
   'gte',
+  'lt',
+  'gt',
   'order',
   'range',
   'limit',

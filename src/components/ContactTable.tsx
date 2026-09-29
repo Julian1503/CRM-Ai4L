@@ -38,6 +38,8 @@ export interface TableContact {
   organisation?: { name: string } | null;
   notes?: string;
   servicesBought?: string[];
+  /** The row's revision when loaded; an edit is refused if it has moved on (H8). */
+  revision?: number;
 }
 
 interface ContactTableProps {

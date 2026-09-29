@@ -7,9 +7,12 @@ import { createDbMock, createQueryBuilderMock } from '@/test/supabaseMock'
 
 const mockGetSession = jest.fn()
 const mockCreateServerClient = jest.fn()
+const mockAdminClient = jest.fn()
 const mockVerify = jest.fn()
 
 jest.mock('@/lib/auth/dal', () => ({ getSession: () => mockGetSession() }))
+// Credentials are read with the service role since audit H1.
+jest.mock('@/lib/supabase/admin', () => ({ getAdminClient: () => mockAdminClient() }))
 jest.mock('@/lib/supabase/server', () => ({
   createSupabaseServerClient: () => mockCreateServerClient(),
 }))
@@ -25,9 +28,7 @@ function withCredentials(
     { key: 'emailoctopus_list_id', value: 'list-1' },
   ]
 ) {
-  mockCreateServerClient.mockResolvedValue(
-    createDbMock(createQueryBuilderMock({ data: rows, error: null }))
-  )
+  mockAdminClient.mockReturnValue(createDbMock(createQueryBuilderMock({ data: rows, error: null })))
 }
 
 function post(body: unknown) {

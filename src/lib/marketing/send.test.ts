@@ -1,418 +1,291 @@
 /**
  * @jest-environment node
  */
-import { createDbMock, createQueryBuilderMock } from '@/test/supabaseMock'
+import type { ClaimedCampaignSend } from '@/lib/db/types'
 
-import type { CampaignProvider } from './providers/types'
-import { EMAILOCTOPUS_CAPABILITIES } from './providers/emailOctopus'
-import { TokenBucket } from './rateLimiter'
 import { BOOKING_URL_MERGE_FIELD } from './mergeFields'
-import { executeCampaignSends, prepareCampaignSends } from './send'
+import { EMAILOCTOPUS_CAPABILITIES } from './providers/emailOctopus'
+import type { CampaignProvider, SendOutcome } from './providers/types'
+import { TokenBucket } from './rateLimiter'
+import { executeCampaignSends, LedgerWriteError } from './send'
 
-function contactRow(id: string, email = `${id}@example.com`) {
-  return { id, contact_id: id, contact: { email, first_name: 'A', last_name: 'B' } }
+/**
+ * An in-memory stand-in for the ledger RPCs (claim_campaign_sends,
+ * begin_campaign_dispatch, complete_campaign_send, create_campaign_booking).
+ * The real SQL is exercised by supabase/tests/verify_20261003000000.sql and the
+ * integration suite; this pins down what the TypeScript does with each answer.
+ */
+function ledger(
+  claims: Array<Partial<ClaimedCampaignSend>>,
+  options: {
+    begin?: (id: string) => 'go' | 'lost' | 'skipped'
+    complete?: (id: string, status: string) => boolean | { error: string }
+    bookingError?: string
+  } = {}
+) {
+  const outcomes: Array<{ id: string; status: string; reference?: unknown; error?: unknown }> = []
+  const begun: string[] = []
+  const rows: ClaimedCampaignSend[] = claims.map((row, index) => ({
+    send_id: `s${index + 1}`,
+    contact_id: `c${index + 1}`,
+    email: `c${index + 1}@example.com`,
+    first_name: 'A',
+    last_name: 'B',
+    claim_token: `t${index + 1}`,
+    ...row,
+  }))
+
+  const rpc = jest.fn(async (fn: string, args: Record<string, unknown>) => {
+    if (fn === 'claim_campaign_sends') return { data: rows.slice(0, args.p_limit as number), error: null }
+    if (fn === 'begin_campaign_dispatch') {
+      begun.push(args.p_send_id as string)
+      return { data: options.begin?.(args.p_send_id as string) ?? 'go', error: null }
+    }
+    if (fn === 'complete_campaign_send') {
+      const answer = options.complete?.(args.p_send_id as string, args.p_status as string) ?? true
+      if (typeof answer === 'object') return { data: null, error: { message: answer.error } }
+      if (answer) {
+        outcomes.push({
+          id: args.p_send_id as string,
+          status: args.p_status as string,
+          reference: args.p_reference,
+          error: args.p_error,
+        })
+      }
+      return { data: answer, error: null }
+    }
+    if (fn === 'create_campaign_booking') {
+      return options.bookingError
+        ? { data: null, error: { message: options.bookingError } }
+        : { data: 'booking-1', error: null }
+    }
+    throw new Error(`unexpected rpc ${fn}`)
+  })
+
+  return { db: { rpc } as never, rpc, outcomes, begun }
 }
 
-function fakeProvider(overrides: Partial<CampaignProvider> = {}): CampaignProvider {
-  return {
-    name: 'fake',
-    capabilities: EMAILOCTOPUS_CAPABILITIES,
-    setContactFields: jest.fn().mockResolvedValue({ ok: true, reference: null }),
-    triggerSend: jest.fn().mockResolvedValue({ ok: true, reference: 'ref-1' }),
-    ...overrides,
-  }
+function provider(trigger: SendOutcome | ((email: string) => SendOutcome) = { ok: true, reference: 'ref' }) {
+  const triggerSend = jest.fn(async ({ email }: { email: string }) =>
+    typeof trigger === 'function' ? trigger(email) : trigger
+  )
+  const setContactFields = jest.fn(async (): Promise<SendOutcome> => ({ ok: true, reference: null }))
+  const fake: CampaignProvider = { name: 'fake', capabilities: EMAILOCTOPUS_CAPABILITIES, triggerSend, setContactFields }
+  return { fake, triggerSend, setContactFields }
 }
 
-/** Bucket with an injected clock so tests never actually wait. */
 function fastBucket() {
   let now = 0
-  return new TokenBucket({
-    capacity: 100,
-    refillPerSecond: 10,
-    now: () => now,
-    sleep: async (ms) => {
-      now += ms
-    },
-  })
+  return new TokenBucket({ capacity: 100, refillPerSecond: 10, now: () => now, sleep: async (ms) => { now += ms } })
 }
 
-const campaign = {
-  id: 'camp-1',
-  provider_automation_id: 'auto-1',
-  merge_fields: {} as Record<string, string>,
-  send_run: 1,
-}
-
-describe('prepareCampaignSends', () => {
-  it('creates one pending row per member', async () => {
-    const builder = createQueryBuilderMock({ data: null, error: null })
-    const db = createDbMock(builder)
-
-    const count = await prepareCampaignSends(db as never, 'camp-1', [
-      { id: 'c1', email: 'a@example.com', first_name: 'A', last_name: 'B' },
-      { id: 'c2', email: 'b@example.com', first_name: 'C', last_name: 'D' },
-    ])
-
-    expect(count).toBe(2)
-    const [rows] = builder.argsFor('upsert') as [Record<string, unknown>[]]
-    expect(rows).toHaveLength(2)
-    expect(rows[0]).toMatchObject({ campaign_id: 'camp-1', status: 'pending' })
-  })
-
-  it('ignores duplicates so re-preparing tops up rather than failing', async () => {
-    const builder = createQueryBuilderMock({ data: null, error: null })
-    const db = createDbMock(builder)
-
-    await prepareCampaignSends(db as never, 'camp-1', [
-      { id: 'c1', email: 'a@example.com', first_name: 'A', last_name: 'B' },
-    ])
-
-    const [, options] = builder.argsFor('upsert') as [unknown, Record<string, unknown>]
-    expect(options).toMatchObject({
-      onConflict: 'campaign_id,contact_id,run',
-      ignoreDuplicates: true,
-    })
-  })
-
-  it('does not hit the database for an empty segment', async () => {
-    const builder = createQueryBuilderMock({ data: null, error: null })
-    const db = createDbMock(builder)
-
-    expect(await prepareCampaignSends(db as never, 'camp-1', [])).toBe(0)
-    expect(db.from).not.toHaveBeenCalled()
-  })
-})
-
-describe('prepareCampaignSends across runs', () => {
-  it('tags the ledger rows with the run they belong to', async () => {
-    // Without the run, the second send's rows collide with the first's and are dropped
-    // as duplicates -- the campaign would report itself sent without emailing anybody.
-    const sends = createQueryBuilderMock({ data: null, error: null })
-    const db = createDbMock(() => sends)
-
-    await prepareCampaignSends(
-      db as never,
-      'camp-1',
-      [
-        { id: 'c1', email: 'a@example.com', first_name: 'A', last_name: 'B' },
-        { id: 'c2', email: 'b@example.com', first_name: 'C', last_name: 'D' },
-      ],
-      3
-    )
-
-    const [rows, options] = sends.argsFor('upsert') as [
-      Record<string, unknown>[],
-      Record<string, unknown>,
-    ]
-
-    expect(rows.every((row) => row.run === 3)).toBe(true)
-    expect(options.onConflict).toBe('campaign_id,contact_id,run')
-  })
-})
+const campaign = { id: 'camp-1', provider_automation_id: 'auto-1', merge_fields: {}, send_run: 2 }
 
 describe('executeCampaignSends', () => {
-  function setup(pending: unknown[]) {
-    const sends = createQueryBuilderMock({ data: pending, error: null })
-    const db = createDbMock(sends)
-    return { db, sends }
-  }
+  it('claims through the database, scoped to the run, with a bounded chunk', async () => {
+    const { db, rpc } = ledger([{}, {}, {}])
 
-  it('sends to each pending recipient', async () => {
-    const { db } = setup([contactRow('c1'), contactRow('c2')])
-    const provider = fakeProvider()
+    await executeCampaignSends(db, provider().fake, campaign, { maxToProcess: 2, bucket: fastBucket() })
 
-    const progress = await executeCampaignSends(db as never, provider, campaign, {
-      bucket: fastBucket(),
-    })
-
-    expect(progress).toMatchObject({ total: 2, sent: 2, failed: 0, remaining: 0 })
-    expect(provider.triggerSend).toHaveBeenCalledTimes(2)
+    expect(rpc).toHaveBeenCalledWith('claim_campaign_sends', expect.objectContaining({
+      p_campaign_id: 'camp-1',
+      p_run: 2,
+      p_limit: 2,
+    }))
   })
 
-  it('queues into the configured automation', async () => {
-    const { db } = setup([contactRow('c1')])
-    const provider = fakeProvider()
+  it('sends each claimed recipient and records the outcome under the claim token', async () => {
+    const { db, rpc, outcomes } = ledger([{}, {}])
+    const { fake, triggerSend } = provider({ ok: true, reference: 'ref-9' })
 
-    await executeCampaignSends(db as never, provider, campaign, { bucket: fastBucket() })
+    const progress = await executeCampaignSends(db, fake, campaign, { bucket: fastBucket() })
 
-    expect(provider.triggerSend).toHaveBeenCalledWith(
-      expect.objectContaining({ campaignHandle: 'auto-1', email: 'c1@example.com' })
+    expect(triggerSend).toHaveBeenCalledTimes(2)
+    expect(triggerSend).toHaveBeenCalledWith(expect.objectContaining({ campaignHandle: 'auto-1', email: 'c1@example.com' }))
+    expect(outcomes).toEqual([
+      { id: 's1', status: 'sent', reference: 'ref-9', error: null },
+      { id: 's2', status: 'sent', reference: 'ref-9', error: null },
+    ])
+    expect(rpc).toHaveBeenCalledWith('complete_campaign_send', expect.objectContaining({ p_token: 't1' }))
+    expect(progress).toMatchObject({ total: 2, sent: 2, failed: 0, uncertain: 0 })
+  })
+
+  it('checks eligibility immediately before the provider call and skips a withdrawn contact (H4)', async () => {
+    const { db, begun } = ledger([{}, {}], { begin: (id) => (id === 's1' ? 'skipped' : 'go') })
+    const { fake, triggerSend } = provider()
+
+    const progress = await executeCampaignSends(db, fake, campaign, { bucket: fastBucket() })
+
+    expect(begun).toEqual(['s1', 's2'])
+    expect(triggerSend).toHaveBeenCalledTimes(1)
+    expect(triggerSend).toHaveBeenCalledWith(expect.objectContaining({ email: 'c2@example.com' }))
+    expect(progress).toMatchObject({ sent: 1, skipped: 1 })
+  })
+
+  it('does not contact the provider for a claim it has lost', async () => {
+    const { db } = ledger([{}], { begin: () => 'lost' })
+    const { fake, triggerSend } = provider()
+
+    const progress = await executeCampaignSends(db, fake, campaign, { bucket: fastBucket() })
+
+    expect(triggerSend).not.toHaveBeenCalled()
+    expect(progress.lost).toBe(1)
+  })
+
+  it('never counts a success it could not record as its own (stale worker)', async () => {
+    const { db } = ledger([{}], { complete: () => false })
+
+    const progress = await executeCampaignSends(db, provider().fake, campaign, { bucket: fastBucket() })
+
+    expect(progress).toMatchObject({ sent: 0, lost: 1 })
+  })
+
+  it('halts the chunk when a provider success cannot be written to the ledger (H3)', async () => {
+    const { db } = ledger([{}, {}], { complete: () => ({ error: 'connection reset' }) })
+    const { fake, triggerSend } = provider()
+
+    await expect(executeCampaignSends(db, fake, campaign, { bucket: fastBucket() })).rejects.toBeInstanceOf(
+      LedgerWriteError
     )
+    // The second recipient is not emailed while outcomes cannot be recorded.
+    expect(triggerSend).toHaveBeenCalledTimes(1)
   })
 
-  it('only loads pending rows, so a resumed run does not re-send', async () => {
-    const { db, sends } = setup([contactRow('c1')])
+  it('records an ambiguous provider outcome as uncertain, never as retryable (H3)', async () => {
+    const { db, outcomes } = ledger([{}])
+    const { fake } = provider({ ok: false, retryable: false, ambiguous: true, error: 'No reply' })
 
-    await executeCampaignSends(db as never, fakeProvider(), campaign, { bucket: fastBucket() })
+    const progress = await executeCampaignSends(db, fake, campaign, { bucket: fastBucket() })
 
-    expect(sends.allFor('eq')).toContainEqual({ method: 'eq', args: ['status', 'pending'] })
+    expect(outcomes).toEqual([{ id: 's1', status: 'uncertain', reference: null, error: 'No reply' }])
+    expect(progress).toMatchObject({ uncertain: 1, remaining: 0 })
   })
 
-  it('bounds one invocation so a large segment can be chunked', async () => {
-    const { db, sends } = setup([contactRow('c1')])
-
-    await executeCampaignSends(db as never, fakeProvider(), campaign, {
-      maxToProcess: 250,
-      bucket: fastBucket(),
-    })
-
-    expect(sends.argsFor('limit')).toEqual([250])
-  })
-
-  it('paces every send through the rate limiter', async () => {
-    const { db } = setup([contactRow('c1'), contactRow('c2'), contactRow('c3')])
+  it('returns a rate-limited recipient to the queue and pauses the bucket', async () => {
+    const { db, outcomes } = ledger([{}])
+    const { fake } = provider({ ok: false, retryable: true, retryAfterMs: 4000, error: 'Too many requests' })
     const bucket = fastBucket()
-    const acquire = jest.spyOn(bucket, 'acquire')
+    const pause = jest.spyOn(bucket, 'pauseFor')
 
-    await executeCampaignSends(db as never, fakeProvider(), campaign, { bucket })
+    const progress = await executeCampaignSends(db, fake, campaign, { bucket })
 
-    expect(acquire).toHaveBeenCalledTimes(3)
+    expect(outcomes).toEqual([{ id: 's1', status: 'pending', reference: null, error: 'Too many requests' }])
+    expect(pause).toHaveBeenCalledWith(4000)
+    expect(progress).toMatchObject({ remaining: 1, deferredReason: 'Too many requests' })
   })
 
-  it('writes merge fields before triggering, since the body cannot be supplied', async () => {
-    const { db } = setup([contactRow('c1')])
-    const provider = fakeProvider()
-    const order: string[] = []
-    ;(provider.setContactFields as jest.Mock).mockImplementation(async () => {
-      order.push('fields')
-      return { ok: true, reference: null }
-    })
-    ;(provider.triggerSend as jest.Mock).mockImplementation(async () => {
-      order.push('send')
-      return { ok: true, reference: null }
-    })
+  it('fails a refused recipient and keeps the first reason', async () => {
+    const { db } = ledger([{}, {}])
+    const { fake } = provider((email) => ({ ok: false, retryable: false, error: `bad ${email}` }))
 
-    await executeCampaignSends(
-      db as never,
-      provider,
-      { ...campaign, merge_fields: { OfferHeadline: 'Free consult' } },
-      { bucket: fastBucket() }
+    const progress = await executeCampaignSends(db, fake, campaign, { bucket: fastBucket() })
+
+    expect(progress).toMatchObject({ failed: 2, failureReason: 'bad c1@example.com' })
+  })
+
+  it('fails a recipient with no email without calling the provider', async () => {
+    const { db, outcomes } = ledger([{ email: null }])
+    const { fake, triggerSend } = provider()
+
+    await executeCampaignSends(db, fake, campaign, { bucket: fastBucket() })
+
+    expect(triggerSend).not.toHaveBeenCalled()
+    expect(outcomes[0]).toMatchObject({ status: 'failed', error: 'Contact has no email address.' })
+  })
+
+  it('surfaces a claim failure', async () => {
+    const rpc = jest.fn(async () => ({ data: null, error: { message: 'permission denied' } }))
+
+    await expect(
+      executeCampaignSends({ rpc } as never, provider().fake, campaign, { bucket: fastBucket() })
+    ).rejects.toBeInstanceOf(LedgerWriteError)
+  })
+
+  it('counts a refusal it could not record as lost, not failed', async () => {
+    const { db } = ledger([{}], { complete: () => false })
+    const { fake } = provider({ ok: false, retryable: false, error: 'Rejected' })
+
+    const progress = await executeCampaignSends(db, fake, campaign, { bucket: fastBucket() })
+
+    expect(progress).toMatchObject({ failed: 0, lost: 1 })
+  })
+
+  it('counts a deferral it could not record as lost', async () => {
+    const { db } = ledger([{}], { complete: () => false })
+    const { fake } = provider({ ok: false, retryable: true, error: 'Slow down' })
+
+    const progress = await executeCampaignSends(db, fake, campaign, { bucket: fastBucket() })
+
+    expect(progress).toMatchObject({ remaining: 0, lost: 1 })
+  })
+
+  it('counts an uncertain outcome it could not record as lost', async () => {
+    const { db } = ledger([{}], { complete: () => false })
+    const { fake } = provider({ ok: false, retryable: false, ambiguous: true, error: 'No reply' })
+
+    expect((await executeCampaignSends(db, fake, campaign, { bucket: fastBucket() })).lost).toBe(1)
+  })
+
+  it('surfaces a dispatch-start failure before contacting the provider', async () => {
+    const { db, rpc } = ledger([{}])
+    rpc.mockImplementation(async (fn: string) =>
+      fn === 'claim_campaign_sends'
+        ? { data: [{ send_id: 's1', contact_id: 'c1', email: 'c1@example.com', first_name: 'A', last_name: 'B', claim_token: 't1' }], error: null }
+        : { data: null, error: { message: 'timeout' } }
     )
+    const { fake, triggerSend } = provider()
 
-    expect(order).toEqual(['fields', 'send'])
+    await expect(executeCampaignSends(db, fake, campaign, { bucket: fastBucket() })).rejects.toBeInstanceOf(LedgerWriteError)
+    expect(triggerSend).not.toHaveBeenCalled()
   })
 
-  it('skips the field write when there is nothing to personalise', async () => {
-    const { db } = setup([contactRow('c1')])
-    const provider = fakeProvider()
+  describe('personalisation and booking links', () => {
+    it('writes merge fields, including a per-recipient booking link, before triggering', async () => {
+      const { db } = ledger([{}])
+      const { fake, setContactFields, triggerSend } = provider()
 
-    await executeCampaignSends(db as never, provider, campaign, { bucket: fastBucket() })
-
-    expect(provider.setContactFields).not.toHaveBeenCalled()
-  })
-
-  describe('booking links', () => {
-    /** campaign_sends reads first; controlled booking RPC returns one id per recipient. */
-    function setupWithBookings(pending: unknown[]) {
-      const builder = createQueryBuilderMock({ data: pending, error: null })
-      const db = createDbMock(builder)
-      pending.forEach((_, index) => {
-        db.rpc.mockResolvedValueOnce({ data: `bk-${index + 1}`, error: null })
-      })
-      return { db, builder }
-    }
-
-    it('gives each recipient a booking link', async () => {
-      // Without this the campaign email has no call to action and the entire
-      // consultation funnel is unreachable.
-      const { db } = setupWithBookings([contactRow('c1')])
-      const provider = fakeProvider()
-
-      await executeCampaignSends(db as never, provider, campaign, {
-        bucket: fastBucket(),
-        baseUrl: 'https://crm.example.com',
-      })
-
-      const [, fields] = (provider.setContactFields as jest.Mock).mock.calls[0]
-      expect(fields[BOOKING_URL_MERGE_FIELD]).toMatch(
-        /^https:\/\/crm\.example\.com\/book\/[A-Za-z0-9_-]{43,}$/
-      )
-    })
-
-    it('gives different recipients different links', async () => {
-      // A shared link would let the first recipient consume everyone's booking.
-      const { db } = setupWithBookings([contactRow('c1'), contactRow('c2')])
-      const provider = fakeProvider()
-
-      await executeCampaignSends(db as never, provider, campaign, {
-        bucket: fastBucket(),
-        baseUrl: 'https://crm.example.com',
-      })
-
-      const calls = (provider.setContactFields as jest.Mock).mock.calls
-      expect(calls[0][1][BOOKING_URL_MERGE_FIELD]).not.toBe(
-        calls[1][1][BOOKING_URL_MERGE_FIELD]
-      )
-    })
-
-    it('keeps the campaign merge fields alongside the link', async () => {
-      const { db } = setupWithBookings([contactRow('c1')])
-      const provider = fakeProvider()
-
-      await executeCampaignSends(
-        db as never,
-        provider,
-        { ...campaign, merge_fields: { Headline: 'Free consult' } },
-        { bucket: fastBucket(), baseUrl: 'https://crm.example.com' }
-      )
-
-      const [, fields] = (provider.setContactFields as jest.Mock).mock.calls[0]
-      expect(fields.Headline).toBe('Free consult')
-      expect(fields[BOOKING_URL_MERGE_FIELD]).toBeDefined()
-    })
-
-    it('does not double the slash when baseUrl has a trailing one', async () => {
-      const { db } = setupWithBookings([contactRow('c1')])
-      const provider = fakeProvider()
-
-      await executeCampaignSends(db as never, provider, campaign, {
+      await executeCampaignSends(db, fake, { ...campaign, merge_fields: { Headline: 'Hi' } }, {
         bucket: fastBucket(),
         baseUrl: 'https://crm.example.com/',
       })
 
-      const [, fields] = (provider.setContactFields as jest.Mock).mock.calls[0]
-      expect(fields[BOOKING_URL_MERGE_FIELD]).not.toContain('.com//book')
+      const [, fields] = setContactFields.mock.calls[0] as unknown as [string, Record<string, string>]
+      expect(fields.Headline).toBe('Hi')
+      expect(fields[BOOKING_URL_MERGE_FIELD]).toMatch(/^https:\/\/crm\.example\.com\/book\/[A-Za-z0-9_-]+$/)
+      expect(setContactFields.mock.invocationCallOrder[0]).toBeLessThan(triggerSend.mock.invocationCallOrder[0])
     })
 
-    it('records the booking against the campaign and contact', async () => {
-      const { db } = setupWithBookings([contactRow('c1')])
+    it('fails the recipient rather than sending a dead booking link', async () => {
+      const { db, outcomes } = ledger([{}], { bookingError: 'No pending campaign send' })
+      const { fake, triggerSend } = provider()
 
-      await executeCampaignSends(db as never, fakeProvider(), campaign, {
-        bucket: fastBucket(),
-        baseUrl: 'https://crm.example.com',
-      })
+      await executeCampaignSends(db, fake, campaign, { bucket: fastBucket(), baseUrl: 'https://crm.example.com' })
 
-      expect(db.rpc).toHaveBeenCalledWith(
-        'create_campaign_booking',
-        expect.objectContaining({ p_contact_id: 'c1', p_campaign_id: 'camp-1' })
-      )
+      expect(triggerSend).not.toHaveBeenCalled()
+      expect(outcomes[0].status).toBe('failed')
     })
 
-    it('fails the recipient rather than sending a dead link', async () => {
-      // An email whose call to action goes nowhere is worse than no email.
-      const builder = createQueryBuilderMock([
-        { data: [contactRow('c1')], error: null },
-      ])
-      const db = createDbMock(builder)
-      db.rpc.mockResolvedValue({ data: null, error: { message: 'insert denied' } })
-      const provider = fakeProvider()
+    it('fails a recipient whose field write was refused outright', async () => {
+      const { db, outcomes } = ledger([{}])
+      const { fake, setContactFields, triggerSend } = provider()
+      setContactFields.mockResolvedValueOnce({ ok: false, retryable: false, error: 'Unknown field' })
 
-      const progress = await executeCampaignSends(
-        db as never,
-        provider,
-        campaign,
-        { bucket: fastBucket(), baseUrl: 'https://crm.example.com' }
-      )
+      await executeCampaignSends(db, fake, { ...campaign, merge_fields: { Headline: 'Hi' } }, { bucket: fastBucket() })
 
-      expect(progress).toMatchObject({ sent: 0, failed: 1 })
-      expect(provider.triggerSend).not.toHaveBeenCalled()
+      expect(triggerSend).not.toHaveBeenCalled()
+      expect(outcomes[0]).toMatchObject({ status: 'failed', error: 'Unknown field' })
     })
 
-    it('sends without a link when no baseUrl is configured', async () => {
-      const { db } = setup([contactRow('c1')])
-      const provider = fakeProvider()
+    it('defers a recipient whose field write was rate limited, before any send attempt', async () => {
+      const { db, outcomes, begun } = ledger([{}])
+      const { fake, setContactFields, triggerSend } = provider()
+      setContactFields.mockResolvedValueOnce({ ok: false, retryable: true, error: 'slow down' })
 
-      await executeCampaignSends(db as never, provider, campaign, { bucket: fastBucket() })
+      await executeCampaignSends(db, fake, { ...campaign, merge_fields: { Headline: 'Hi' } }, { bucket: fastBucket() })
 
-      expect(provider.setContactFields).not.toHaveBeenCalled()
-      expect(provider.triggerSend).toHaveBeenCalled()
+      expect(begun).toEqual([])
+      expect(triggerSend).not.toHaveBeenCalled()
+      expect(outcomes[0].status).toBe('pending')
     })
-  })
-
-  it('records a non-retryable failure and moves on', async () => {
-    const { db, sends } = setup([contactRow('c1'), contactRow('c2')])
-    const provider = fakeProvider({
-      triggerSend: jest
-        .fn()
-        .mockResolvedValueOnce({ ok: false, error: 'Bad contact', retryable: false })
-        .mockResolvedValueOnce({ ok: true, reference: 'r' }),
-    })
-
-    const progress = await executeCampaignSends(db as never, provider, campaign, {
-      bucket: fastBucket(),
-    })
-
-    expect(progress).toMatchObject({ sent: 1, failed: 1 })
-    const update = sends.argsFor('update') as [Record<string, unknown>]
-    expect(update[0].status).toBe('failed')
-  })
-
-  it('leaves a retryable failure pending for the next run', async () => {
-    const { db, sends } = setup([contactRow('c1')])
-    const provider = fakeProvider({
-      triggerSend: jest.fn().mockResolvedValue({ ok: false, error: '429', retryable: true }),
-    })
-
-    const progress = await executeCampaignSends(db as never, provider, campaign, {
-      bucket: fastBucket(),
-    })
-
-    expect(progress).toMatchObject({ sent: 0, failed: 0, remaining: 1 })
-
-    // The row stays pending, but the reason is written down: a retryable failure used
-    // to leave no trace anywhere, so a stalled send looked like a working one.
-    const updates = sends.allFor('update')
-    expect(updates).toHaveLength(1)
-    const note = updates[0].args[0] as Record<string, unknown>
-    expect(note).toMatchObject({ error: '429' })
-    expect(note.status).toBeUndefined()
-    expect(progress.deferredReason).toBe('429')
-  })
-
-  it('reports why a recipient failed, not just that one did', async () => {
-    // A count with no reason is what made a failed campaign unactionable: the operator
-    // saw "failed" and had to read the database to learn the provider had rejected it.
-    const { db } = setup([contactRow('c1')])
-    const provider = fakeProvider({
-      triggerSend: jest.fn().mockResolvedValue({
-        ok: false,
-        error: 'Automation not found.',
-        retryable: false,
-      }),
-    })
-
-    const progress = await executeCampaignSends(db as never, provider, campaign, {
-      bucket: fastBucket(),
-    })
-
-    expect(progress).toMatchObject({ failed: 1, failureReason: 'Automation not found.' })
-  })
-
-  it('stalls the whole bucket on a provider backoff', async () => {
-    // Backing off one call while the rest keep firing just prolongs rate limiting.
-    const { db } = setup([contactRow('c1')])
-    const bucket = fastBucket()
-    const pauseFor = jest.spyOn(bucket, 'pauseFor')
-    const provider = fakeProvider({
-      triggerSend: jest
-        .fn()
-        .mockResolvedValue({ ok: false, error: '429', retryable: true, retryAfterMs: 4000 }),
-    })
-
-    await executeCampaignSends(db as never, provider, campaign, { bucket })
-
-    expect(pauseFor).toHaveBeenCalledWith(4000)
-  })
-
-  it('fails a recipient with no email rather than calling the provider', async () => {
-    const { db } = setup([{ id: 's1', contact_id: 'c1', contact: null }])
-    const provider = fakeProvider()
-
-    const progress = await executeCampaignSends(db as never, provider, campaign, {
-      bucket: fastBucket(),
-    })
-
-    expect(progress).toMatchObject({ failed: 1 })
-    expect(provider.triggerSend).not.toHaveBeenCalled()
-  })
-
-  it('surfaces a ledger read failure', async () => {
-    const sends = createQueryBuilderMock({ data: null, error: { message: 'db down' } })
-
-    await expect(
-      executeCampaignSends(createDbMock(sends) as never, fakeProvider(), campaign, {
-        bucket: fastBucket(),
-      })
-    ).rejects.toThrow(/db down/)
   })
 })

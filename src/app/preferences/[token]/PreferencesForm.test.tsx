@@ -86,8 +86,19 @@ describe('PreferencesForm', () => {
     fireEvent.click(screen.getByTestId('unsubscribe-all'))
 
     expect(await screen.findByTestId('preferences-saved')).toHaveTextContent(
-      /will not receive any more email/i
+      /will not send you any more email/i
     )
+    // An email the provider already accepted cannot be recalled; the page does not pretend.
+    expect(screen.getByTestId('preferences-saved')).toHaveTextContent(/already on its way/i)
+  })
+
+  it('says when the mailing service has not caught up yet', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ newsletter: false, programs: false, providerSync: 'pending' }))
+    setup()
+
+    fireEvent.click(screen.getByTestId('unsubscribe-all'))
+
+    expect(await screen.findByTestId('preferences-provider-pending')).toBeInTheDocument()
   })
 
   it('shows what the server applied rather than what was asked for', async () => {

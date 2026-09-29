@@ -16,6 +16,13 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
  */
 export const AUTH_FAILED_MESSAGE = 'Invalid email or password.'
 
+/**
+ * Shown only after the password was verified, so it reveals nothing to someone who does
+ * not already hold the account's credentials.
+ */
+export const NOT_APPROVED_MESSAGE =
+  'This account is not approved for CRM access. Ask an administrator to invite you.'
+
 export type LoginInput =
   | { ok: true; email: string; password: string }
   | { ok: false; fieldErrors: { email?: string; password?: string } }

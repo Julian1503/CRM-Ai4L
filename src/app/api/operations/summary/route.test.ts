@@ -5,8 +5,12 @@ import { createDbMock, createQueryBuilderMock } from '@/test/supabaseMock'
 
 const mockGetSession = jest.fn()
 const mockCreateServerClient = jest.fn()
+const ATTENTION = { uncertainSends: 1, expiredSendClaims: 0, consentSyncPending: 3, consentSyncFailed: 0 }
 
 jest.mock('@/lib/auth/dal', () => ({ getSession: () => mockGetSession() }))
+jest.mock('@/lib/operations/attention', () => ({
+  readAttentionCounts: async () => ATTENTION,
+}))
 jest.mock('@/lib/supabase/server', () => ({
   createSupabaseServerClient: () => mockCreateServerClient(),
 }))
@@ -65,7 +69,7 @@ describe('GET /api/operations/summary', () => {
     const db = await mockCreateServerClient.mock.results[0].value
 
     expect(response.status).toBe(200)
-    expect(body.summary).toEqual(SUMMARY)
+    expect(body.summary).toEqual({ ...SUMMARY, attention: ATTENTION })
     expect(db.rpc).toHaveBeenCalledWith('get_operations_summary')
   })
 

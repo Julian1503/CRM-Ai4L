@@ -262,58 +262,57 @@ describe('Home Page & Excel Importer UI Integration Tests', () => {
     expect(screen.getByText('Invalid Email address format')).toBeInTheDocument();
   });
 
-  it('saves EmailOctopus credentials and triggers manual sync', async () => {
-    routeFetch({
-      '/api/integrations/emailoctopus/fields': jsonResponse({
-        tags: ['Headline'],
-        missing: [],
-        ready: true,
-      }),
-      '/api/integrations/emailoctopus/sync': jsonResponse({
-        success: true,
-        syncedCount: 3,
-        errorsCount: 0,
-        hasMore: false,
-        nextOffset: null,
-      }),
+  it('saves EmailOctopus credentials server-side and triggers manual sync', async () => {
+    // The browser never holds the saved key (audit H1): it reads a status, writes a
+    // write-only replacement, and the sync route loads the key itself.
+    let status = { apiKeyConfigured: false, listId: '', configured: false, canEdit: true };
+    mockFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === '/api/integrations/emailoctopus/credentials') {
+        if (init?.method === 'PUT') {
+          status = { apiKeyConfigured: true, listId: 'list-456', configured: true, canEdit: true };
+        }
+        return jsonResponse(status);
+      }
+      if (path === '/api/integrations/emailoctopus/fields') {
+        return jsonResponse({ tags: ['Headline'], missing: [], ready: true });
+      }
+      if (path === '/api/integrations/emailoctopus/sync') {
+        return jsonResponse({ success: true, syncedCount: 3, errorsCount: 0, hasMore: false, nextOffset: null });
+      }
+      if (path.startsWith('/api/contacts')) {
+        return jsonResponse({ contacts: [], total: 0, page: 1, pageSize: 50, hasMore: false });
+      }
+      return jsonResponse(parsedSpreadsheet);
     });
 
     render(<Home />);
 
-    // 1. Go to settings
     fireEvent.click(screen.getByTestId('nav-item-settings'));
     expect(screen.getByRole('heading', { name: /system settings/i })).toBeInTheDocument();
+    await screen.findByText('No key is saved.');
 
-    // 2. Input credentials
-    const apiKeyInput = screen.getByPlaceholderText('your-emailoctopus-api-key') as HTMLInputElement;
-    const listIdInput = screen.getByPlaceholderText('your-emailoctopus-list-id') as HTMLInputElement;
-    
-    fireEvent.change(apiKeyInput, { target: { value: 'key-123' } });
-    fireEvent.change(listIdInput, { target: { value: 'list-456' } });
+    fireEvent.change(screen.getByLabelText('EmailOctopus API Key'), { target: { value: 'key-123' } });
+    fireEvent.change(screen.getByLabelText('EmailOctopus List ID'), { target: { value: 'list-456' } });
+    fireEvent.click(screen.getByRole('button', { name: /save config/i }));
 
-    // 3. Save config
-    const saveBtn = screen.getByRole('button', { name: /save config/i });
-    fireEvent.click(saveBtn);
-
-    // 4. Verify alert triggered after Supabase settings persistence
-    await waitFor(() => {
-      expect(global.alert).toHaveBeenCalledWith('Settings saved successfully!');
+    await screen.findByText('EmailOctopus settings saved.');
+    const saveCall = mockFetch.mock.calls.find(
+      (call) => call[0] === '/api/integrations/emailoctopus/credentials' && call[1]?.method === 'PUT'
+    );
+    expect(JSON.parse(saveCall?.[1].body)).toEqual({
+      apiKey: { action: 'replace', value: 'key-123' },
+      listId: 'list-456',
     });
+    // The key field empties after saving and nothing reads it back.
+    expect((screen.getByLabelText('EmailOctopus API Key') as HTMLInputElement).value).toBe('');
 
-    // 5. Navigate to Integrations (EmailOctopus) tab
     fireEvent.click(screen.getByTestId('nav-item-integrations'));
-    
-    // Connection State is based on a real list/field check, not merely stored keys.
     await waitFor(() => {
       expect(screen.getByText('Ready')).toBeInTheDocument();
     });
 
-    // 6. Click "Sync Now" to trigger manual synchronization
-    const syncBtn = screen.getByRole('button', { name: /sync now/i });
-    fireEvent.click(syncBtn);
-
-    // Verify fetch endpoint called, with no contact list: the browser holds only the
-    // page on screen, so the route reads the full book server-side.
+    fireEvent.click(screen.getByRole('button', { name: /sync now/i }));
     await waitFor(() => {
       expect(mockFetch).toHaveBeenCalledWith('/api/integrations/emailoctopus/sync', expect.any(Object));
     });
@@ -321,11 +320,35 @@ describe('Home Page & Excel Importer UI Integration Tests', () => {
     const syncCall = mockFetch.mock.calls.find(
       (call) => call[0] === '/api/integrations/emailoctopus/sync'
     );
-    expect(JSON.parse(syncCall?.[1].body)).toMatchObject({ offset: 0 });
-    expect(JSON.parse(syncCall?.[1].body)).not.toHaveProperty('contacts');
+    expect(JSON.parse(syncCall?.[1].body)).toEqual({ offset: 0 });
 
-    // Check that success notice is logged in the sync timeline
     await screen.findByText(/Sync completed: 3 subscribers/);
+  });
+
+  it('never queries the credentials table from the browser', async () => {
+    const { from } = jest.requireMock('@/lib/supabaseClient').getSupabaseClient();
+    render(<Home />);
+
+    await waitFor(() => expect(from).toHaveBeenCalled());
+    expect(from.mock.calls.map((call: unknown[]) => call[0])).not.toContain('credentials');
+  });
+
+  it('shows an operator the settings read-only', async () => {
+    routeFetch({
+      '/api/integrations/emailoctopus/credentials': jsonResponse({
+        apiKeyConfigured: true,
+        listId: 'list-1',
+        configured: true,
+        canEdit: false,
+      }),
+    });
+
+    render(<Home />);
+    fireEvent.click(screen.getByTestId('nav-item-settings'));
+
+    expect(await screen.findByTestId('credentials-read-only')).toBeInTheDocument();
+    expect(screen.getByLabelText('EmailOctopus API Key')).toBeDisabled();
+    expect(screen.getByRole('button', { name: /save config/i })).toBeDisabled();
   });
 
   it('requests one bounded page of contacts rather than the whole table', async () => {

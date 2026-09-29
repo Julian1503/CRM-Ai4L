@@ -207,6 +207,8 @@ export default function ContactDrawer({
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setFormData({
         id: contact.id,
+        // Carried through unchanged: the save names the revision it was edited from.
+        revision: contact.revision,
         firstName: contact.firstName || '',
         lastName: contact.lastName || '',
         preferredName: contact.preferredName || '',

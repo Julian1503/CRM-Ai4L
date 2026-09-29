@@ -73,7 +73,11 @@ begin
   values ('Booking', 'Target', 'booking__p5verify@example.com')
   returning id into v_contact_id;
 
-  insert into public.campaigns (name) values ('Booking campaign __p5verify')
+  -- A send needs an audience to prepare (20261003000000).
+  insert into public.segments (name) values ('Booking segment __p5verify');
+  insert into public.campaigns (name, segment_id)
+  values ('Booking campaign __p5verify',
+          (select id from public.segments where name = 'Booking segment __p5verify'))
   returning id into v_campaign_id;
 
   insert into public.bookings (token_hash, contact_id, campaign_id, expires_at)
@@ -98,14 +102,24 @@ begin
   insert into public.campaign_sends (campaign_id, contact_id, status)
   values (v_campaign_id, v_contact_id, 'pending');
 
-  update public.campaigns set status = 'in_review' where id = v_campaign_id;
+  -- Content is set in draft; approval binds that revision (20261003000000).
+  update public.campaigns
+     set status = 'in_review', provider_automation_id = 'automation__p5verify'
+   where id = v_campaign_id;
   update public.campaigns
      set status = 'approved',
-         approved_by = gen_random_uuid(),
-         provider_automation_id = 'automation__p5verify'
+         approved_by = gen_random_uuid()
    where id = v_campaign_id;
+  insert into public.campaign_runs (campaign_id, run, revision, segment_id, consent_stream, audience_status) select id, send_run, revision, segment_id, consent_stream, 'prepared' from public.campaigns where id = v_campaign_id on conflict do nothing;  -- audience prepared (20261003000000)
   update public.campaigns set status = 'sending' where id = v_campaign_id;
 
+  -- The RPC requires an approved member (20261002000000_crm_membership).
+  insert into auth.users (id, email)
+    values ('00000000-0000-4000-8000-00000000a11c', 'member__p5verify@example.invalid');
+  insert into public.crm_members (user_id, role)
+    values ('00000000-0000-4000-8000-00000000a11c', 'operator');
+  perform set_config('request.jwt.claims',
+    '{"sub":"00000000-0000-4000-8000-00000000a11c","role":"authenticated"}', true);
   perform set_config('request.jwt.claim.role', 'authenticated', true);
   select public.create_campaign_booking(
     repeat('a', 64),

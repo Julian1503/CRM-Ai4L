@@ -1,7 +1,12 @@
 /* Release preflight. Configuration checks are local; --online also verifies the live
-database and provider resources without creating contacts, bookings, or charges. */
+database and provider resources without creating contacts, bookings, or charges.
+
+Each feature is ready, intentionally disabled (CRM_DISABLED_FEATURES), or misconfigured;
+only the last fails. See scripts/lib/readiness.mjs and docs/DEPLOYMENT.md. */
 
 import { readFileSync } from 'node:fs';
+
+import { assessFeatures } from './lib/readiness.mjs';
 
 import { createClient } from '@supabase/supabase-js';
 import Stripe from 'stripe';
@@ -32,13 +37,6 @@ function record(ok, name, detail = '') {
 
 function warn(name, detail) {
   console.log(` WARN  ${name} - ${detail}`);
-}
-
-function configured(name) {
-  const value = process.env[name]?.trim() ?? '';
-  const ok = value !== '' && value !== examples[name];
-  record(ok, name, ok ? 'configured' : 'missing or still using the example value');
-  return ok ? value : null;
 }
 
 function validUrl(name, value, { https = false } = {}) {
@@ -76,7 +74,48 @@ async function checkDatabase(url, serviceRoleKey) {
 
   const { error } = await db.rpc('get_operations_summary');
   record(!error, 'database operations aggregate', error?.message ?? 'available');
+
+  // Contract, not existence: the columns the app reads through the view (audit M7).
+  const view = await db
+    .from('active_contacts')
+    .select('id,source,removed_at,archive_reason,subscribed_to_newsletter,subscribed_to_programs')
+    .limit(1);
+  record(!view.error, 'active_contacts view contract', view.error?.message ?? 'columns present');
+
+  // Membership enforcement (audit C1): the function exists and an administrator does.
+  const member = await db.rpc('is_crm_member');
+  record(!member.error, 'membership enforcement installed', member.error?.message ?? 'is_crm_member() present');
+  const admins = await db
+    .from('crm_members')
+    .select('user_id', { count: 'exact', head: true })
+    .eq('role', 'admin')
+    .eq('active', true);
+  record(
+    !admins.error && (admins.count ?? 0) > 0,
+    'active CRM administrator',
+    admins.error?.message ?? `${admins.count ?? 0} active`,
+  );
   return db;
+}
+
+async function checkAccessBoundary(url, anonKey) {
+  // Invite-only: public signup must be off. /auth/v1/settings is the read-only answer.
+  try {
+    const response = await fetch(`${url.replace(/\/+$/, '')}/auth/v1/settings`, {
+      headers: { apikey: anonKey },
+    });
+    const settings = await response.json();
+    record(settings.disable_signup === true, 'public signup disabled', `disable_signup=${settings.disable_signup}`);
+  } catch (error) {
+    record(false, 'public signup disabled', error instanceof Error ? error.message : 'request failed');
+  }
+
+  const anon = createClient(url, anonKey, { auth: { persistSession: false, autoRefreshToken: false } });
+  for (const table of ['contacts', 'credentials', 'crm_members']) {
+    const { data, error } = await anon.from(table).select('*').limit(1);
+    const denied = Boolean(error) || (data ?? []).length === 0;
+    record(denied, `anonymous read of ${table} denied`, error ? 'refused' : `${(data ?? []).length} rows`);
+  }
 }
 
 async function checkStripe(secretKey, priceId, couponId) {
@@ -164,35 +203,48 @@ async function checkTarget(target, appUrl) {
   }
 }
 
+function reportFeatures() {
+  const readiness = assessFeatures(process.env, examples);
+
+  for (const feature of readiness.features) {
+    if (feature.state === 'disabled') {
+      console.log(` OFF   ${feature.label} (${feature.id}) - intentionally disabled`);
+      continue;
+    }
+    record(
+      feature.state === 'ready',
+      `${feature.label} (${feature.id})`,
+      feature.state === 'ready' ? 'ready' : feature.problems.join('; '),
+    );
+  }
+  for (const id of readiness.unknownDisabled) {
+    record(false, 'CRM_DISABLED_FEATURES', `unknown feature "${id}"`);
+  }
+
+  return new Map(readiness.features.map((feature) => [feature.id, feature.state]));
+}
+
 async function main() {
   console.log(`CRM release preflight${online ? ' (online)' : ''}\n`);
 
-  const supabaseUrl = configured('NEXT_PUBLIC_SUPABASE_URL');
-  configured('NEXT_PUBLIC_SUPABASE_ANON_KEY');
-  const serviceRoleKey = configured('SUPABASE_SERVICE_ROLE_KEY');
-  const appUrl = validUrl('NEXT_PUBLIC_APP_URL', configured('NEXT_PUBLIC_APP_URL'), { https: true });
-  configured('EMAILOCTOPUS_WEBHOOK_SECRET');
-  const stripeSecret = configured('STRIPE_SECRET_KEY');
-  const stripePrice = configured('STRIPE_CONSULTATION_PRICE_ID');
-  const stripeCoupon = configured('STRIPE_CONSULTATION_COUPON_ID');
-  configured('STRIPE_WEBHOOK_SECRET');
-  configured('CALENDLY_WEBHOOK_SECRET');
-  const calendlyUrl = validUrl(
-    'NEXT_PUBLIC_CALENDLY_SCHEDULING_URL',
-    configured('NEXT_PUBLIC_CALENDLY_SCHEDULING_URL'),
-    { https: true },
-  );
+  const states = reportFeatures();
+  const enabled = (id) => states.get(id) === 'ready';
+  const env = (name) => process.env[name]?.trim() ?? '';
 
+  const appUrl = enabled('core') ? new URL(env('NEXT_PUBLIC_APP_URL')) : null;
   if (targetArg) await checkTarget(targetArg, appUrl);
 
-  if (online && supabaseUrl && serviceRoleKey) {
-    const db = await checkDatabase(supabaseUrl, serviceRoleKey);
+  if (online && enabled('core')) {
+    await checkAccessBoundary(env('NEXT_PUBLIC_SUPABASE_URL'), env('NEXT_PUBLIC_SUPABASE_ANON_KEY'));
+    const db = await checkDatabase(env('NEXT_PUBLIC_SUPABASE_URL'), env('SUPABASE_SERVICE_ROLE_KEY'));
     await checkEmailOctopus(db);
   }
-  if (online && stripeSecret && stripePrice && stripeCoupon) {
-    await checkStripe(stripeSecret, stripePrice, stripeCoupon);
+  if (online && enabled('booking')) {
+    await checkStripe(env('STRIPE_SECRET_KEY'), env('STRIPE_CONSULTATION_PRICE_ID'), env('STRIPE_CONSULTATION_COUPON_ID'));
   }
-  if (online && calendlyUrl) await checkCalendly(calendlyUrl);
+  if (online && enabled('calendly')) {
+    await checkCalendly(new URL(env('NEXT_PUBLIC_CALENDLY_SCHEDULING_URL')));
+  }
 
   console.log(`\n${results.length - failures}/${results.length} checks passed.`);
   if (!online) console.log('Run with --online to verify the database and provider resources.');

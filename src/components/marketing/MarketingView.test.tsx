@@ -226,6 +226,87 @@ describe('MarketingView', () => {
     )
   })
 
+  it('approves the revision on screen, so a changed campaign cannot be approved blind (H6)', async () => {
+    routeFetch({
+      ...defaultHandlers,
+      'GET /api/campaigns': jsonResponse({
+        campaigns: [
+          {
+            id: 'camp-1',
+            name: 'August offer',
+            status: 'in_review',
+            revision: 7,
+            segment_id: 'seg-1',
+            provider_automation_id: 'auto-1',
+            segment: { name: 'NSW leads' },
+          },
+        ],
+      }),
+    })
+    render(<MarketingView jobTypes={jobTypes} />)
+
+    fireEvent.click(await screen.findByTestId('approve-camp-1'))
+
+    await waitFor(() => {
+      const call = mockFetch.mock.calls.find(([url]) => url === '/api/campaigns/camp-1/approve')
+      expect(JSON.parse(call![1].body)).toEqual({ revision: 7 })
+    })
+  })
+
+  describe('uncertain recipients (H3)', () => {
+    const failedWithUncertain = {
+      ...defaultHandlers,
+      'GET /api/campaigns': jsonResponse({
+        campaigns: [
+          {
+            id: 'camp-1',
+            name: 'August offer',
+            status: 'failed',
+            revision: 2,
+            segment_id: 'seg-1',
+            provider_automation_id: 'auto-1',
+            segment: { name: 'NSW leads' },
+          },
+        ],
+        sendReports: {
+          'camp-1': {
+            total: 10, sent: 7, failed: 0, pending: 0, skipped: 1, uncertain: 2,
+            failureReason: null, stallReason: 'No reply from EmailOctopus',
+          },
+        },
+      }),
+      'POST /api/campaigns/camp-1/uncertain': jsonResponse({ resolved: 2, resolution: 'sent' }),
+      'GET /api/campaigns/summaries': jsonResponse({ summaries: {} }),
+    }
+
+    it('says the outcome is unknown and offers both settlements, never an automatic retry', async () => {
+      routeFetch(failedWithUncertain)
+      render(<MarketingView jobTypes={jobTypes} />)
+
+      expect(await screen.findByTestId('send-report-camp-1')).toHaveTextContent(/2 of 10 recipients have an unknown outcome/)
+      expect(screen.getByTestId('send-report-camp-1')).toHaveTextContent(/1 skipped/)
+      expect(screen.getByTestId('reconcile-sent-camp-1')).toBeInTheDocument()
+      expect(screen.getByTestId('reconcile-retry-camp-1')).toBeInTheDocument()
+    })
+
+    it('settles them only after the operator confirms', async () => {
+      routeFetch(failedWithUncertain)
+      const confirm = jest.spyOn(window, 'confirm')
+      confirm.mockReturnValueOnce(false).mockReturnValueOnce(true)
+      render(<MarketingView jobTypes={jobTypes} />)
+
+      fireEvent.click(await screen.findByTestId('reconcile-sent-camp-1'))
+      expect(mockFetch).not.toHaveBeenCalledWith('/api/campaigns/camp-1/uncertain', expect.anything())
+
+      fireEvent.click(screen.getByTestId('reconcile-sent-camp-1'))
+      await waitFor(() => {
+        const call = mockFetch.mock.calls.find(([url]) => url === '/api/campaigns/camp-1/uncertain')
+        expect(JSON.parse(call![1].body)).toEqual({ resolution: 'sent' })
+      })
+      confirm.mockRestore()
+    })
+  })
+
   it('archives a campaign in review and reloads the list', async () => {
     routeFetch({ ...defaultHandlers, 'PATCH /api/campaigns/camp-1': jsonResponse({ campaign: {} }) })
     render(<MarketingView jobTypes={jobTypes} />)
@@ -638,15 +719,8 @@ describe('MarketingView', () => {
   it('keeps saying why a campaign failed after a reload', async () => {
     // A failure the operator can only see in the response to their own click is gone
     // the moment they refresh, leaving "failed" and nothing else.
+    // The list response carries the ledger summary: one request, not one per row (A2).
     routeFetch({
-      'GET /api/campaigns/camp-1/send': jsonResponse({
-        total: 40,
-        sent: 0,
-        failed: 40,
-        pending: 0,
-        failureReason: 'Automation not found.',
-        stallReason: null,
-      }),
       ...defaultHandlers,
       'GET /api/campaigns': jsonResponse({
         campaigns: [
@@ -659,6 +733,18 @@ describe('MarketingView', () => {
             segment: { name: 'NSW leads' },
           },
         ],
+        sendReports: {
+          'camp-1': {
+            total: 40,
+            sent: 0,
+            failed: 40,
+            pending: 0,
+            skipped: 0,
+            uncertain: 0,
+            failureReason: 'Automation not found.',
+            stallReason: null,
+          },
+        },
       }),
     })
 

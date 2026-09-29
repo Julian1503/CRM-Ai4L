@@ -42,7 +42,8 @@ import {
   type ColumnMapping,
   type CrmFieldKey,
 } from '@/lib/contacts/columnMapping';
-import { importContacts } from '@/lib/contacts/import';
+import { importContacts, previewContactImport } from '@/lib/contacts/import';
+import ImportChangePreview from '@/components/import/ImportChangePreview';
 import FilterBar, { type StatusFilter } from '@/components/contacts/FilterBar';
 import MarketingView from '@/components/marketing/MarketingView';
 import EmailTemplateRegistry from '@/components/marketing/EmailTemplateRegistry';
@@ -52,11 +53,11 @@ import { requestLifecycle } from '@/lib/lifecycle/client';
 import BookingsView from '@/components/bookings/BookingsView';
 import OperationsPanel from '@/components/operations/OperationsPanel';
 import Pagination from '@/components/ui/Pagination';
+import EmailOctopusSettings, { type EmailOctopusStatus } from '@/components/settings/EmailOctopusSettings';
 import type { ContactStatus } from '@/lib/db/types';
 
 type ServiceOption = { id: string; name: string };
 type SyncLog = { id: string; event_text: string; status: string; created_at: string };
-type Credential = { key: string; value: string };
 type ContactServiceJoin = { contact_id: string; service_id: string };
 type DbContact = {
   id: string;
@@ -80,6 +81,7 @@ type DbContact = {
   subscribed_to_programs: boolean | null;
   job_type_id: string | null;
   organisation: { name: string } | null;
+  revision?: number;
 };
 type ContactSavePayload = Partial<TableContact> & {
   organisationName?: string;
@@ -121,6 +123,7 @@ function formatContactFromDatabase(contact: DbContact, contactServices: string[]
     jobTypeId: contact.job_type_id || null,
     organisation: contact.organisation || null,
     servicesBought: contactServices,
+    revision: contact.revision,
   };
 }
 
@@ -302,8 +305,8 @@ export default function App() {
   const [columnMapping, setColumnMapping] = useState<ColumnMapping>(emptyColumnMapping());
 
   // EmailOctopus integrations state
-  const [emailOctopusApiKey, setEmailOctopusApiKey] = useState('');
-  const [emailOctopusListId, setEmailOctopusListId] = useState('');
+  // Connection status only: the saved API key never reaches the browser (audit H1).
+  const [emailOctopusStatus, setEmailOctopusStatus] = useState<EmailOctopusStatus | null>(null);
   const [syncLogs, setSyncLogs] = useState<SyncLog[]>([]);
   const [syncLogsPage, setSyncLogsPage] = useState(1);
   const [syncLogsTotal, setSyncLogsTotal] = useState(0);
@@ -313,8 +316,7 @@ export default function App() {
     status: 'unchecked',
     missing: [],
   });
-  const isEmailOctopusConfigured =
-    emailOctopusApiKey.trim() !== '' && emailOctopusListId.trim() !== '';
+  const isEmailOctopusConfigured = Boolean(emailOctopusStatus?.configured);
   const isEmailOctopusReachable =
     emailOctopusHealth.status === 'ready' || emailOctopusHealth.status === 'needs_fields';
 
@@ -343,7 +345,7 @@ export default function App() {
   const exportQuery = contactQuery ? `&${contactQuery}` : '';
 
   /**
-   * Reference data: services, job types and integration credentials.
+   * Reference data: services, job types and the integration connection status.
    *
    * Contacts, the dashboard counters and the sync log each load separately below — they
    * are paginated and re-fetch on their own schedule, while this is the small, whole
@@ -353,8 +355,7 @@ export default function App() {
     if (!hasSupabaseConfig) {
       setServices([]);
       setJobTypes([]);
-      setEmailOctopusApiKey('');
-      setEmailOctopusListId('');
+      setEmailOctopusStatus(null);
       setIsDatabaseConnected(false);
       setConnectionError('Supabase is not configured. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to load CRM data.');
       return;
@@ -379,18 +380,15 @@ export default function App() {
         .limit(REFERENCE_LIMIT);
       if (jobTypeError) throw jobTypeError;
 
-      const { data: credentialsData, error: credentialsError } = await db
-        .from('credentials')
-        .select('*')
-        .limit(REFERENCE_LIMIT);
-      if (credentialsError) throw credentialsError;
-
-      const credentialsFromDb = (credentialsData || []) as Credential[];
+      const statusResponse = await fetch('/api/integrations/emailoctopus/credentials');
+      const statusBody = await statusResponse.json().catch(() => ({}));
+      if (!statusResponse.ok) {
+        throw new Error(statusBody.error || `Could not read integration settings (HTTP ${statusResponse.status})`);
+      }
 
       setServices(((serviceData || []) as ServiceOption[]).map((service) => ({ id: service.id, name: service.name })));
       setJobTypes(((jobTypeData || []) as ServiceOption[]).map((jobType) => ({ id: jobType.id, name: jobType.name })));
-      setEmailOctopusApiKey(credentialsFromDb.find((credential) => credential.key === 'emailoctopus_api_key')?.value || '');
-      setEmailOctopusListId(credentialsFromDb.find((credential) => credential.key === 'emailoctopus_list_id')?.value || '');
+      setEmailOctopusStatus(statusBody as EmailOctopusStatus);
       setIsDatabaseConnected(true);
       setConnectionError(null);
     } catch (error) {
@@ -600,20 +598,27 @@ export default function App() {
     e.target.value = '';
   };
 
-  const handleIngestContacts = async () => {
-    const mapped = mapAndValidateRows(rawRows, columnMapping);
+  // Mapped once per mapping change, so the change preview below is not re-requested on
+  // every render.
+  const mappedImportRows = React.useMemo(
+    () => mapAndValidateRows(rawRows, columnMapping),
+    [rawRows, columnMapping]
+  );
 
-    if (!mapped.some((r) => r.isValid && r.data)) {
-      alert('No valid contacts found to ingest.');
-      return;
-    }
+  /** What the import would change, computed by the database without writing (P3). */
+  const previewImport = useCallback(
+    () => previewContactImport(getSupabaseClient(), mappedImportRows),
+    [mappedImportRows]
+  );
 
-    try {
-      // Organisation/job-type resolution and the upsert all happen inside the
-      // import_contacts RPC. It is required rather than preferred: email uniqueness is
-      // a partial index (WHERE deleted_at IS NULL) that a client-side
-      // .upsert({ onConflict: 'email' }) cannot target. See src/lib/contacts/import.ts.
-      const result = await importContacts(getSupabaseClient(), mapped);
+  /**
+   * Commits the import against the preview the operator just read. Errors are rethrown
+   * for the preview panel, which keeps the upload and mapping in place and, for a stale
+   * preview, shows a fresh one.
+   */
+  const commitImport = useCallback(
+    async (previewToken: string) => {
+      const result = await importContacts(getSupabaseClient(), mappedImportRows, previewToken);
 
       await refreshData();
 
@@ -621,11 +626,10 @@ export default function App() {
         `${result.inserted} added`,
         `${result.updated} updated`,
         result.skipped > 0 ? `${result.skipped} skipped` : null,
+        (result.duplicates ?? 0) > 0 ? `${result.duplicates} repeated in the file` : null,
         // Named rather than folded into "skipped": these rows were understood and
         // deliberately held back, and somebody has to go and look at them.
-        result.archived_collisions > 0
-          ? `${result.archived_collisions} already archived`
-          : null,
+        result.archived_collisions > 0 ? `${result.archived_collisions} already archived` : null,
       ]
         .filter(Boolean)
         .join(', ');
@@ -638,18 +642,15 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
           : `Import complete: ${summary}.`
       );
 
-      // Reset view variables
       setImportFile(null);
       setRawHeaders([]);
       setRawRows([]);
       setShowPreview(false);
       setIsMapped(false);
       setCurrentView('contacts');
-    } catch (err) {
-      console.error('Ingestion error:', err);
-      alert(`Failed to ingest contact records: ${getErrorMessage(err)}`);
-    }
-  };
+    },
+    [mappedImportRows, refreshData]
+  );
 
   // Fetch Database Entities
   useEffect(() => {
@@ -750,117 +751,26 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
   };
 
   // Save / Update / Insert Contact Handler
+  /**
+   * Saves through one server call that commits the contact, its organisation and its
+   * services together, or nothing at all (audit H8). An update names the revision it
+   * was edited from, so a concurrent edit is refused rather than overwritten. Errors are
+   * rethrown for the drawer, which keeps the draft open and shows the message.
+   */
   const handleSaveContact = async (data: ContactSavePayload) => {
-    try {
-      const db = getSupabaseClient();
-      let orgId: string | null = null;
+    const { id, revision, ...fields } = data;
+    const response = await fetch(id ? `/api/contacts/${id}` : '/api/contacts', {
+      method: id ? 'PUT' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...fields, ...(id ? { expectedRevision: revision } : {}) }),
+    });
 
-      if (typeof data.organisationName === 'string' && data.organisationName.trim()) {
-        const orgName = data.organisationName.trim();
-        const { data: orgData, error: orgLookupError } = await db
-          .from('organisations')
-          .select('id')
-          .eq('name', orgName)
-          .maybeSingle();
-
-        if (orgLookupError) throw orgLookupError;
-
-        if (orgData?.id) {
-          orgId = orgData.id;
-        } else {
-          const { data: newOrg, error: orgInsertError } = await db
-            .from('organisations')
-            .insert({ name: orgName })
-            .select('id')
-            .single();
-
-          if (orgInsertError) throw orgInsertError;
-          orgId = newOrg?.id || null;
-        }
-      }
-
-      const status = data.status ?? (data.isCustomer ? 'customer' : 'prospect');
-      const dbContact = {
-        first_name: data.firstName,
-        last_name: data.lastName,
-        preferred_name: data.preferredName || null,
-        email: data.email,
-        mobile_number: data.mobileNumber || null,
-        work_phone: data.workPhone || null,
-        address: data.address || null,
-        suburb: data.suburb || null,
-        state: data.state || null,
-        postcode: data.postcode || null,
-        country: data.country || null,
-        organisation_id: orgId,
-        // Empty string is the "Not set" option, which has to become NULL rather than an
-        // empty uuid -- Postgres rejects the latter, and the drawer sends '' for it.
-        job_type_id: data.jobTypeId || null,
-        department: data.department || null,
-        position: data.position || null,
-        notes: data.notes || null,
-        status,
-        is_customer: status === 'customer',
-        subscribed_to_newsletter: Boolean(data.subscribedToNewsletter),
-        subscribed_to_programs: Boolean(data.subscribedToPrograms),
-      };
-
-      let contactId = data.id || null;
-
-      if (contactId) {
-        const { error: updateError } = await db.from('contacts').update(dbContact).eq('id', contactId);
-        if (updateError) throw updateError;
-
-        const { error: deleteJoinError } = await db.from('contact_services').delete().eq('contact_id', contactId);
-        if (deleteJoinError) throw deleteJoinError;
-      } else {
-        const { data: insertedContact, error: insertError } = await db
-          .from('contacts')
-          .insert(dbContact)
-          .select('id')
-          .single();
-
-        if (insertError) throw insertError;
-        contactId = insertedContact?.id || null;
-      }
-
-      const servicesBought = Array.isArray(data.servicesBought) ? data.servicesBought : [];
-      if (contactId && status === 'customer' && servicesBought.length > 0) {
-        const joinRecords = servicesBought.map((serviceId: string) => ({
-          contact_id: contactId,
-          service_id: serviceId,
-        }));
-        const { error: joinInsertError } = await db.from('contact_services').insert(joinRecords);
-        if (joinInsertError) throw joinInsertError;
-      }
-
-      await refreshData();
-
-      if (emailOctopusApiKey.trim() !== '' && emailOctopusListId.trim() !== '') {
-        fetch('/api/integrations/emailoctopus/sync', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            apiKey: emailOctopusApiKey,
-            listId: emailOctopusListId,
-            contacts: [
-              {
-                email: data.email,
-                firstName: data.firstName || '',
-                lastName: data.lastName || '',
-                subscribedToNewsletter: data.subscribedToNewsletter,
-                subscribedToPrograms: data.subscribedToPrograms,
-              },
-            ],
-          }),
-        }).catch((err) => console.error('Failed background single contact sync to EmailOctopus:', err));
-      }
-    } catch (err) {
-      console.error('Error committing updates to Supabase database', err);
-      throw err;
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error || `Could not save this contact (HTTP ${response.status}).`);
     }
+
+    await refreshData();
   };
 
   // Archive Contact Handler
@@ -896,26 +806,6 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
     await refreshData();
   };
 
-  const handleSaveSettings = async () => {
-    try {
-      const db = getSupabaseClient();
-      const { error } = await db.from('credentials').upsert(
-        [
-          { key: 'emailoctopus_api_key', value: emailOctopusApiKey },
-          { key: 'emailoctopus_list_id', value: emailOctopusListId },
-        ],
-        { onConflict: 'key' }
-      );
-
-      if (error) throw error;
-      await refreshData();
-      alert('Settings saved successfully!');
-    } catch (err) {
-      console.error('Settings save error:', err);
-      alert(`Failed to save settings: ${getErrorMessage(err)}`);
-    }
-  };
-
   const handleManualSync = async () => {
     setIsSyncing(true);
     try {
@@ -934,11 +824,7 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({
-            apiKey: emailOctopusApiKey,
-            listId: emailOctopusListId,
-            offset,
-          }),
+          body: JSON.stringify({ offset }),
         });
 
         const result = await response.json();
@@ -1442,7 +1328,7 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
                       </div>
 
                       {(() => {
-                        const mapped = mapAndValidateRows(rawRows, columnMapping);
+                        const mapped = mappedImportRows;
                         const validRows = mapped.filter(r => r.isValid);
                         const invalidRows = mapped.filter(r => !r.isValid);
 
@@ -1506,14 +1392,15 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
                               </table>
                             </div>
 
-                            <button 
-                              className={styles.actionButton} 
-                              style={{ width: '100%', justifyContent: 'center' }}
-                              onClick={handleIngestContacts}
-                              disabled={validRows.length === 0}
-                            >
-                              Ingest {validRows.length} Contacts
-                            </button>
+                            {validRows.length > 0 ? (
+                              <ImportChangePreview
+                                rows={mapped}
+                                onPreview={previewImport}
+                                onCommit={commitImport}
+                              />
+                            ) : (
+                              <p className={styles.settingDescription}>No valid rows to import.</p>
+                            )}
                           </div>
                         );
                       })()}
@@ -1766,43 +1653,7 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
                 </div>
 
                 {/* Email Marketing Card */}
-                <div className="outerShell">
-                  <div className="innerCore" style={{ padding: '24px' }}>
-                    <div className={styles.sectionTitle} style={{ margin: 0, borderBottom: '1px dashed var(--border)', paddingBottom: '12px', marginBottom: '20px' }}>Email Marketing Keys</div>
-
-                    <div className={styles.settingGroup}>
-                      <label className={styles.settingLabel} htmlFor="emailoctopus-api-key">EmailOctopus API Key</label>
-                      <input 
-                        type="password" 
-                        className={styles.searchInput} 
-                        style={{ maxWidth: '100%', marginTop: '6px' }}
-                        placeholder="your-emailoctopus-api-key"
-                        id="emailoctopus-api-key"
-                        value={emailOctopusApiKey}
-                        onChange={(e) => setEmailOctopusApiKey(e.target.value)}
-                      />
-                      <span className={styles.settingDescription}>Mailing lists campaign API key credentials.</span>
-                    </div>
-
-                    <div className={styles.settingGroup} style={{ marginBottom: 0 }}>
-                      <label className={styles.settingLabel} htmlFor="emailoctopus-list-id">EmailOctopus List ID</label>
-                      <input 
-                        type="text" 
-                        className={styles.searchInput} 
-                        style={{ maxWidth: '100%', marginTop: '6px' }}
-                        placeholder="your-emailoctopus-list-id"
-                        id="emailoctopus-list-id"
-                        value={emailOctopusListId}
-                        onChange={(e) => setEmailOctopusListId(e.target.value)}
-                      />
-                      <span className={styles.settingDescription}>EmailOctopus campaigns subscriber list ID.</span>
-                    </div>
-                  </div>
-                </div>
-                
-                <button className={styles.actionButton} style={{ width: '100%', justifyContent: 'center' }} onClick={handleSaveSettings}>
-                  Save Config Options
-                </button>
+                <EmailOctopusSettings status={emailOctopusStatus} onSaved={setEmailOctopusStatus} />
               </div>
             </div>
           </>

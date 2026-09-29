@@ -4,6 +4,7 @@ import { cache } from 'react'
 
 import { redirect } from 'next/navigation'
 
+import { fetchActiveRole, type CrmRole } from '@/lib/auth/membership'
 import { isSupabaseConfigured } from '@/lib/supabase/config'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 
@@ -22,6 +23,8 @@ import { createSupabaseServerClient } from '@/lib/supabase/server'
 export type Session = {
   userId: string
   email: string
+  /** Read from public.crm_members on every request; never from a token claim. */
+  role: CrmRole
 }
 
 /**
@@ -49,7 +52,13 @@ export const getSession = cache(async (): Promise<Session | null> => {
       return null
     }
 
-    return { userId: user.id, email: user.email ?? '' }
+    const role = await fetchActiveRole(supabase, user.id)
+
+    if (!role) {
+      return null
+    }
+
+    return { userId: user.id, email: user.email ?? '', role }
   } catch {
     // Network failure, malformed cookie, misconfiguration — all deny.
     return null

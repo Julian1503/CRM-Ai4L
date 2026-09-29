@@ -1,9 +1,11 @@
 /**
  * @jest-environment node
  */
-import { AUTH_FAILED_MESSAGE } from '@/lib/auth/credentials'
+import { AUTH_FAILED_MESSAGE, NOT_APPROVED_MESSAGE } from '@/lib/auth/credentials'
+import { ACTIVE_OPERATOR, membershipFrom, type MembershipRow } from '@/test/membership'
 
 const mockSignInWithPassword = jest.fn()
+const mockSignOut = jest.fn()
 const mockCreateServerClient = jest.fn()
 const mockRedirect = jest.fn((_path: string): never => {
   // The real redirect() throws to unwind; mirroring that proves the action stops here.
@@ -37,9 +39,28 @@ describe('login action', () => {
       NEXT_PUBLIC_SUPABASE_URL: 'https://test.supabase.co',
       NEXT_PUBLIC_SUPABASE_ANON_KEY: 'anon-key',
     }
+    withMembership(ACTIVE_OPERATOR)
+  })
+
+  function withMembership(row: MembershipRow) {
     mockCreateServerClient.mockResolvedValue({
-      auth: { signInWithPassword: mockSignInWithPassword },
+      auth: { signInWithPassword: mockSignInWithPassword, signOut: mockSignOut },
+      from: membershipFrom(row),
     })
+  }
+
+  it.each([
+    ['no membership row', null],
+    ['a disabled membership', { role: 'admin', active: false }],
+  ])('signs a verified account with %s straight back out', async (_label, row) => {
+    withMembership(row)
+    mockSignInWithPassword.mockResolvedValue({ data: { user: { id: 'u1' } }, error: null })
+
+    const result = await login(INITIAL_LOGIN_STATE, form({ email: 'a@b.co', password: 'pw' }))
+
+    expect(result.error).toBe(NOT_APPROVED_MESSAGE)
+    expect(mockSignOut).toHaveBeenCalledTimes(1)
+    expect(mockRedirect).not.toHaveBeenCalled()
   })
 
   afterAll(() => {
@@ -55,7 +76,7 @@ describe('login action', () => {
   })
 
   it('signs in with the normalised email', async () => {
-    mockSignInWithPassword.mockResolvedValue({ error: null })
+    mockSignInWithPassword.mockResolvedValue({ data: { user: { id: 'u1' } }, error: null })
 
     await expect(
       login(INITIAL_LOGIN_STATE, form({ email: '  Admin@Example.COM ', password: 'pw' }))
@@ -68,7 +89,7 @@ describe('login action', () => {
   })
 
   it('redirects to the sanitised destination on success', async () => {
-    mockSignInWithPassword.mockResolvedValue({ error: null })
+    mockSignInWithPassword.mockResolvedValue({ data: { user: { id: 'u1' } }, error: null })
 
     await expect(
       login(INITIAL_LOGIN_STATE, form({ email: 'a@b.co', password: 'pw', next: '/contacts' }))
@@ -78,7 +99,7 @@ describe('login action', () => {
   })
 
   it('refuses to redirect off-site after a successful sign-in', async () => {
-    mockSignInWithPassword.mockResolvedValue({ error: null })
+    mockSignInWithPassword.mockResolvedValue({ data: { user: { id: 'u1' } }, error: null })
 
     await expect(
       login(
@@ -93,7 +114,7 @@ describe('login action', () => {
   it('does not let the success redirect be swallowed as a network error', async () => {
     // redirect() throws; if it were inside the try/catch the user would see
     // "could not reach the authentication service" after a *successful* login.
-    mockSignInWithPassword.mockResolvedValue({ error: null })
+    mockSignInWithPassword.mockResolvedValue({ data: { user: { id: 'u1' } }, error: null })
 
     await expect(
       login(INITIAL_LOGIN_STATE, form({ email: 'a@b.co', password: 'pw' }))

@@ -51,7 +51,7 @@ export const WEBHOOK_PATHS = [
  *
  * Exact allowlist, fail-closed, for the same reasons as WEBHOOK_PATHS.
  */
-export const CRON_PATHS = ['/api/cron/newsletters'] as const
+export const CRON_PATHS = ['/api/cron/newsletters', '/api/cron/jobs'] as const
 
 function normalise(pathname: string): string {
   // Treat '/x/' and '/x' identically, but keep the root as '/'.

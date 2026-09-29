@@ -25,7 +25,7 @@ jest.mock('@/lib/marketing/segments', () => {
   const actual = jest.requireActual('@/lib/marketing/segments')
   return {
     ...actual,
-    resolveSegmentMembers: (...args: unknown[]) => mockResolveMembers(...args),
+    measureSegmentAudience: (...args: unknown[]) => mockResolveMembers(...args),
   }
 })
 

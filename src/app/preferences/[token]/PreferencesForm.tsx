@@ -50,6 +50,7 @@ function applyRequest(initial: ConsentState, requested: Props['requested']): Con
 export default function PreferencesForm({ token, initial, requested }: Props) {
   const [choice, setChoice] = useState<ConsentState>(() => applyRequest(initial, requested))
   const [saved, setSaved] = useState<ConsentState | null>(null)
+  const [providerPending, setProviderPending] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -79,6 +80,7 @@ export default function PreferencesForm({ token, initial, requested }: Props) {
 
       setChoice(applied)
       setSaved(applied)
+      setProviderPending(body.providerSync === 'pending')
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Could not save your preferences.')
     } finally {
@@ -101,8 +103,15 @@ export default function PreferencesForm({ token, initial, requested }: Props) {
       {saved !== null && (
         <p className={styles.saved} role="status" data-testid="preferences-saved">
           {nothingLeft
-            ? 'Saved. You will not receive any more email from us.'
+            ? // An email the provider had already accepted cannot be recalled, so this
+              // does not promise that nothing more can arrive.
+              'Saved. We will not send you any more email. A message already on its way may still arrive.'
             : 'Saved. Your preferences have been updated.'}
+          {providerPending && (
+            <span data-testid="preferences-provider-pending">
+              {' '}Our mailing service is still being updated, which can take a few minutes.
+            </span>
+          )}
         </p>
       )}
 

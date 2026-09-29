@@ -54,6 +54,19 @@ async function main() {
 
     console.log(`Auth user created: ${email} (id: ${userId})`);
 
+    // 1b) Approve the account. Without a crm_members row it can sign in to nothing
+    // (20261002000000_crm_membership.sql).
+    const memberResp = await fetch(`${url.replace(/\/+$/,'')}/rest/v1/crm_members?on_conflict=user_id`, {
+      method: 'POST',
+      headers: { ...headers, Prefer: 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify({ user_id: userId, role: 'admin', active: true }),
+    });
+    if (!memberResp.ok) {
+      console.error('Failed to grant admin membership:', await memberResp.text());
+      process.exit(1);
+    }
+    console.log('Granted active admin membership.');
+
     // 2) Insert a contact row linked to that user (optional)
     const contactBody = {
       id: userId,

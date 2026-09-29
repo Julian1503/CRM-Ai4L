@@ -1,6 +1,6 @@
 // Database types for the CRM schema.
 //
-// Hand-written to match supabase/migrations as of 20261001030000.
+// Hand-written to match supabase/migrations as of 20261003000000.
 //
 // `npm run db:types` (supabase gen types) would overwrite this file with the generated
 // shape, which exports no row aliases (ContactRow, SegmentRow, ...) that the whole app
@@ -124,6 +124,10 @@ export type CampaignRow = {
    * so a second send builds its own ledger instead of overwriting the first one's.
    */
   send_run: number
+  /** Moves on every change to what would be sent. See 20261003000000_campaign_delivery. */
+  revision: number
+  /** The revision the approval applies to; sending requires it to equal `revision`. */
+  approved_revision: number | null
   /** The newsletter schedule that drafted this campaign; null for hand-made ones. */
   schedule_id: string | null
   /** The occurrence (a local date) this campaign was drafted for. Unique per schedule. */
@@ -246,17 +250,84 @@ export type CampaignTemplateRow = {
   updated_at: string
 }
 
+/**
+ * One recipient of one run.
+ *
+ * `processing` is claimed by a worker under a lease; `uncertain` means the provider may
+ * or may not have queued it and a person must reconcile it — it is never retried
+ * automatically. See 20261003000000_campaign_delivery.sql.
+ */
+export type CampaignSendStatus = 'pending' | 'processing' | 'sent' | 'failed' | 'skipped' | 'uncertain'
+
 export type CampaignSendRow = {
   id: string
   campaign_id: string
   contact_id: string
   /** The campaign fan-out this row belongs to. See `CampaignRow.send_run`. */
   run: number
-  status: 'pending' | 'sent' | 'failed' | 'skipped'
+  status: CampaignSendStatus
   provider_reference: string | null
   error: string | null
   attempted_at: string | null
+  claim_token: string | null
+  lease_expires_at: string | null
+  /** Written just before the provider call; set on an unsent row means "outcome unknown". */
+  provider_attempted_at: string | null
+  attempts: number
+  /** The campaign revision this recipient was sent. */
+  revision: number | null
   created_at: string
+}
+
+/** One fan-out: the approved revision and audience it materialised. */
+export type CampaignRunRow = {
+  campaign_id: string
+  run: number
+  revision: number
+  segment_id: string
+  consent_stream: ConsentStream
+  audience_status: 'preparing' | 'prepared'
+  audience_cursor: string | null
+  expected_count: number | null
+  prepared_count: number
+  prepared_at: string | null
+  created_at: string
+}
+
+/** A recipient handed to a worker by claim_campaign_sends(). */
+export type ClaimedCampaignSend = {
+  send_id: string
+  contact_id: string
+  email: string | null
+  first_name: string | null
+  last_name: string | null
+  claim_token: string
+}
+
+/** A consent change waiting to reach the provider. See 20261003010000_consent_outbox.sql. */
+export type ConsentSyncOutboxRow = {
+  id: string
+  contact_id: string
+  consent_version: number
+  source: string | null
+  status: 'pending' | 'processing' | 'done' | 'superseded' | 'failed'
+  attempts: number
+  next_attempt_at: string
+  claim_token: string | null
+  lease_expires_at: string | null
+  last_error: string | null
+  created_at: string
+  processed_at: string | null
+}
+
+/** Approved CRM staff. See 20261002000000_crm_membership.sql. */
+export type CrmMemberRow = {
+  user_id: string
+  role: 'admin' | 'operator'
+  active: boolean
+  granted_by: string | null
+  created_at: string
+  updated_at: string
 }
 
 export type ContactRow = {
@@ -291,6 +362,8 @@ export type ContactRow = {
   removed_by: string | null
   /** newsletter | import | manual. Null for rows predating the column. */
   source: string | null
+  /** Moves on every consent or email change; drives the consent outbox (H5). */
+  consent_version: number
   created_at: string
 }
 
@@ -354,7 +427,36 @@ export type ImportContactsResult = {
    * that archived them, so they wait for a person to merge or restore.
    */
   archived_collisions: number
+  /** Later rows repeating an address already in the file; the first row wins. */
+  duplicates?: number
   total: number
+}
+
+/** What an import would do, from preview_import_contacts() (audit P3). */
+export type ImportPreview = {
+  total: number
+  rejected: number
+  duplicates: number
+  new: number
+  changed: number
+  unchanged: number
+  /** Addresses of archived contacts: held back, never imported. */
+  held_back: number
+  becoming_customers: number
+  leaving_customers: number
+  withdrawing_newsletter: number
+  withdrawing_programs: number
+  customer_column_present: boolean | null
+  samples: Array<{
+    email: string
+    outcome: 'new' | 'changed' | 'held_back'
+    status: string
+    previous_status: string | null
+    newsletter: boolean
+    previous_newsletter: boolean | null
+  }>
+  /** Pass to import_contacts; it refuses if a matched contact changed since. */
+  token: string
 }
 
 /** One element of the JSON array passed to public.import_contacts(jsonb). */
@@ -455,6 +557,9 @@ export interface Database {
       segments: TableDef<SegmentRow>
       campaigns: TableDef<CampaignRow>
       campaign_sends: TableDef<CampaignSendRow>
+      campaign_runs: TableDef<CampaignRunRow>
+      crm_members: TableDef<CrmMemberRow>
+      consent_sync_outbox: TableDef<ConsentSyncOutboxRow>
       campaign_templates: TableDef<CampaignTemplateRow>
       newsletter_schedules: TableDef<NewsletterScheduleRow>
       newsletter_topics: TableDef<NewsletterTopicRow>
@@ -466,6 +571,45 @@ export interface Database {
       active_contacts: { Row: ContactRow; Relationships: [] }
     }
     Functions: {
+      claim_campaign_sends: {
+        Args: { p_campaign_id: string; p_run: number; p_limit: number; p_lease_seconds?: number }
+        Returns: ClaimedCampaignSend[]
+      }
+      begin_campaign_dispatch: {
+        Args: { p_send_id: string; p_token: string }
+        Returns: 'go' | 'lost' | 'skipped'
+      }
+      complete_campaign_send: {
+        Args: {
+          p_send_id: string
+          p_token: string
+          p_status: 'sent' | 'failed' | 'pending' | 'uncertain'
+          p_reference?: string | null
+          p_error?: string | null
+        }
+        Returns: boolean
+      }
+      resolve_uncertain_campaign_sends: {
+        Args: { p_campaign_id: string; p_run: number; p_resolution: 'sent' | 'retry' }
+        Returns: number
+      }
+      campaign_send_summaries: {
+        Args: { p_campaign_ids: string[] }
+        Returns: Array<{
+          campaign_id: string
+          run: number
+          pending: number
+          processing: number
+          sent: number
+          failed: number
+          skipped: number
+          uncertain: number
+          failure_reason: string | null
+          stall_reason: string | null
+        }>
+      }
+      is_crm_member: { Args: Record<string, never>; Returns: boolean }
+      is_crm_admin: { Args: Record<string, never>; Returns: boolean }
       create_campaign_booking: {
         Args: {
           p_token_hash: string
@@ -476,8 +620,12 @@ export interface Database {
         Returns: string
       }
       import_contacts: {
-        Args: { payload: ImportContactPayloadRow[] }
+        Args: { payload: ImportContactPayloadRow[]; p_preview_token?: string | null }
         Returns: ImportContactsResult
+      }
+      preview_import_contacts: {
+        Args: { payload: ImportContactPayloadRow[] }
+        Returns: ImportPreview
       }
       apply_contact_consent: {
         Args: {

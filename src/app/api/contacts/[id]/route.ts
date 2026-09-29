@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { getSession } from '@/lib/auth/dal'
 import { badRequest, conflict, notFound, ok, readJsonBody, requireSessionOr401, serverError } from '@/lib/api/responses'
 import { archiveContact, restoreContact } from '@/lib/contacts/repository'
+import { handleContactSave } from '@/lib/contacts/saveHandler'
 import { contactLifecycle } from '@/lib/lifecycle/entityLifecycle'
 import { isArchiveRuleError, lifecyclePatch, readLifecycleAction, refusal } from '@/lib/lifecycle/lifecycle'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
@@ -162,4 +163,17 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
   } catch (error) {
     return serverError(error, 'Could not change the contact.')
   }
+}
+
+/**
+ * Replaces a contact's details, organisation and services in one transaction (audit H8).
+ * Requires `expectedRevision`: saving over someone else's newer edit is a 409, and a
+ * failure anywhere leaves the contact exactly as it was.
+ */
+export async function PUT(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
+  const guard = await requireSessionOr401()
+  if ('response' in guard) return guard.response
+
+  const { id } = await params
+  return handleContactSave(request, id, request.nextUrl.origin)
 }

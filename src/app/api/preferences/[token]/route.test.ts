@@ -6,7 +6,16 @@ import { NextRequest } from 'next/server'
 import { createDbMock, createQueryBuilderMock } from '@/test/supabaseMock'
 
 const mockGetAdminClient = jest.fn()
+const mockProcessOutbox = jest.fn()
 
+// The provider push is covered by src/lib/consent/outbox tests; here only its effect on
+// the response matters.
+jest.mock('@/lib/consent/outbox', () => ({
+  processConsentOutbox: (...args: unknown[]) => mockProcessOutbox(...args),
+}))
+jest.mock('@/lib/marketing/providers/credentials', () => ({
+  loadEmailOctopusCredentials: async () => ({ apiKey: 'k', listId: 'l' }),
+}))
 jest.mock('@/lib/supabase/admin', () => ({
   getAdminClient: () => mockGetAdminClient(),
 }))
@@ -23,6 +32,7 @@ function setupDb(consent = { subscribed_to_newsletter: false, subscribed_to_prog
   const db = createDbMock(contacts)
 
   mockGetAdminClient.mockReturnValue(db)
+  mockProcessOutbox.mockResolvedValue({ claimed: 1, synced: 1, failed: 0 })
 
   return { db, contacts }
 }
@@ -100,7 +110,26 @@ describe('POST /api/preferences/[token]', () => {
       programs: false,
     })
 
-    await expect(response.json()).resolves.toEqual({ newsletter: false, programs: false })
+    await expect(response.json()).resolves.toEqual({ newsletter: false, programs: false, providerSync: 'done' })
+  })
+
+  it('pushes the change to the email provider straight away, for this contact only (H5)', async () => {
+    setupDb()
+
+    await post(mintPreferencesToken(CONTACT), { newsletter: false })
+
+    expect(mockProcessOutbox).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ contactId: CONTACT }))
+  })
+
+  it('still confirms the saved choice when the provider cannot be reached, and says so', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => undefined)
+    setupDb()
+    mockProcessOutbox.mockRejectedValue(new Error('provider down'))
+
+    const response = await post(mintPreferencesToken(CONTACT), { newsletter: false })
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({ providerSync: 'pending' })
   })
 
   it('leaves a stream alone when the reader said nothing about it', async () => {

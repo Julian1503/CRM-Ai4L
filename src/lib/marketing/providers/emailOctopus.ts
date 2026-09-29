@@ -127,6 +127,9 @@ async function toOutcome(response: Response, reference: string | null): Promise<
   }
 }
 
+/** How long to wait for the queue call before treating its outcome as unknown. */
+const QUEUE_TIMEOUT_MS = 15_000
+
 export function createEmailOctopusProvider(config: {
   apiKey: string
   listId: string
@@ -174,14 +177,37 @@ export function createEmailOctopusProvider(config: {
 
       const contactId = emailOctopusContactId(email)
 
-      const response = await doFetch(
-        `${API_BASE}/automations/${encodeURIComponent(campaignHandle)}/queue`,
-        {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ contact_id: contactId }),
+      // The queue call is not idempotent and EmailOctopus offers no idempotency key, so
+      // any failure that could follow acceptance is reported as ambiguous rather than
+      // retryable (audit H3). Only a 429 is known not to have been acted on.
+      let response: Response
+      try {
+        response = await doFetch(
+          `${API_BASE}/automations/${encodeURIComponent(campaignHandle)}/queue`,
+          {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ contact_id: contactId }),
+            signal: AbortSignal.timeout(QUEUE_TIMEOUT_MS),
+          }
+        )
+      } catch (error) {
+        return {
+          ok: false,
+          retryable: false,
+          ambiguous: true,
+          error: `No reply from EmailOctopus (${error instanceof Error ? error.name : 'network error'}); the email may or may not have been queued.`,
         }
-      )
+      }
+
+      if (response.status >= 500) {
+        return {
+          ok: false,
+          retryable: false,
+          ambiguous: true,
+          error: `${await readError(response)} — EmailOctopus failed mid-request; the email may or may not have been queued.`,
+        }
+      }
 
       // The queue endpoint answers with an empty body, so the contact id is the only
       // handle on the queued send. Recorded so a ledger row can be traced back to a

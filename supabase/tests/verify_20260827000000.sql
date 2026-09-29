@@ -95,6 +95,7 @@ begin
   ----------------------------------------------------------------------------
   update public.campaigns set status='in_review' where id=v_campaign_id;
   update public.campaigns set status='approved', approved_by=gen_random_uuid() where id=v_campaign_id;
+  insert into public.campaign_runs (campaign_id, run, revision, segment_id, consent_stream, audience_status) select id, send_run, revision, segment_id, consent_stream, 'prepared' from public.campaigns where id = v_campaign_id on conflict do nothing;  -- audience prepared (20261003000000)
   update public.campaigns set status='sending' where id=v_campaign_id;
   update public.campaigns set status='sent' where id=v_campaign_id;
 

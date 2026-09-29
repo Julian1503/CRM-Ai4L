@@ -44,7 +44,9 @@ export type CampaignCopyEditorProps = {
    * copy can move a campaign back to draft, and the caller must not have to guess
    * which of its own actions did that.
    */
-  onSaved: (mergeFields: Record<string, string>, status?: string) => void
+  /** The revision on screen; a save over a newer one is refused (audit H6). */
+  revision?: number
+  onSaved: (mergeFields: Record<string, string>, status?: string, revision?: number) => void
   onError: (message: string) => void
 }
 
@@ -71,6 +73,7 @@ export default function CampaignCopyEditor({
   campaignName,
   editable,
   mergeFields,
+  revision,
   audienceLabel,
   audienceSize,
   onSaved,
@@ -135,7 +138,7 @@ export default function CampaignCopyEditor({
         `Written for ${body.audience?.size ?? 0} contacts` +
           (body.generation?.attempts > 1 ? ` (${body.generation.attempts} attempts)` : '')
       )
-      onSaved(copy, body.campaign?.status)
+      onSaved(copy, body.campaign?.status, body.campaign?.revision)
     } catch (error) {
       onError(error instanceof Error ? error.message : 'Could not generate copy.')
     } finally {
@@ -156,7 +159,10 @@ export default function CampaignCopyEditor({
       const response = await fetch(`/api/campaigns/${campaignId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mergeFields: trimmed }),
+        body: JSON.stringify({
+          mergeFields: trimmed,
+          ...(revision !== undefined ? { expectedRevision: revision } : {}),
+        }),
       })
 
       if (!response.ok) throw new Error(await readError(response))
@@ -165,7 +171,7 @@ export default function CampaignCopyEditor({
 
       setDraft(trimmed)
       setGeneratedAt(null)
-      onSaved(trimmed, body.campaign?.status)
+      onSaved(trimmed, body.campaign?.status, body.campaign?.revision)
     } catch (error) {
       onError(error instanceof Error ? error.message : 'Could not save copy.')
     } finally {

@@ -200,6 +200,8 @@ export default function OperationsPanel() {
               </div>
             </div>
 
+            <AttentionList attention={summary.attention} />
+
             {stripe && !stripe.ok && (
               <div
                 className={`${styles.inlineError} ${styles.error}`}
@@ -227,5 +229,43 @@ export default function OperationsPanel() {
         )}
       </div>
     </section>
+  )
+}
+
+/**
+ * Work that stopped moving on its own. Listed only when present, each with what to do,
+ * so an empty list means nothing needs a person.
+ */
+function AttentionList({ attention }: { attention?: OperationsSummary['attention'] }) {
+  if (!attention) return null
+
+  const items = [
+    attention.uncertainSends > 0 &&
+      `${attention.uncertainSends} campaign recipient(s) have an unknown delivery outcome. Check the automation in EmailOctopus, then settle them from the campaign's send report.`,
+    attention.expiredSendClaims > 0 &&
+      `${attention.expiredSendClaims} recipient claim(s) expired mid-send. The next send step recovers them.`,
+    attention.consentSyncFailed > 0 &&
+      `${attention.consentSyncFailed} consent change(s) could not reach EmailOctopus after repeated attempts. Check the connection in Settings.`,
+    attention.consentSyncPending > 0 &&
+      `${attention.consentSyncPending} consent change(s) are waiting to reach EmailOctopus.`,
+  ].filter((item): item is string => typeof item === 'string')
+
+  if (items.length === 0) {
+    return (
+      <p className={styles.updated} data-testid="attention-clear">
+        Nothing is waiting on a person.
+      </p>
+    )
+  }
+
+  return (
+    <div className={styles.inlineError} role="status" data-testid="attention-list">
+      <strong>Waiting on a person</strong>
+      <ul>
+        {items.map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ul>
+    </div>
   )
 }

@@ -1,12 +1,12 @@
 import { NextResponse, type NextRequest } from 'next/server'
 
-import { markBookingCancelled, markBookingScheduled } from '@/lib/booking/repository'
+import { applyCalendlyEvent, readCalendlyEvent } from '@/lib/booking/calendly'
 import {
   completeIntegrationDelivery,
   startIntegrationDelivery,
 } from '@/lib/operations/deliveries'
 import { getAdminClient } from '@/lib/supabase/admin'
-import { claimWebhookEvent, deriveEventId, releaseWebhookEvent } from '@/lib/webhooks/idempotency'
+import { claimWebhookEvent, completeWebhookEvent, deriveEventId } from '@/lib/webhooks/idempotency'
 import { verifyWebhookSignature } from '@/lib/webhooks/verify'
 
 export const runtime = 'nodejs'
@@ -26,27 +26,7 @@ const PROVIDER = 'calendly'
  */
 type CalendlyPayload = {
   event?: string
-  payload?: {
-    uri?: string
-    email?: string
-    scheduled_event?: { uri?: string; start_time?: string }
-    tracking?: Record<string, unknown>
-    questions_and_answers?: unknown
-  }
-}
-
-/** Reads the booking id Calendly echoes back, if the tracking parameter survived. */
-function readBookingId(payload: CalendlyPayload['payload']): string | null {
-  const tracking = payload?.tracking
-
-  if (typeof tracking !== 'object' || tracking === null) {
-    return null
-  }
-
-  // Calendly surfaces `?utm_content=` and friends under `tracking`.
-  const candidate = (tracking as Record<string, unknown>).utm_content
-
-  return typeof candidate === 'string' && candidate.trim() !== '' ? candidate.trim() : null
+  payload?: Record<string, unknown>
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -84,7 +64,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   const eventName = body.event
-  const payload = body.payload
 
   if (eventName !== 'invitee.created' && eventName !== 'invitee.canceled') {
     await completeIntegrationDelivery(db, deliveryId, {
@@ -96,9 +75,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ status: 'ignored', event: eventName ?? null })
   }
 
-  const inviteeUri = payload?.uri
+  const invitee = readCalendlyEvent(eventName, body.payload)
 
-  if (!inviteeUri) {
+  if (!invitee) {
     await completeIntegrationDelivery(db, deliveryId, {
       status: 'failed',
       eventCount: 1,
@@ -110,51 +89,28 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   const eventId = deriveEventId(rawBody, request.headers.get('calendly-webhook-id'))
-  let claimed = false
+  let claim: { provider: string; eventId: string; token: string } | null = null
 
   try {
-    const isNew = await claimWebhookEvent(db, PROVIDER, eventId, eventName)
+    const claimed = await claimWebhookEvent(db, PROVIDER, eventId, eventName)
 
-    if (!isNew) {
+    if (claimed.outcome !== 'claimed') {
       await completeIntegrationDelivery(db, deliveryId, {
         status: 'succeeded',
         eventCount: 1,
-        processedCount: 1,
+        processedCount: claimed.outcome === 'completed' ? 1 : 0,
         failedCount: 0,
       })
-      return NextResponse.json({ status: 'duplicate' })
+      return claimed.outcome === 'completed'
+        ? NextResponse.json({ status: 'duplicate' })
+        : NextResponse.json({ status: 'in_progress' }, { status: 503 })
     }
-    claimed = true
+    claim = { provider: PROVIDER, eventId, token: claimed.token }
 
-    if (eventName === 'invitee.canceled') {
-      const cancelled = await markBookingCancelled(db, inviteeUri)
-
-      await completeIntegrationDelivery(db, deliveryId, {
-        status: 'succeeded',
-        eventCount: 1,
-        processedCount: 1,
-        failedCount: 0,
-      })
-
-      return NextResponse.json({ status: cancelled ? 'ok' : 'unmatched' })
-    }
-
-    const matched = await markBookingScheduled(db, {
-      bookingId: readBookingId(payload),
-      email: payload?.email ?? null,
-      eventUri: payload?.scheduled_event?.uri ?? '',
-      inviteeUri,
-      scheduledAt: payload?.scheduled_event?.start_time ?? new Date().toISOString(),
-    })
-
-    // An unmatched booking is acknowledged, not retried: the invitee may simply not be
-    // in the CRM. Logged so it is visible rather than silently dropped.
-    if (!matched) {
-      await db.from('sync_logs').insert({
-        event_text: `Calendly booking for ${payload?.email ?? 'unknown'} matched no contact`,
-        status: 'info',
-      })
-    }
+    // Applied and completed in one transaction (audit H11). Order-tolerant: a
+    // reschedule's cancel and create may arrive either way round, twice (audit M4).
+    // Anything that cannot be placed is parked for reconciliation, not dropped.
+    const outcome = await applyCalendlyEvent(db, invitee, claim)
 
     await completeIntegrationDelivery(db, deliveryId, {
       status: 'succeeded',
@@ -163,12 +119,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       failedCount: 0,
     })
 
-    return NextResponse.json({ status: matched ? 'ok' : 'unmatched' })
+    return NextResponse.json({ status: outcome === 'applied' ? 'ok' : outcome })
   } catch (error) {
     console.error('Calendly webhook processing failed:', error)
 
-    if (claimed) {
-      await releaseWebhookEvent(db, PROVIDER, eventId)
+    if (claim) {
+      await completeWebhookEvent(db, claim, 'failed_retryable', error instanceof Error ? error.message : 'failed')
     }
 
     await completeIntegrationDelivery(db, deliveryId, {

@@ -111,7 +111,7 @@ begin
   v_failed := false;
   begin
     update public.campaigns
-       set status='approved', provider_automation_id='auto__p4verify'
+       set status='approved'
      where id = v_campaign_id;
   exception when others then
     v_failed := true;
@@ -133,26 +133,33 @@ begin
   end;
   assert v_failed, 'a campaign was approved with no provider_automation_id';
 
+  -- Content only changes in draft since 20261003000000 (approval binds a revision).
+  update public.campaigns set status='draft' where id = v_campaign_id;
+  update public.campaigns set provider_automation_id='   ', status='in_review' where id = v_campaign_id;
+
   v_failed := false;
   begin
     update public.campaigns
-       set status='approved', approved_by=gen_random_uuid(), provider_automation_id='   '
+       set status='approved', approved_by=gen_random_uuid()
      where id = v_campaign_id;
   exception when others then
     v_failed := true;
   end;
   assert v_failed, 'a whitespace-only provider_automation_id was accepted as an automation id';
 
+  update public.campaigns set status='draft' where id = v_campaign_id;
+  update public.campaigns set provider_automation_id='auto__p4verify', status='in_review' where id = v_campaign_id;
+
   ----------------------------------------------------------------------------
   raise notice '7. the full happy path runs draft -> in_review -> approved -> sending -> sent';
   ----------------------------------------------------------------------------
   update public.campaigns
-     set status='approved', approved_by=gen_random_uuid(),
-         provider_automation_id='auto__p4verify', approved_at=now()
+     set status='approved', approved_by=gen_random_uuid(), approved_at=now()
    where id = v_campaign_id;
   assert (select status = 'approved' from public.campaigns where id = v_campaign_id),
          'a properly attributed approval was refused';
 
+  insert into public.campaign_runs (campaign_id, run, revision, segment_id, consent_stream, audience_status) select id, send_run, revision, segment_id, consent_stream, 'prepared' from public.campaigns where id = v_campaign_id on conflict do nothing;  -- audience prepared (20261003000000)
   update public.campaigns set status='sending', started_at=now() where id = v_campaign_id;
   update public.campaigns set status='sent', completed_at=now() where id = v_campaign_id;
   assert (select status = 'sent' from public.campaigns where id = v_campaign_id),

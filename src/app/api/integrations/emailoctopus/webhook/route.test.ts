@@ -72,9 +72,7 @@ function setupDb(
 ) {
   const { claimed = true, existing = null } = options
 
-  const webhookEvents = createQueryBuilderMock(
-    claimed ? { data: null, error: null } : { data: null, error: { code: '23505', message: 'dup' } }
-  )
+  const webhookEvents = createQueryBuilderMock({ data: null, error: null })
   const contacts = createQueryBuilderMock(
     options.contacts ?? [
       { data: existing, error: null },
@@ -90,9 +88,24 @@ function setupDb(
     return contacts
   })
 
+  // The durable ledger (audit H11) answers through RPCs; the consent RPC succeeds.
+  db.rpc = ledgerRpc(claimed) as never
+
   mockGetAdminClient.mockReturnValue(db)
 
   return { db, webhookEvents, contacts, syncLogs }
+}
+
+function ledgerRpc(claimed: boolean) {
+  return jest.fn(async (fn: string) => {
+    if (fn === 'claim_webhook_event') {
+      return {
+        data: [claimed ? { outcome: 'claimed', claim_token: 'tok-1' } : { outcome: 'completed', claim_token: null }],
+        error: null,
+      }
+    }
+    return { data: true, error: null }
+  })
 }
 
 describe('POST emailoctopus webhook', () => {
@@ -305,7 +318,10 @@ describe('POST emailoctopus webhook', () => {
       )
 
       await expect(response.json()).resolves.toMatchObject({ updated: 2, received: 2 })
-      expect(db.rpc).toHaveBeenCalledTimes(2)
+      // Each event: claimed, applied, completed — on its own.
+      const calls = (db.rpc as jest.Mock).mock.calls.map(([fn]) => fn)
+      expect(calls.filter((fn) => fn === 'apply_contact_consent')).toHaveLength(2)
+      expect(calls.filter((fn) => fn === 'complete_webhook_event')).toHaveLength(2)
     })
 
     it('logs a batch with a single insert rather than one per event', async () => {
@@ -338,23 +354,25 @@ describe('POST emailoctopus webhook', () => {
   describe('idempotency', () => {
     it('claims each event on its own id, not the delivery', async () => {
       // Keying on the request would let 999 events ride in on the first one's claim.
-      const { webhookEvents } = setupDb()
+      const { db } = setupDb()
 
       await POST(request(subscribePayload))
 
-      const insert = webhookEvents.argsFor('insert') as [Record<string, unknown>]
-      expect(insert[0]).toMatchObject({ event_id: 'evt-1', event_type: 'contact.created' })
+      expect(db.rpc).toHaveBeenCalledWith('claim_webhook_event', expect.objectContaining({
+        p_event_id: 'evt-1',
+        p_event_type: 'contact.created',
+      }))
     })
 
     it('falls back to a content hash when an event carries no id', async () => {
-      const { webhookEvents } = setupDb()
+      const { db } = setupDb()
 
       await POST(
         request([{ type: 'contact.created', contact_email_address: 'grace@example.com' }])
       )
 
-      const insert = webhookEvents.argsFor('insert') as [Record<string, unknown>]
-      expect(String(insert[0].event_id)).toMatch(/^sha256:[0-9a-f]{64}$/)
+      const claim = (db.rpc as jest.Mock).mock.calls.find(([fn]) => fn === 'claim_webhook_event')
+      expect(String(claim?.[1].p_event_id)).toMatch(/^sha256:[0-9a-f]{64}$/)
     })
 
     it('processes a first delivery', async () => {
@@ -381,14 +399,13 @@ describe('POST emailoctopus webhook', () => {
 
   describe('failure handling', () => {
     function setupFailingDb() {
-      const webhookEvents = createQueryBuilderMock({ data: null, error: null })
       const failing = createQueryBuilderMock({ data: null, error: { message: 'db down' } })
+      const db = createDbMock(() => failing)
+      db.rpc = ledgerRpc(true) as never
 
-      mockGetAdminClient.mockReturnValue(
-        createDbMock((table: string) => (table === 'webhook_events' ? webhookEvents : failing))
-      )
+      mockGetAdminClient.mockReturnValue(db)
 
-      return { webhookEvents }
+      return { db }
     }
 
     it('returns 500 so the provider retries when processing fails', async () => {
@@ -399,16 +416,25 @@ describe('POST emailoctopus webhook', () => {
       expect(response.status).toBe(500)
     })
 
-    it('releases the claim so the retry is not dismissed as a duplicate', async () => {
-      // Without this the ledger turns a transient database blip into permanent loss:
-      // the event stays claimed, and every retry is skipped.
-      const { webhookEvents } = setupFailingDb()
+    it('records the failure as retryable, so the retry takes the event over (H11)', async () => {
+      // A deleted claim used to be the recovery path; a crash before the delete lost the
+      // event for good. The outcome is recorded instead, and nothing is deleted.
+      const { db } = setupFailingDb()
 
       await POST(request(subscribePayload))
 
-      expect(webhookEvents.allFor('delete')).toHaveLength(1)
-      const eqCalls = webhookEvents.allFor('eq').map((call) => call.args)
-      expect(eqCalls).toContainEqual(['event_id', 'evt-1'])
+      expect(db.rpc).toHaveBeenCalledWith('complete_webhook_event', expect.objectContaining({
+        p_event_id: 'evt-1',
+        p_token: 'tok-1',
+        p_status: 'failed_retryable',
+      }))
+    })
+
+    it('fails the delivery while another one is still processing an event', async () => {
+      const { db } = setupDb()
+      db.rpc = jest.fn(async () => ({ data: [{ outcome: 'in_progress', claim_token: null }], error: null })) as never
+
+      expect((await POST(request(subscribePayload))).status).toBe(500)
     })
   })
 })

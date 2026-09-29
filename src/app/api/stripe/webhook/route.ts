@@ -1,15 +1,15 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import type Stripe from 'stripe'
 
-import { sendBookingPaidEmail } from '@/lib/booking/paidEmail'
-import { markBookingPaid } from '@/lib/booking/repository'
+import { processNotifications } from '@/lib/booking/notifications'
+import { applyCheckoutPayment, isCompletedCheckout } from '@/lib/booking/payment'
 import {
   completeIntegrationDelivery,
   startIntegrationDelivery,
 } from '@/lib/operations/deliveries'
 import { getStripeClient, getStripeConfig } from '@/lib/stripe/client'
 import { getAdminClient } from '@/lib/supabase/admin'
-import { claimWebhookEvent, releaseWebhookEvent } from '@/lib/webhooks/idempotency'
+import { claimWebhookEvent, completeWebhookEvent } from '@/lib/webhooks/idempotency'
 
 export const runtime = 'nodejs'
 
@@ -64,58 +64,73 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ status: 'ignored', type: event.type })
   }
 
-  let claimed = false
+  let claim: { provider: string; eventId: string; token: string } | null = null
 
   try {
+    // Stripe retries aggressively. A completed event is acknowledged; one another
+    // delivery is still working on is answered retryable; one whose worker died, or
+    // that failed retryably, is taken over (audit H11).
+    const claimed = await claimWebhookEvent(db, PROVIDER, event.id, event.type)
 
-    // Stripe retries aggressively; the ledger makes a replay a no-op.
-    const isNew = await claimWebhookEvent(db, PROVIDER, event.id, event.type)
-
-    if (!isNew) {
+    if (claimed.outcome !== 'claimed') {
       await completeIntegrationDelivery(db, deliveryId, {
         status: 'succeeded',
         eventCount: 1,
-        processedCount: 1,
+        processedCount: claimed.outcome === 'completed' ? 1 : 0,
         failedCount: 0,
       })
-      return NextResponse.json({ status: 'duplicate' })
+      return claimed.outcome === 'completed'
+        ? NextResponse.json({ status: 'duplicate' })
+        : NextResponse.json({ status: 'in_progress' }, { status: 503 })
     }
-    claimed = true
+    claim = { provider: PROVIDER, eventId: event.id, token: claimed.token }
 
     const session = event.data.object as Stripe.Checkout.Session
     const bookingId = session.metadata?.booking_id?.trim()
-    const paymentConfirmed =
-      session.status === 'complete' &&
-      (session.payment_status === 'paid' || session.payment_status === 'no_payment_required')
 
-    if (!bookingId || !paymentConfirmed || session.amount_total !== 0) {
-      throw new Error('Checkout session did not confirm the expected $0 booking.')
+    if (!bookingId || !isCompletedCheckout(session)) {
+      // Not something retrying can fix: record it terminally and acknowledge.
+      await completeWebhookEvent(db, claim, 'failed_terminal', 'checkout not complete or no booking id')
+      await completeIntegrationDelivery(db, deliveryId, {
+        status: 'failed',
+        eventCount: 1,
+        processedCount: 0,
+        failedCount: 1,
+        errorCode: 'unexpected_checkout',
+      })
+      return NextResponse.json({ status: 'rejected' })
     }
 
-    const matched = await markBookingPaid(db, session.id, session.amount_total, bookingId)
+    // Payment, confirmation email and event completion commit together (audit H10).
+    const outcome = await applyCheckoutPayment(db, { bookingId, session, webhook: claim })
 
-    if (!matched) {
-      throw new Error('Checkout session matched no pending booking.')
+    if (outcome === 'not_ready') {
+      throw new Error('The booking has not recorded this checkout yet.')
     }
 
-    // Only reached on the transition to 'paid', so each booking is emailed once.
-    // A delivery failure is logged, not rethrown: the booking is already paid, and a
-    // 500 would make Stripe retry into a markBookingPaid that no longer matches.
-    try {
-      const emailResult = await sendBookingPaidEmail(db, session, bookingId)
+    if (outcome === 'mismatch' || outcome === 'not_found') {
+      console.warn('Stripe checkout refused', { bookingId, session: session.id, outcome })
+      await completeIntegrationDelivery(db, deliveryId, {
+        status: 'failed',
+        eventCount: 1,
+        processedCount: 0,
+        failedCount: 1,
+        errorCode: `checkout_${outcome}`,
+      })
+      return NextResponse.json({ status: 'rejected' })
+    }
 
-      if (emailResult.status === 'skipped') {
-        console.warn('Booking confirmation email skipped', {
-          bookingId,
-          reason: emailResult.reason,
-        })
-      }
-    } catch (emailError) {
-      console.error('Booking confirmation email failed', {
+    // The email is queued; sending it now is only for immediacy. The scheduled worker
+    // retries it independently of the payment if this attempt fails.
+    await processNotifications(db, {
+      retrieveCheckout: (id) => stripe.checkout.sessions.retrieve(id),
+      limit: 1,
+    }).catch((emailError) => {
+      console.error('Booking confirmation email left queued', {
         bookingId,
         message: emailError instanceof Error ? emailError.message : String(emailError),
       })
-    }
+    })
 
     await completeIntegrationDelivery(db, deliveryId, {
       status: 'succeeded',
@@ -124,12 +139,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       failedCount: 0,
     })
 
-    return NextResponse.json({ status: 'ok', session: session.id })
+    return NextResponse.json({ status: outcome === 'applied' ? 'ok' : 'duplicate', session: session.id })
   } catch (error) {
     console.error('Stripe webhook processing failed:', error)
 
-    if (claimed) {
-      await releaseWebhookEvent(db, PROVIDER, event.id)
+    if (claim) {
+      await completeWebhookEvent(db, claim, 'failed_retryable', error instanceof Error ? error.message : 'failed')
     }
 
     await completeIntegrationDelivery(db, deliveryId, {
@@ -140,7 +155,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       errorCode: 'processing_failed',
     })
 
-    // 500 so Stripe retries; the ledger makes that safe.
+    // 500 so Stripe retries; the ledger and the idempotent payment make that safe.
     return NextResponse.json({ error: 'Processing failed.' }, { status: 500 })
   }
 }

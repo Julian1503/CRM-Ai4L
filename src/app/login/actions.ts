@@ -2,7 +2,8 @@
 
 import { redirect } from 'next/navigation'
 
-import { AUTH_FAILED_MESSAGE, validateLoginInput } from '@/lib/auth/credentials'
+import { AUTH_FAILED_MESSAGE, NOT_APPROVED_MESSAGE, validateLoginInput } from '@/lib/auth/credentials'
+import { fetchActiveRole } from '@/lib/auth/membership'
 import { sanitizeNextPath } from '@/lib/auth/redirect'
 import { isSupabaseConfigured } from '@/lib/supabase/config'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
@@ -41,10 +42,11 @@ export async function login(
   }
 
   let signInFailed = false
+  let notApproved = false
 
   try {
     const supabase = await createSupabaseServerClient()
-    const { error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabase.auth.signInWithPassword({
       email: validated.email,
       password: validated.password,
     })
@@ -52,13 +54,24 @@ export async function login(
     // Every failure reason collapses into one message. Supabase distinguishes
     // "invalid credentials" from "email not confirmed"; surfacing that difference
     // would confirm which addresses have accounts.
-    signInFailed = Boolean(error)
+    signInFailed = Boolean(error) || !data?.user
+
+    // A correct password is not CRM access (audit C1). The session is dropped at once
+    // so an unapproved account holds no cookie at all.
+    if (!signInFailed && data.user && !(await fetchActiveRole(supabase, data.user.id))) {
+      notApproved = true
+      await supabase.auth.signOut()
+    }
   } catch {
     return { error: 'Could not reach the authentication service. Please try again.' }
   }
 
   if (signInFailed) {
     return { error: AUTH_FAILED_MESSAGE }
+  }
+
+  if (notApproved) {
+    return { error: NOT_APPROVED_MESSAGE }
   }
 
   // redirect() throws to unwind, so it must sit outside the try/catch above -

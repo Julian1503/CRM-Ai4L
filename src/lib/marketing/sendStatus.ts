@@ -1,106 +1,100 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
-import type { CampaignSendRow, Database } from '@/lib/db/types'
-
-/** The ledger statuses this report counts. Mirrors the table's CHECK constraint. */
-type LedgerStatus = CampaignSendRow['status']
+import type { Database } from '@/lib/db/types'
 
 /**
- * What the send ledger says about one campaign.
+ * What the send ledger says about a campaign's current run.
  *
  * Read back rather than inferred from the chunk that just ran: a send is chunked and
  * resumable, so the run that finishes a campaign is rarely the run that failed part of
- * it. Without the cumulative view, a campaign could end `failed` while the last chunk
- * reported nothing but successes — which is exactly how a whole failed send used to
- * reach the operator as a silent status change.
+ * it. Every ledger status is counted separately (audit H3/H4) — a recipient skipped for
+ * withdrawn consent or left uncertain after a provider timeout is neither sent nor
+ * forgotten.
+ *
+ * Served by one SQL aggregate for many campaigns at once (campaign_send_summaries), so
+ * a page of campaigns costs one request, not one per row (audit A2).
  */
 export type CampaignSendSummary = {
   /** Which fan-out these figures describe. A re-sent campaign has more than one. */
   run: number
   total: number
+  /** Accepted by the provider. Not the same as delivered. */
   sent: number
   failed: number
+  /** Still to go: queued plus currently claimed by a worker. */
   pending: number
+  /** Claimed by a worker right now. Included in `pending`. */
+  processing: number
+  /** Not sent because the contact was no longer eligible at dispatch. */
+  skipped: number
+  /** The provider may or may not have queued these. Need reconciliation; never retried automatically. */
+  uncertain: number
   /** The provider's own words for the most recent failure, or null if none failed. */
   failureReason: string | null
-  /**
-   * Why recipients are still waiting — a rate limit or an outage recorded against a
-   * pending row. Null when the remaining work simply has not been attempted yet.
-   */
+  /** Why recipients are waiting or uncertain, or null when nothing is recorded. */
   stallReason: string | null
 }
 
-async function countByStatus(
-  db: SupabaseClient<Database>,
-  campaignId: string,
-  run: number,
-  status: LedgerStatus
-): Promise<number> {
-  const { count, error } = await db
-    .from('campaign_sends')
-    .select('id', { count: 'exact', head: true })
-    .eq('campaign_id', campaignId)
-    .eq('run', run)
-    .eq('status', status)
+export const MAX_SUMMARY_BATCH = 200
 
-  if (error) throw new Error(error.message)
-
-  return count ?? 0
+type SummaryRow = {
+  campaign_id: string
+  run: number
+  pending: number
+  processing: number
+  sent: number
+  failed: number
+  skipped: number
+  uncertain: number
+  failure_reason: string | null
+  stall_reason: string | null
 }
 
-/** The most recent non-empty `error` recorded against a row in this status. */
-async function latestReason(
-  db: SupabaseClient<Database>,
-  campaignId: string,
-  run: number,
-  status: LedgerStatus
-): Promise<string | null> {
-  const { data, error } = await db
-    .from('campaign_sends')
-    .select('error')
-    .eq('campaign_id', campaignId)
-    .eq('run', run)
-    .eq('status', status)
-    .not('error', 'is', null)
-    .order('attempted_at', { ascending: false, nullsFirst: false })
-    .limit(1)
-    .maybeSingle()
-
-  if (error) throw new Error(error.message)
-
-  const reason = (data as { error?: string | null } | null)?.error
-
-  return typeof reason === 'string' && reason.trim() !== '' ? reason : null
-}
-
-/**
- * Reads one run's ledger totals, plus the reason behind them when there is one.
- *
- * Scoped to a run because a re-sent campaign accumulates: summing every row would
- * report "18 of 9 sent" the moment a campaign went out twice.
- *
- * The two reason lookups are skipped when their counts are zero, so a clean send costs
- * three head-count queries and nothing more.
- */
-export async function readCampaignSendSummary(
-  db: SupabaseClient<Database>,
-  campaignId: string,
-  run = 1
-): Promise<CampaignSendSummary> {
-  const pending = await countByStatus(db, campaignId, run, 'pending')
-  const failed = await countByStatus(db, campaignId, run, 'failed')
-  const sent = await countByStatus(db, campaignId, run, 'sent')
-
-  const failureReason = failed > 0 ? await latestReason(db, campaignId, run, 'failed') : null
-  const stallReason = pending > 0 ? await latestReason(db, campaignId, run, 'pending') : null
+function toSummary(row: SummaryRow): CampaignSendSummary {
+  const pending = row.pending + row.processing
 
   return {
-    run,
-    total: pending + failed + sent,
-    sent,
-    failed,
+    run: row.run,
+    total: pending + row.sent + row.failed + row.skipped + row.uncertain,
+    sent: row.sent,
+    failed: row.failed,
     pending,
-    failureReason,
-    stallReason,
+    processing: row.processing,
+    skipped: row.skipped,
+    uncertain: row.uncertain,
+    failureReason: row.failed > 0 ? row.failure_reason : null,
+    stallReason: pending + row.uncertain > 0 ? row.stall_reason : null,
   }
+}
+
+/** Current-run summaries for up to MAX_SUMMARY_BATCH campaigns, keyed by campaign id. */
+export async function readCampaignSendSummaries(
+  db: SupabaseClient<Database>,
+  campaignIds: readonly string[]
+): Promise<Map<string, CampaignSendSummary>> {
+  const ids = [...new Set(campaignIds)]
+  if (ids.length === 0) return new Map()
+  if (ids.length > MAX_SUMMARY_BATCH) {
+    throw new Error(`At most ${MAX_SUMMARY_BATCH} campaign summaries can be read at once.`)
+  }
+
+  const rpc = db.rpc.bind(db) as unknown as (
+    fn: 'campaign_send_summaries',
+    args: { p_campaign_ids: string[] }
+  ) => PromiseLike<{ data: SummaryRow[] | null; error: { message: string } | null }>
+
+  const { data, error } = await rpc('campaign_send_summaries', { p_campaign_ids: ids })
+  if (error) throw new Error(`Could not read send summaries: ${error.message}`)
+
+  return new Map((data ?? []).map((row) => [row.campaign_id, toSummary(row)]))
+}
+
+export async function readCampaignSendSummary(
+  db: SupabaseClient<Database>,
+  campaignId: string
+): Promise<CampaignSendSummary> {
+  const summary = (await readCampaignSendSummaries(db, [campaignId])).get(campaignId)
+  if (!summary) throw new Error('Campaign not found.')
+
+  return summary
 }

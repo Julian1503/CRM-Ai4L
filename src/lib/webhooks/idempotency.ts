@@ -5,14 +5,20 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/lib/db/types'
 
 /**
- * At-least-once delivery protection.
+ * At-least-once delivery protection with recoverable outcomes (audit H11).
  *
- * Webhook providers retry on any non-2xx and on timeouts, so the same event arrives
- * more than once. Without a ledger, a retried `unsubscribed` can land *after* a newer
- * `subscribed` and silently undo it.
+ * Providers retry on any non-2xx and on timeouts, so the same event arrives more than
+ * once. The ledger used to record only that an event had been *claimed*: a process that
+ * died before releasing its claim left the event "handled" forever, and every retry was
+ * dismissed as a duplicate. Now an event has an outcome and a lease:
  *
- * The uniqueness constraint on (provider, event_id) is the whole mechanism: an insert
- * that conflicts means the event was already handled.
+ *   claimed      process it, then complete it with the token
+ *   completed    a finished (or terminally refused) event: acknowledge the duplicate
+ *   in_progress  another delivery holds a live lease: answer retryable (503)
+ *
+ * A redelivery of an event whose worker died, or that failed retryably, takes it over.
+ * Handlers that change business data complete the event inside the same database call
+ * (apply_checkout_payment, apply_calendly_event), so the two cannot disagree.
  */
 
 /**
@@ -21,9 +27,8 @@ import type { Database } from '@/lib/db/types'
  * Prefers a provider-supplied id. Falls back to a hash of the payload it was derived
  * from, which is a sound key because a genuine retry replays identical content.
  *
- * Note that a delivery is not the unit here: EmailOctopus batches up to 1000 events
- * into one request, so keying on the request would let 999 events ride in on the first
- * one's claim.
+ * A delivery is not the unit: EmailOctopus batches up to 1000 events into one request,
+ * so keying on the request would let 999 events ride in on the first one's claim.
  */
 export function deriveEventId(payload: string, providedId?: string | null): string {
   const trimmed = typeof providedId === 'string' ? providedId.trim() : ''
@@ -35,56 +40,62 @@ export function deriveEventId(payload: string, providedId?: string | null): stri
   return `sha256:${createHash('sha256').update(payload, 'utf8').digest('hex')}`
 }
 
-/**
- * Claims an event id.
- *
- * @returns true when this delivery is new and should be processed, false when it has
- * already been handled.
- */
+export type WebhookClaim =
+  | { outcome: 'claimed'; token: string }
+  | { outcome: 'completed' }
+  | { outcome: 'in_progress' }
+
+type Rpc = (fn: string, args: Record<string, unknown>) => PromiseLike<{
+  data: unknown
+  error: { message: string } | null
+}>
+
+function rpc(db: SupabaseClient<Database>): Rpc {
+  return db.rpc.bind(db) as unknown as Rpc
+}
+
 export async function claimWebhookEvent(
   db: SupabaseClient<Database>,
   provider: string,
   eventId: string,
   eventType: string | null
-): Promise<boolean> {
-  const { error } = await db
-    .from('webhook_events')
-    .insert({ provider, event_id: eventId, event_type: eventType })
+): Promise<WebhookClaim> {
+  const { data, error } = await rpc(db)('claim_webhook_event', {
+    p_provider: provider,
+    p_event_id: eventId,
+    p_event_type: eventType,
+  })
 
-  if (!error) {
-    return true
-  }
+  if (error) throw new Error(`Could not record webhook event: ${error.message}`)
 
-  // 23505 = unique_violation: another delivery of this event already claimed it.
-  if (error.code === '23505') {
-    return false
-  }
+  const row = (Array.isArray(data) ? data[0] : data) as { outcome?: string; claim_token?: string } | null
+  if (row?.outcome === 'claimed' && row.claim_token) return { outcome: 'claimed', token: row.claim_token }
+  if (row?.outcome === 'in_progress') return { outcome: 'in_progress' }
+  if (row?.outcome === 'completed') return { outcome: 'completed' }
 
-  throw new Error(`Could not record webhook event: ${error.message}`)
+  throw new Error('Could not record webhook event: unexpected claim result.')
 }
 
 /**
- * Gives a claim back after processing failed.
- *
- * Without this, an event that errors mid-apply stays claimed, so the retry the provider
- * is about to send is dismissed as a duplicate and the event is lost for good — the
- * ledger would turn a transient database blip into permanent data loss.
- *
- * Failures here are logged rather than thrown: the caller is already handling an error,
- * and masking it with this one would hide the real cause.
+ * Records a claimed event's outcome. A failure to record is logged, not thrown: the
+ * caller is already answering, and an unrecorded completion simply expires into a
+ * retryable claim, which is safe because every handler is idempotent.
  */
-export async function releaseWebhookEvent(
+export async function completeWebhookEvent(
   db: SupabaseClient<Database>,
-  provider: string,
-  eventId: string
+  claim: { provider: string; eventId: string; token: string },
+  status: 'completed' | 'failed_retryable' | 'failed_terminal',
+  errorMessage: string | null = null
 ): Promise<void> {
-  const { error } = await db
-    .from('webhook_events')
-    .delete()
-    .eq('provider', provider)
-    .eq('event_id', eventId)
+  const { error } = await rpc(db)('complete_webhook_event', {
+    p_provider: claim.provider,
+    p_event_id: claim.eventId,
+    p_token: claim.token,
+    p_status: status,
+    p_error: errorMessage,
+  })
 
   if (error) {
-    console.error(`Could not release webhook event ${provider}/${eventId}: ${error.message}`)
+    console.error(`Could not record the outcome of webhook event ${claim.provider}/${claim.eventId}: ${error.message}`)
   }
 }

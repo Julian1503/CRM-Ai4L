@@ -10,6 +10,20 @@ const hasCredentials = Boolean(process.env.E2E_EMAIL && process.env.E2E_PASSWORD
 const useExternalServer = process.env.E2E_EXTERNAL_SERVER === 'true';
 const reuseExistingServer = process.env.E2E_REUSE_EXISTING_SERVER === 'true';
 const skipBuild = process.env.E2E_SKIP_BUILD === 'true';
+// Set in CI's integration job: a missing test identity is a broken environment, not a
+// reason to skip the signed-in suites and report green (audit T1).
+const requireAuth = process.env.E2E_REQUIRE_AUTH === 'true';
+
+if (requireAuth && !hasCredentials) {
+  throw new Error('E2E_REQUIRE_AUTH=true but E2E_EMAIL / E2E_PASSWORD are not set.');
+}
+if (
+  requireAuth &&
+  !['127.0.0.1', 'localhost'].includes(new URL(process.env.NEXT_PUBLIC_SUPABASE_URL || 'http://invalid').hostname)
+) {
+  // Mutating journeys must never run against a hosted (business) project by accident.
+  throw new Error('E2E_REQUIRE_AUTH=true expects the local Supabase test stack.');
+}
 
 if (!useExternalServer && !['127.0.0.1', 'localhost'].includes(parsedBaseURL.hostname)) {
   throw new Error('Set E2E_EXTERNAL_SERVER=true when E2E_BASE_URL is not local.');
@@ -41,7 +55,7 @@ const publicProjects = browserDefinitions.map(({ name, device }) => ({
 
 const authenticatedProjects = browserDefinitions.map(({ name, device }) => ({
   name: `authenticated-${name}`,
-  testMatch: /(smoke|archive)\.spec\.ts/,
+  testMatch: /(smoke|archive|membership)\.spec\.ts/,
   grepInvert: SIGN_OUT_TEST,
   dependencies: hasCredentials ? ['auth-setup'] : [],
   use: {

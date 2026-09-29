@@ -3,7 +3,8 @@ import type { NextResponse } from 'next/server'
 
 import { badRequest, conflict, notFound, ok, requireSessionOr401, serverError } from '@/lib/api/responses'
 import { isSendable } from '@/lib/marketing/campaignStatus'
-import { resolveSegmentMembers } from '@/lib/marketing/segments'
+import { loadEmailOctopusStatus } from '@/lib/marketing/providers/credentials'
+import { measureSegmentAudience, SEGMENT_MEMBER_CAP } from '@/lib/marketing/segments'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 
 export const runtime = 'nodejs'
@@ -25,7 +26,7 @@ export async function GET(
     const db = await createSupabaseServerClient()
     const { data: campaign, error } = await db
       .from('campaigns')
-      .select('id, status, segment_id, provider_automation_id, consent_stream, segment:segments(definition)')
+      .select('id, status, send_run, segment_id, provider_automation_id, consent_stream, segment:segments(definition)')
       .eq('id', id)
       .maybeSingle()
 
@@ -37,25 +38,40 @@ export async function GET(
     if (!campaign.segment_id) return conflict('This campaign has no audience segment.')
     if (!campaign.provider_automation_id?.trim()) return conflict('Connect an EmailOctopus template before sending.')
 
-    const { data: credentials, error: credentialsError } = await db
-      .from('credentials')
-      .select('key, value')
-    if (credentialsError) throw new Error(credentialsError.message)
-
-    const keys = new Set((credentials ?? []).map((row) => row.key))
-    if (!keys.has('emailoctopus_api_key') || !keys.has('emailoctopus_list_id')) {
+    if (!(await loadEmailOctopusStatus()).configured) {
       return conflict('EmailOctopus is not connected. Open Settings to finish setup.')
     }
 
     const segment = campaign.segment as unknown as { definition: Record<string, unknown> } | null
     if (!segment) return conflict('The campaign audience no longer exists.')
 
-    const members = await resolveSegmentMembers(
+    // Once a run's audience is materialised, the send goes to that snapshot (minus anyone
+    // who becomes ineligible), not to whatever the segment matches now.
+    const { data: run, error: runError } = await db
+      .from('campaign_runs')
+      .select('audience_status, prepared_count, expected_count')
+      .eq('campaign_id', campaign.id)
+      .eq('run', campaign.send_run)
+      .maybeSingle()
+    if (runError) throw new Error(runError.message)
+
+    if (run?.audience_status === 'prepared') {
+      return ok({ ready: run.prepared_count > 0, total: run.prepared_count, truncated: false, prepared: true })
+    }
+
+    const members = await measureSegmentAudience(
       db,
       { id: campaign.segment_id, definition: segment.definition },
       campaign.consent_stream
     )
-    return ok({ ready: members.total > 0, total: members.total, truncated: members.truncated })
+    return ok({
+      // Over the cap is refused outright rather than sent to the first N (audit H7).
+      ready: members.total > 0 && !members.truncated,
+      total: members.total,
+      truncated: members.truncated,
+      limit: SEGMENT_MEMBER_CAP,
+      prepared: false,
+    })
   } catch (error) {
     return serverError(error, 'Could not run campaign preflight.')
   }

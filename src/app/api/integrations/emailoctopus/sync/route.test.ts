@@ -6,10 +6,15 @@ import { NextRequest } from 'next/server'
 const mockGetSession = jest.fn()
 const mockSync = jest.fn()
 const mockCreateServerClient = jest.fn()
+const mockLoadCredentials = jest.fn()
 
 jest.mock('@/lib/auth/dal', () => ({ getSession: () => mockGetSession() }))
 jest.mock('@/lib/emailOctopus', () => ({
   syncContactToEmailOctopus: (...args: unknown[]) => mockSync(...args),
+}))
+// Read server-side with the service role since audit H1; never from the request.
+jest.mock('@/lib/marketing/providers/credentials', () => ({
+  loadEmailOctopusCredentials: () => mockLoadCredentials(),
 }))
 jest.mock('@/lib/supabase/server', () => ({
   createSupabaseServerClient: () => mockCreateServerClient(),
@@ -19,15 +24,26 @@ jest.mock('@/lib/supabase/server', () => ({
  * A contacts table of `count` rows, served through the chained query builder in
  * whatever `.range()` windows the route asks for.
  */
-function stubContactsTable(count: number) {
+type StubRow = {
+  id?: string
+  email: string
+  first_name?: string
+  last_name?: string
+  subscribed_to_newsletter?: boolean
+  subscribed_to_programs?: boolean
+}
+
+function stubContactsTable(countOrRows: number | StubRow[]) {
   const ranges: Array<[number, number]> = []
 
-  const rows = Array.from({ length: count }, (unused, index) => ({
-    email: `contact-${index}@example.com`,
-    first_name: `First${index}`,
-    last_name: `Last${index}`,
-    subscribed_to_newsletter: index % 2 === 0,
-  }))
+  const rows: StubRow[] = Array.isArray(countOrRows)
+    ? countOrRows
+    : Array.from({ length: countOrRows }, (unused, index) => ({
+        email: `contact-${index}@example.com`,
+        first_name: `First${index}`,
+        last_name: `Last${index}`,
+        subscribed_to_newsletter: index % 2 === 0,
+      }))
 
   const builder: Record<string, unknown> = {}
   const chain = () => builder
@@ -60,20 +76,12 @@ function post(body: unknown) {
   )
 }
 
-const validPayload = {
-  apiKey: 'eo-key',
-  listId: 'list-1',
-  contacts: [
-    { email: 'a@example.com', firstName: 'A', lastName: 'One', subscribedToNewsletter: true },
-    { email: 'b@example.com', firstName: 'B', lastName: 'Two', subscribedToNewsletter: false },
-  ],
-}
-
 describe('POST /api/integrations/emailoctopus/sync', () => {
   beforeEach(() => {
     jest.clearAllMocks()
     mockGetSession.mockResolvedValue({ userId: 'u1', email: 'admin@example.com' })
     mockSync.mockResolvedValue(undefined)
+    mockLoadCredentials.mockResolvedValue({ apiKey: 'eo-key', listId: 'list-1' })
   })
 
   it('syncs every contact when the caller omits the list', async () => {
@@ -81,10 +89,10 @@ describe('POST /api/integrations/emailoctopus/sync', () => {
     // gathered server-side rather than posted up.
     const { ranges } = stubContactsTable(3)
 
-    const response = await post({ apiKey: 'eo-key', listId: 'list-1' })
+    const response = await post({})
 
     expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toMatchObject({ syncedCount: 3, skippedCount: 0 })
+    await expect(response.json()).resolves.toMatchObject({ syncedCount: 3 })
     expect(mockSync).toHaveBeenCalledTimes(3)
     expect(ranges[0]).toEqual([0, SYNC_CHUNK_SIZE])
   })
@@ -92,11 +100,9 @@ describe('POST /api/integrations/emailoctopus/sync', () => {
   it('returns a continuation cursor instead of processing the whole database in one request', async () => {
     const { ranges } = stubContactsTable(125)
 
-    const first = await post({ apiKey: 'eo-key', listId: 'list-1' })
+    const first = await post({})
     const firstBody = await first.json()
     const second = await post({
-      apiKey: 'eo-key',
-      listId: 'list-1',
       offset: firstBody.nextOffset,
     })
 
@@ -116,23 +122,21 @@ describe('POST /api/integrations/emailoctopus/sync', () => {
     ])
   })
 
-  it('still accepts an explicit contact list for a single-contact sync', async () => {
+  it('refuses a contact list from the caller: the server reads the database itself (H5)', async () => {
+    // Accepting one let any caller push arbitrary consent state for arbitrary addresses.
     const response = await post({
-      apiKey: 'eo-key',
-      listId: 'list-1',
       contacts: [{ email: 'one@example.com', subscribedToNewsletter: true }],
     })
 
-    expect(response.status).toBe(200)
-    expect(mockCreateServerClient).not.toHaveBeenCalled()
-    expect(mockSync).toHaveBeenCalledTimes(1)
+    expect(response.status).toBe(400)
+    expect(mockSync).not.toHaveBeenCalled()
   })
 
   it('refuses an unauthenticated caller', async () => {
     // Unlike the webhook, this acts on behalf of a user and is not exempt.
     mockGetSession.mockResolvedValue(null)
 
-    expect((await post(validPayload)).status).toBe(401)
+    expect((await post({})).status).toBe(401)
     expect(mockSync).not.toHaveBeenCalled()
   })
 
@@ -141,19 +145,11 @@ describe('POST /api/integrations/emailoctopus/sync', () => {
     // as the newsletter flag alone, it would push a contact who takes courses but not
     // the newsletter as UNSUBSCRIBED — and EmailOctopus then refuses to queue the course
     // automation for them, making the second consent unusable.
-    const response = await post({
-      apiKey: 'eo-key',
-      listId: 'list-1',
-      contacts: [
-        {
-          email: 'courses@example.com',
-          firstName: 'C',
-          lastName: 'Only',
-          subscribedToNewsletter: false,
-          subscribedToPrograms: true,
-        },
-      ],
-    })
+    stubContactsTable([
+      { email: 'courses@example.com', first_name: 'C', last_name: 'Only', subscribed_to_newsletter: false, subscribed_to_programs: true },
+    ])
+
+    const response = await post({})
 
     expect(response.status).toBe(200)
     expect(mockSync).toHaveBeenCalledWith(
@@ -163,14 +159,19 @@ describe('POST /api/integrations/emailoctopus/sync', () => {
       'C',
       'Only',
       'SUBSCRIBED',
-      // Which consent they actually hold cannot be carried by the list status, so it
-      // travels as fields — that is what a natively-sent newsletter segments on.
+      // Which consent they actually hold travels as fields — that is what a
+      // natively-sent newsletter segments on.
       expect.objectContaining({ fields: { Newsletter: 'no', Courses: 'yes' } })
     )
   })
 
   it('syncs each contact with the right subscription status', async () => {
-    const response = await post(validPayload)
+    stubContactsTable([
+      { email: 'a@example.com', first_name: 'A', last_name: 'One', subscribed_to_newsletter: true },
+      { email: 'b@example.com', first_name: 'B', last_name: 'Two', subscribed_to_newsletter: false },
+    ])
+
+    const response = await post({})
 
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toMatchObject({ syncedCount: 2, errorsCount: 0 })
@@ -182,43 +183,57 @@ describe('POST /api/integrations/emailoctopus/sync', () => {
     )
   })
 
-  it.each([
-    ['no api key', { listId: 'l', contacts: [] }],
-    ['no list id', { apiKey: 'k', contacts: [] }],
-    ['contacts not an array', { apiKey: 'k', listId: 'l', contacts: 'nope' }],
-  ])('rejects a payload with %s', async (_label, payload) => {
-    expect((await post(payload)).status).toBe(400)
+  it('refuses when EmailOctopus is not configured server-side', async () => {
+    stubContactsTable(2)
+    mockLoadCredentials.mockResolvedValue(null)
+
+    expect((await post({})).status).toBe(409)
+    expect(mockSync).not.toHaveBeenCalled()
   })
 
-  it('skips entries with no email rather than calling the provider with blanks', async () => {
-    const response = await post({
-      ...validPayload,
-      contacts: [{ email: '' }, { notAnEmail: true }, validPayload.contacts[0]],
-    })
+  it('ignores a key and list supplied by the caller', async () => {
+    // A caller-supplied key would let anyone push the CRM's contacts to their own list.
+    stubContactsTable([{ email: 'a@example.com', first_name: 'A', last_name: 'One', subscribed_to_newsletter: true }])
 
-    await expect(response.json()).resolves.toMatchObject({ syncedCount: 1, skippedCount: 2 })
+    await post({ apiKey: 'attacker-key', listId: 'attacker-list' })
+
+    expect(mockSync).toHaveBeenCalledWith(
+      'eo-key', 'list-1', 'a@example.com', 'A', 'One', 'SUBSCRIBED', expect.anything()
+    )
+  })
+
+  it('skips rows with no email rather than calling the provider with blanks', async () => {
+    stubContactsTable([{ email: '' }, { email: 'a@example.com', subscribed_to_newsletter: true }])
+
+    await expect((await post({})).json()).resolves.toMatchObject({ syncedCount: 1 })
+    expect(mockSync).toHaveBeenCalledTimes(1)
   })
 
   it('continues after one contact fails', async () => {
     // One bad address must not abort a whole sync run.
+    stubContactsTable([
+      { email: 'a@example.com', subscribed_to_newsletter: true },
+      { email: 'b@example.com', subscribed_to_newsletter: true },
+    ])
     mockSync
       .mockRejectedValueOnce(new Error('Invalid email address'))
       .mockResolvedValueOnce(undefined)
 
-    const response = await post(validPayload)
-    const body = await response.json()
+    const body = await (await post({})).json()
 
     expect(body).toMatchObject({ syncedCount: 1, errorsCount: 1 })
     expect(body.errors[0]).toMatchObject({ email: 'a@example.com' })
   })
 
   it('marks the response uncacheable, since errors echo email addresses', async () => {
-    const response = await post(validPayload)
+    stubContactsTable(1)
+    const response = await post({})
 
     expect(response.headers.get('cache-control')).toContain('no-store')
   })
 
-  it('surfaces a malformed body as a server error rather than crashing', async () => {
-    expect((await post('not json')).status).toBe(500)
+  it('treats a malformed body as a plain full sync request', async () => {
+    stubContactsTable(1)
+    expect((await post('not json')).status).toBe(200)
   })
 })

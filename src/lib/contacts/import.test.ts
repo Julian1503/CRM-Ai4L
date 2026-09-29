@@ -1,6 +1,6 @@
 import type { MappedContactRow } from '@/lib/excelParser'
 
-import { importContacts, toImportPayload } from './import'
+import { ImportPreviewStaleError, importContacts, previewContactImport, toImportPayload } from './import'
 
 function validRow(overrides: Partial<NonNullable<MappedContactRow['data']>> = {}): MappedContactRow {
   return {
@@ -125,8 +125,42 @@ describe('importContacts', () => {
       payload: [
         expect.objectContaining({ email: 'ada@example.com', first_name: 'Ada' }),
       ],
+      p_preview_token: null,
     })
     expect(result).toEqual({ inserted: 1, updated: 0, skipped: 0, total: 1 })
+  })
+
+  it('passes the preview token so a stale preview is refused (P3)', async () => {
+    const db = mockDb({ data: { inserted: 1, updated: 0, skipped: 0, total: 1 }, error: null })
+
+    await importContacts(db as never, [validRow()], 'token-1')
+
+    expect(db.rpc).toHaveBeenCalledWith('import_contacts', expect.objectContaining({ p_preview_token: 'token-1' }))
+  })
+
+  it('reports a stale preview as its own error', async () => {
+    const db = mockDb({ data: null, error: { code: 'CRM08', message: 'changed after the preview' } })
+
+    await expect(importContacts(db as never, [validRow()], 'token-1')).rejects.toBeInstanceOf(ImportPreviewStaleError)
+  })
+
+  it('never sends a customer flag the spreadsheet did not carry (H9)', async () => {
+    const db = mockDb({ data: { inserted: 0, updated: 1, skipped: 0, total: 1 }, error: null })
+    const row = validRow()
+    delete (row.data as { isCustomer?: boolean }).isCustomer
+
+    await importContacts(db as never, [row])
+
+    const [, args] = (db.rpc as jest.Mock).mock.calls[0]
+    expect(args.payload[0]).not.toHaveProperty('is_customer')
+  })
+
+  it('previews through the database without writing', async () => {
+    const preview = { total: 1, new: 1, token: 't' }
+    const db = mockDb({ data: preview, error: null })
+
+    await expect(previewContactImport(db as never, [validRow()])).resolves.toEqual(preview)
+    expect(db.rpc).toHaveBeenCalledWith('preview_import_contacts', { payload: [expect.objectContaining({ email: 'ada@example.com' })] })
   })
 
   it('does not hit the database when there are no valid rows', async () => {

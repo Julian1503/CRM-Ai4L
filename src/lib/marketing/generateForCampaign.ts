@@ -5,7 +5,7 @@ import type { CampaignRow, Database } from '@/lib/db/types'
 import { generateCampaignCopy, type GenerationUsage, type MessagesApi } from './generateCampaign'
 import type { ScheduleBrief } from './prompt'
 import { parseSegmentCriteria } from './segmentCriteria'
-import { resolveSegmentMembers } from './segments'
+import { measureSegmentAudience } from './segments'
 
 /**
  * Writes copy for one campaign and stores it.
@@ -70,7 +70,7 @@ export async function generateForCampaign(
     }
   }
 
-  const audience = await resolveSegmentMembers(
+  const audience = await measureSegmentAudience(
     db,
     { id: campaign.segment_id, definition: segment.definition },
     campaign.consent_stream

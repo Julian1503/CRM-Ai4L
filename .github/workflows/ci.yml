@@ -23,8 +23,6 @@ jobs:
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-anon-key
       E2E_BROWSERS: chromium
       E2E_SKIP_BUILD: "true"
-      E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
-      E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
 
     steps:
       - uses: actions/checkout@v4
@@ -56,16 +54,94 @@ jobs:
       - name: Public end-to-end security tests
         run: npx playwright test --project=public-chromium
 
-      # authenticated-sign-out depends on the authenticated Chromium project, so logout
-      # is guaranteed to run last and cannot invalidate another test's Supabase session.
-      - name: Authenticated end-to-end tests
-        if: ${{ env.E2E_EMAIL != '' && env.E2E_PASSWORD != '' }}
-        run: npx playwright test --project=authenticated-sign-out
+      # Script-level unit tests (readiness rules for `npm run preflight`).
+      - name: Script tests
+        run: npm run test:scripts
 
       - name: Upload Playwright report
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+  # Real database, real auth, no business data (audit T1/T2).
+  #
+  # Starts the local Supabase stack, replays every migration from an empty database,
+  # runs the database verification suites, seeds the four test identities, then runs
+  # the authenticated browser suites against a build pointed at that stack. Nothing here
+  # can reach the linked production project: seed-e2e.mjs refuses non-local URLs and
+  # playwright.config.ts refuses E2E_REQUIRE_AUTH against a hosted Supabase.
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      E2E_BROWSERS: chromium
+      E2E_SKIP_BUILD: "true"
+      E2E_REQUIRE_AUTH: "true"
+      E2E_EMAIL: e2e-operator@example.test
+      E2E_UNAPPROVED_EMAIL: e2e-unapproved@example.test
+      E2E_DISABLED_EMAIL: e2e-disabled@example.test
+      NEXT_PUBLIC_APP_URL: http://127.0.0.1:3100
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.118.0
+
+      - run: npm ci
+
+      - name: Start local Supabase (replays all migrations from empty)
+        run: supabase start -x studio,imgproxy,vector,logflare,inbucket,realtime,storage-api,edge-runtime,supavisor,postgres-meta
+
+      - name: Export test-stack environment
+        run: |
+          supabase status -o env             --override-name api.url=NEXT_PUBLIC_SUPABASE_URL             --override-name auth.anon_key=NEXT_PUBLIC_SUPABASE_ANON_KEY             --override-name auth.service_role_key=SUPABASE_SERVICE_ROLE_KEY             | grep -E '^(NEXT_PUBLIC_SUPABASE_URL|NEXT_PUBLIC_SUPABASE_ANON_KEY|SUPABASE_SERVICE_ROLE_KEY)='             | sed 's/"//g' >> "$GITHUB_ENV"
+          echo "E2E_PASSWORD=$(openssl rand -hex 16)" >> "$GITHUB_ENV"
+          echo "PREFERENCES_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "E2E environment: local Supabase stack, revision ${GITHUB_SHA}"
+
+      - name: Database verification suites
+        run: npm run db:verify
+
+      - name: Seed test identities
+        run: node scripts/seed-e2e.mjs
+
+      # Real row locks, lease expiry, the PostgREST row cap, triggers and injected
+      # database faults: the acceptance cases unit tests cannot prove (audit T2).
+      - name: Database integration tests
+        run: npm run test:integration
+        env:
+          SUPABASE_INTEGRATION_URL: ${{ env.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_INTEGRATION_SERVICE_KEY: ${{ env.SUPABASE_SERVICE_ROLE_KEY }}
+
+      - name: Production build against the test stack
+        run: npm run build
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Public end-to-end tests
+        run: npx playwright test --project=public-chromium
+
+      # authenticated-sign-out depends on the authenticated Chromium project, so logout
+      # is guaranteed to run last and cannot invalidate another test's Supabase session.
+      - name: Authenticated end-to-end tests
+        run: npx playwright test --project=authenticated-sign-out
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-integration
           path: playwright-report/
           retention-days: 7

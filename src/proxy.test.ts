@@ -9,9 +9,11 @@ type ServerClientOptions = {
 }
 
 const mockGetUser = jest.fn()
+let mockMembership: MembershipRow = ACTIVE_OPERATOR
 const mockCreateServerClient = jest.fn(
   (_url: string, _key: string, _options: ServerClientOptions) => ({
     auth: { getUser: mockGetUser },
+    from: membershipFrom(mockMembership),
   })
 )
 
@@ -19,6 +21,8 @@ jest.mock('@supabase/ssr', () => ({
   createServerClient: (url: string, key: string, options: ServerClientOptions) =>
     mockCreateServerClient(url, key, options),
 }))
+
+import { ACTIVE_OPERATOR, membershipFrom, type MembershipRow } from '@/test/membership'
 
 import { config, proxy } from './proxy'
 
@@ -83,6 +87,36 @@ describe('proxy', () => {
 
     expect(response.status).toBe(200)
     expect(response.headers.get('location')).toBeNull()
+  })
+
+  describe('approved membership (audit C1)', () => {
+    afterEach(() => {
+      mockMembership = ACTIVE_OPERATOR
+    })
+
+    it.each([
+      ['no membership row', null],
+      ['a disabled membership', { role: 'operator', active: false }],
+    ])('redirects a verified user with %s to the login notice', async (_label, row) => {
+      authenticated()
+      mockMembership = row
+
+      const response = await proxy(request('/contacts'))
+
+      expect(response.status).toBe(307)
+      expect(response.headers.get('location')).toContain('reason=not-approved')
+    })
+
+    it('leaves API membership to the route DAL, which answers for itself', async () => {
+      // Every route calls getSession(), which enforces membership (dal.test.ts); the
+      // proxy does not spend a second lookup on API calls.
+      authenticated()
+      mockMembership = null
+
+      const response = await proxy(request('/api/contacts'))
+
+      expect(response.headers.get('location')).toBeNull()
+    })
   })
 
   it('marks authenticated responses uncacheable so refreshed cookies are not shared', async () => {

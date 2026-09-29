@@ -190,18 +190,28 @@ export async function PATCH(
       return badRequest('No supported fields to update.')
     }
 
+    // Optimistic concurrency (audit H6): an editor who loaded revision N may only write
+    // over revision N. Optional for older clients; the database still refuses content
+    // changes outside draft either way.
+    const expectedRevision = body.expectedRevision
+    if (expectedRevision !== undefined && (typeof expectedRevision !== 'number' || !Number.isInteger(expectedRevision))) {
+      return badRequest('expectedRevision must be an integer.')
+    }
+
     updates.updated_at = new Date().toISOString()
 
-    const { data, error } = await db
-      .from('campaigns')
-      .update(updates)
-      .eq('id', id)
-      .select('*')
-      .single()
+    let query = db.from('campaigns').update(updates).eq('id', id).eq('status', existing.status)
+    if (typeof expectedRevision === 'number') query = query.eq('revision', expectedRevision)
+
+    const { data, error } = await query.select('*').maybeSingle()
 
     // An archived segment, chosen here or archived since.
     if (isArchiveRuleError(error)) return conflict(error?.message ?? 'That segment is archived.')
+    if (error?.code === 'CRM03') return conflict(error.message)
     if (error) throw new Error(error.message)
+    if (!data) {
+      return conflict('Someone else changed this campaign while you were editing. Reload to see their changes.')
+    }
 
     return ok({ campaign: data })
   } catch (error) {

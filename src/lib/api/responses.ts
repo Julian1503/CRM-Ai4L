@@ -19,6 +19,10 @@ export function unauthorized(): NextResponse {
   )
 }
 
+export function forbidden(message = 'You do not have permission to do that.'): NextResponse {
+  return NextResponse.json({ error: message }, { status: 403, headers: NO_STORE })
+}
+
 export function badRequest(message: string): NextResponse {
   return NextResponse.json({ error: message }, { status: 400, headers: NO_STORE })
 }
@@ -57,6 +61,26 @@ export async function requireSessionOr401(): Promise<
   }
 
   return { session }
+}
+
+/**
+ * Resolves an administrator's session: 401 without an approved session, 403 for an
+ * approved operator. See docs/ACCESS_CONTROL.md for which operations need it.
+ */
+export async function requireAdminOr403(): Promise<
+  { session: Session } | { response: NextResponse }
+> {
+  const guard = await requireSessionOr401()
+
+  if ('response' in guard) {
+    return guard
+  }
+
+  if (guard.session.role !== 'admin') {
+    return { response: forbidden('Only an administrator can do that.') }
+  }
+
+  return guard
 }
 
 /** Reads a JSON body, returning null when it is absent or malformed. */

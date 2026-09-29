@@ -5,8 +5,6 @@ import { createHmac } from 'node:crypto'
 
 import { NextRequest } from 'next/server'
 
-import { createDbMock, createQueryBuilderMock } from '@/test/supabaseMock'
-
 const mockGetAdminClient = jest.fn()
 const mockStartIntegrationDelivery = jest.fn().mockResolvedValue('delivery-1')
 const mockCompleteIntegrationDelivery = jest.fn().mockResolvedValue(undefined)
@@ -48,30 +46,25 @@ const created = {
       uri: 'https://api.calendly.com/events/e1',
       start_time: '2026-09-01T02:00:00.000Z',
     },
-    tracking: { utm_content: 'booking-1' },
+    tracking: { utm_content: '11111111-1111-4111-8111-111111111111' },
   },
 }
 
-function setupDb(options: { claimed?: boolean; matched?: boolean } = {}) {
-  const { claimed = true, matched = true } = options
+type Answers = { claim?: { outcome: string; claim_token: string | null }; apply?: string | { error: string } }
 
-  const webhookEvents = createQueryBuilderMock(
-    claimed ? { data: null, error: null } : { data: null, error: { code: '23505', message: 'dup' } }
-  )
-  const bookings = createQueryBuilderMock({ data: matched ? [{ id: 'b1' }] : [], error: null })
-  const contacts = createQueryBuilderMock({ data: null, error: null })
-  const syncLogs = createQueryBuilderMock({ data: null, error: null })
-
-  const db = createDbMock((table: string) => {
-    if (table === 'webhook_events') return webhookEvents
-    if (table === 'bookings') return bookings
-    if (table === 'sync_logs') return syncLogs
-    return contacts
+function setupDb(answers: Answers = {}) {
+  const rpc = jest.fn(async (fn: string) => {
+    if (fn === 'claim_webhook_event') {
+      return { data: [answers.claim ?? { outcome: 'claimed', claim_token: 'tok-1' }], error: null }
+    }
+    if (fn === 'apply_calendly_event') {
+      const apply = answers.apply ?? 'applied'
+      return typeof apply === 'string' ? { data: apply, error: null } : { data: null, error: { message: apply.error } }
+    }
+    return { data: true, error: null }
   })
-
-  mockGetAdminClient.mockReturnValue(db)
-
-  return { bookings, syncLogs, webhookEvents }
+  mockGetAdminClient.mockReturnValue({ rpc })
+  return { rpc }
 }
 
 describe('POST /api/calendly/webhook', () => {
@@ -123,55 +116,67 @@ describe('POST /api/calendly/webhook', () => {
     })
   })
 
-  describe('invitee.created', () => {
-    it('attaches the appointment to the booking', async () => {
-      const { bookings } = setupDb()
+  describe('applying events (M4)', () => {
+    it('applies a creation and completes the event in the same call', async () => {
+      const { rpc } = setupDb()
 
       const response = await POST(request(created))
 
       expect(response.status).toBe(200)
-      await expect(response.json()).resolves.toMatchObject({ status: 'ok' })
-
-      const update = bookings.argsFor('update') as [Record<string, unknown>]
-      expect(update[0]).toMatchObject({
-        status: 'booked',
-        calendly_invitee_uri: 'https://api.calendly.com/invitees/i1',
-        scheduled_at: '2026-09-01T02:00:00.000Z',
+      expect(rpc).toHaveBeenCalledWith('apply_calendly_event', {
+        p_event: 'invitee.created',
+        p_invitee_uri: 'https://api.calendly.com/invitees/i1',
+        p_event_uri: 'https://api.calendly.com/events/e1',
+        p_scheduled_at: '2026-09-01T02:00:00.000Z',
+        p_email: 'lead@example.com',
+        p_tracking_booking: '11111111-1111-4111-8111-111111111111',
+        p_rescheduled: false,
+        p_old_invitee_uri: null,
+        p_provider: 'calendly',
+        p_event_id: expect.any(String),
+        p_event_token: 'tok-1',
       })
     })
 
-    it('uses the tracking parameter to match the exact booking', async () => {
-      const { bookings } = setupDb()
+    it('passes a reschedule through as a reschedule, not a cancellation', async () => {
+      const { rpc } = setupDb()
 
-      await POST(request(created))
+      await POST(request({
+        event: 'invitee.canceled',
+        payload: { uri: 'https://api.calendly.com/invitees/old', rescheduled: true, new_invitee: 'https://api.calendly.com/invitees/new' },
+      }))
 
-      expect(bookings.allFor('eq')).toContainEqual({ method: 'eq', args: ['id', 'booking-1'] })
+      expect(rpc).toHaveBeenCalledWith('apply_calendly_event', expect.objectContaining({
+        p_event: 'invitee.canceled',
+        p_rescheduled: true,
+      }))
     })
 
-    it('logs an unmatched invitee instead of dropping it silently', async () => {
-      // The invitee may simply not be in the CRM; that should be visible, not invisible.
-      const { syncLogs } = setupDb({ matched: false })
+    it('passes the old invitee of a replacement', async () => {
+      const { rpc } = setupDb()
 
-      const response = await POST(
-        request({ ...created, payload: { ...created.payload, tracking: {} } })
-      )
+      await POST(request({ ...created, payload: { ...created.payload, old_invitee: 'https://api.calendly.com/invitees/old' } }))
 
-      await expect(response.json()).resolves.toMatchObject({ status: 'unmatched' })
-      expect(syncLogs.allFor('insert')).toHaveLength(1)
+      expect(rpc).toHaveBeenCalledWith('apply_calendly_event', expect.objectContaining({
+        p_old_invitee_uri: 'https://api.calendly.com/invitees/old',
+      }))
     })
-  })
 
-  describe('invitee.canceled', () => {
-    it('cancels the booking', async () => {
-      const { bookings } = setupDb()
+    it('ignores a tracking value that is not a booking id', async () => {
+      const { rpc } = setupDb()
 
-      const response = await POST(
-        request({ event: 'invitee.canceled', payload: { uri: 'https://api.calendly.com/invitees/i1' } })
-      )
+      await POST(request({ ...created, payload: { ...created.payload, tracking: { utm_content: "b1' or 1=1" } } }))
+
+      expect(rpc).toHaveBeenCalledWith('apply_calendly_event', expect.objectContaining({ p_tracking_booking: null }))
+    })
+
+    it('acknowledges an event it had to park for reconciliation', async () => {
+      setupDb({ apply: 'unmatched' })
+
+      const response = await POST(request(created))
 
       expect(response.status).toBe(200)
-      const update = bookings.argsFor('update') as [Record<string, unknown>]
-      expect(update[0]).toMatchObject({ status: 'cancelled' })
+      await expect(response.json()).resolves.toEqual({ status: 'unmatched' })
     })
   })
 
@@ -196,30 +201,31 @@ describe('POST /api/calendly/webhook', () => {
     })
   })
 
-  describe('idempotency', () => {
-    it('skips a repeated delivery', async () => {
-      const { bookings } = setupDb({ claimed: false })
+  describe('idempotency (H11)', () => {
+    it('acknowledges a completed duplicate', async () => {
+      const { rpc } = setupDb({ claim: { outcome: 'completed', claim_token: null } })
+
+      await expect((await POST(request(created))).json()).resolves.toEqual({ status: 'duplicate' })
+      expect(rpc).not.toHaveBeenCalledWith('apply_calendly_event', expect.anything())
+    })
+
+    it('answers retryable while another delivery holds the event', async () => {
+      setupDb({ claim: { outcome: 'in_progress', claim_token: null } })
+
+      expect((await POST(request(created))).status).toBe(503)
+    })
+
+    it('records a failure as retryable, so the redelivery can take the event over', async () => {
+      jest.spyOn(console, 'error').mockImplementation(() => undefined)
+      const { rpc } = setupDb({ apply: { error: 'deadlock detected' } })
 
       const response = await POST(request(created))
 
-      await expect(response.json()).resolves.toMatchObject({ status: 'duplicate' })
-      expect(bookings.allFor('update')).toHaveLength(0)
-    })
-
-    it('releases a claimed event when processing fails so Calendly can retry it', async () => {
-      const webhookEvents = createQueryBuilderMock({ data: null, error: null })
-      const failingBookings = createQueryBuilderMock({
-        data: null,
-        error: { message: 'db down' },
-      })
-      mockGetAdminClient.mockReturnValue(
-        createDbMock((table: string) =>
-          table === 'webhook_events' ? webhookEvents : failingBookings
-        )
-      )
-
-      expect((await POST(request(created))).status).toBe(500)
-      expect(webhookEvents.allFor('delete')).toHaveLength(1)
+      expect(response.status).toBe(500)
+      expect(rpc).toHaveBeenCalledWith('complete_webhook_event', expect.objectContaining({
+        p_status: 'failed_retryable',
+        p_token: 'tok-1',
+      }))
     })
   })
 })

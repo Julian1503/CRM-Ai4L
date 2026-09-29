@@ -65,8 +65,17 @@ function isCronRoute(route: RouteFile): boolean {
 }
 
 /** A cron route's only gate: the shared secret, compared in constant time. */
+/** The shared check every cron route must call; its own behaviour is tested in cron.test.ts. */
+const CRON_HELPER = readFileSync(join(process.cwd(), 'src/lib/auth/cron.ts'), 'utf8')
+
 function verifiesCronSecret(route: RouteFile): boolean {
-  return /process\.env\.CRON_SECRET/.test(route.content) && /timingSafeEqual\s*\(/.test(route.content)
+  const inline = /process\.env\.CRON_SECRET/.test(route.content) && /timingSafeEqual\s*\(/.test(route.content)
+  const viaHelper =
+    /from '@\/lib\/auth\/cron'/.test(route.content) &&
+    /isAuthorisedCronRequest\s*\(\s*request\.headers\.get\('authorization'\)\s*\)/.test(route.content) &&
+    /process\.env\.CRON_SECRET/.test(CRON_HELPER) &&
+    /timingSafeEqual\s*\(/.test(CRON_HELPER)
+  return inline || viaHelper
 }
 
 /** True when the route is a documented public endpoint. */

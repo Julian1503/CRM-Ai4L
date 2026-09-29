@@ -31,6 +31,7 @@ export default async function LoginPage({
 
   const configured = isSupabaseConfigured()
   const sessionExpired = params.reason === 'expired'
+  const notApproved = params.reason === 'not-approved'
 
   return (
     <main className={styles.page}>
@@ -50,6 +51,12 @@ export default async function LoginPage({
         {sessionExpired && (
           <div className={styles.notice} role="status">
             Your session expired. Please sign in again.
+          </div>
+        )}
+
+        {notApproved && (
+          <div className={styles.notice} role="status" data-testid="not-approved">
+            This account is not approved for CRM access. Ask an administrator to invite you.
           </div>
         )}
 

@@ -41,4 +41,6 @@ export type OperationsSummary = {
     failures24h: number
     latestAt: string | null
   }
+  /** Stuck work needing a person. Added by the API route; see src/lib/operations/attention.ts. */
+  attention?: import('./attention').AttentionCounts
 }
