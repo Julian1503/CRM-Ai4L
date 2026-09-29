@@ -30,6 +30,46 @@ spreadsheet import, status filter tabs, contact CRUD, dashboard) are not repeate
 | 6 — Hardening | **Complete** — coverage now clears 80% on all four metrics |
 | Gap closure | **Complete** — booking links wired; archive screen shipped |
 | Audit closure | **Complete** — bookings screen; 2 live-API defects fixed |
+| Archive & remove | **Complete** (2026-09-28) — every record can be archived or removed; nothing is deleted |
+
+**Archive & remove (2026-09-28): contacts, segments, campaigns, templates, schedules, topics.**
+
+Every record can be taken out of the way in two steps, and neither destroys a row:
+
+| | Column | Seen where | Undo |
+|---|---|---|---|
+| Archived | `archived_at` (contacts: `deleted_at`) | Archive view only | Restore, in the app |
+| Removed | `removed_at` + `removed_by` | Nowhere in the app | Only an administrator, in SQL |
+
+- **Removed implies archived** (a CHECK per table), so every existing "not archived"
+  filter already excludes removed rows. Only the Archive view adds `removed_at is null`.
+- **No physical deletes.** The RLS delete policies on business tables are gone; topic
+  "delete" is a soft delete. `enforce_removal_is_final` refuses to clear `removed_at` for
+  the `authenticated`/`anon` roles.
+- **Only what is in flight is blocked**, since nothing is lost: a segment used by an
+  unfinished campaign or a live schedule; an approved or sending campaign; a template a
+  live schedule drafts with; a used topic. An archived campaign is frozen. A live
+  campaign or schedule cannot point at an archived segment or template, including by
+  being restored. Refusals raise SQLSTATE `CRM01`, answered as 409 naming the blocker.
+- **Contacts.** Regaining consent never brings a removed contact back. An import of a
+  removed contact's address creates a new contact with no more consent than the removed
+  one held — only when no live contact has the address (20261001030000). An archived,
+  restorable contact still holds its address back.
+- **API:** `PATCH { archived: boolean }` or `{ removed: true }`, on its own, on every
+  entity's `[id]` route; rules in `src/lib/lifecycle/`. **UI:** `LifecycleActions` +
+  `ConfirmDialog` (`src/components/ui/`); the Archive view has a tab per kind.
+- Migrations `20260930000000` → `20261001030000`; `npm run db:verify:archive` and
+  `db:verify:archive2`; E2E in `src/e2e/archive.spec.ts` (leaves one removed
+  `e2e-archive-*` segment per run, by design).
+
+Found on the way and fixed:
+- `contacts` had **RLS disabled** in the live database, with full `anon` grants — the
+  public anon key could read and write every contact. Re-enabled and `anon` revoked
+  (20261001020000). Worth finding out who turned it off, and reviewing access meanwhile.
+- `active_contacts` was frozen at its 2026-08-07 columns (`select *` expands once) and
+  lacked `subscribed_to_programs`, `source` and `archive_reason`. Recreated in
+  20261001010000 — **rerun that `create or replace view` whenever contacts gains a column.**
+- Three `db:verify` scripts had gone stale after later migrations and now pass again.
 
 **Stage 1 prepared (2026-08-22): everything deployable that does not need the account.**
 
