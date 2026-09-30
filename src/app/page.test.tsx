@@ -262,6 +262,41 @@ describe('Home Page & Excel Importer UI Integration Tests', () => {
     expect(screen.getByText('Invalid Email address format')).toBeInTheDocument();
   });
 
+  it('blocks the preview and names the missing requirement when the name is unmapped', async () => {
+    render(<Home />);
+    fireEvent.click(screen.getByTestId('nav-item-imports'));
+    fireEvent.change(screen.getByTestId('excel-file-input'), {
+      target: { files: [new File(['x'], 'Leads.xlsx')] },
+    });
+    await screen.findByText('File Uploaded: Leads.xlsx');
+
+    const previewBtn = screen.getByRole('button', { name: /preview validation/i });
+    expect(previewBtn).toBeEnabled();
+
+    fireEvent.change(screen.getByTestId('mapping-select-fullName'), { target: { value: '' } });
+
+    expect(previewBtn).toBeDisabled();
+    expect(screen.getByTestId('import-missing-requirements')).toHaveTextContent(/name/i);
+  });
+
+  it('asks rather than mapping an Industry column to Job Type', async () => {
+    routeFetch({
+      '/api/import/parse': jsonResponse({
+        ...parsedSpreadsheet,
+        headers: [...parsedSpreadsheet.headers, 'Industry'],
+      }),
+    });
+    render(<Home />);
+    fireEvent.click(screen.getByTestId('nav-item-imports'));
+    fireEvent.change(screen.getByTestId('excel-file-input'), {
+      target: { files: [new File(['x'], 'Leads.xlsx')] },
+    });
+    await screen.findByText('File Uploaded: Leads.xlsx');
+
+    expect((screen.getByTestId('mapping-select-jobTypeName') as HTMLSelectElement).value).toBe('');
+    expect(screen.getByTestId('import-ambiguous-columns')).toHaveTextContent('Industry');
+  });
+
   it('saves EmailOctopus credentials server-side and triggers manual sync', async () => {
     // The browser never holds the saved key (audit H1): it reads a status, writes a
     // write-only replacement, and the sync route loads the key itself.
@@ -361,6 +396,43 @@ describe('Home Page & Excel Importer UI Integration Tests', () => {
       const params = new URLSearchParams(String(listCall?.[0]).split('?')[1]);
       expect(params.get('page')).toBe('1');
       expect(params.get('pageSize')).toBe('50');
+    });
+  });
+
+  it('loads job types through the catalogue API for the filter options', async () => {
+    routeFetch({
+      '/api/job-types': jsonResponse({
+        jobTypes: [{ id: 'jt-1', name: 'Trainers' }],
+        total: 1,
+        page: 1,
+        pageSize: 200,
+        hasMore: false,
+      }),
+    });
+
+    render(<Home />);
+
+    expect(await screen.findByRole('option', { name: 'Trainers' })).toBeInTheDocument();
+  });
+
+  it('sends the industry filter to the server and returns to page 1', async () => {
+    routeFetch({
+      '/api/organisations?facet=industry': jsonResponse({ industries: ['Health', 'Mining'] }),
+    });
+
+    render(<Home />);
+    const select = await screen.findByLabelText('Industry');
+    await screen.findByRole('option', { name: 'Health' });
+
+    fireEvent.change(select, { target: { value: 'Health' } });
+
+    await waitFor(() => {
+      const params = mockFetch.mock.calls
+        .map(([url]) => String(url))
+        .filter((url) => url.startsWith('/api/contacts?'))
+        .map((url) => new URLSearchParams(url.split('?')[1]))
+        .find((p) => p.get('industry') === 'Health');
+      expect(params?.get('page')).toBe('1');
     });
   });
 

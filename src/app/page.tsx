@@ -37,14 +37,22 @@ import ContactDrawer from '@/components/ContactDrawer';
 import { getSupabaseClient, hasSupabaseConfig } from '@/lib/supabaseClient';
 import { mapAndValidateRows } from '@/lib/excelParser';
 import {
-  autoMapHeaders,
+  analyseHeaders,
   emptyColumnMapping,
+  isMappingComplete,
+  type AmbiguousHeader,
   type ColumnMapping,
-  type CrmFieldKey,
 } from '@/lib/contacts/columnMapping';
+import { CRM_FIELDS } from '@/lib/contacts/importFields';
 import { importContacts, previewContactImport } from '@/lib/contacts/import';
 import ImportChangePreview from '@/components/import/ImportChangePreview';
+import ImportRequirements from '@/components/import/ImportRequirements';
+import ImportMappingStatus from '@/components/import/ImportMappingStatus';
+import ImportCommonTags from '@/components/import/ImportCommonTags';
 import FilterBar, { type StatusFilter } from '@/components/contacts/FilterBar';
+import BulkTagActions from '@/components/contacts/BulkTagActions';
+import type { TagOption } from '@/components/contacts/TagPicker';
+import type { OrganisationOption } from '@/components/contacts/OrganisationPicker';
 import MarketingView from '@/components/marketing/MarketingView';
 import EmailTemplateRegistry from '@/components/marketing/EmailTemplateRegistry';
 import NewsletterSchedules from '@/components/marketing/NewsletterSchedules';
@@ -54,6 +62,9 @@ import BookingsView from '@/components/bookings/BookingsView';
 import OperationsPanel from '@/components/operations/OperationsPanel';
 import Pagination from '@/components/ui/Pagination';
 import EmailOctopusSettings, { type EmailOctopusStatus } from '@/components/settings/EmailOctopusSettings';
+import JobTypesSettings from '@/components/settings/JobTypesSettings';
+import JobTypesDialog from '@/components/settings/JobTypesDialog';
+import OrganisationSettings from '@/components/settings/OrganisationSettings';
 import type { ContactStatus } from '@/lib/db/types';
 
 type ServiceOption = { id: string; name: string };
@@ -81,6 +92,7 @@ type DbContact = {
   subscribed_to_programs: boolean | null;
   job_type_id: string | null;
   organisation: { name: string } | null;
+  tags?: { id: string; name: string }[] | null;
   revision?: number;
 };
 type ContactSavePayload = Partial<TableContact> & {
@@ -123,6 +135,7 @@ function formatContactFromDatabase(contact: DbContact, contactServices: string[]
     jobTypeId: contact.job_type_id || null,
     organisation: contact.organisation || null,
     servicesBought: contactServices,
+    tags: contact.tags ?? [],
     revision: contact.revision,
   };
 }
@@ -134,6 +147,19 @@ function formatContactFromDatabase(contact: DbContact, contactServices: string[]
  * query silently returns a prefix instead of failing.
  */
 const REFERENCE_LIMIT = 200;
+
+/**
+ * Job types for the dropdowns, through the catalogue API so the page and the settings
+ * screen read the same list with the same rules.
+ */
+async function fetchJobTypes(): Promise<ServiceOption[]> {
+  const response = await fetch(`/api/job-types?pageSize=${REFERENCE_LIMIT}`);
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body.error || `Could not load job types (HTTP ${response.status})`);
+  }
+  return ((body.jobTypes ?? []) as ServiceOption[]).map((jobType) => ({ id: jobType.id, name: jobType.name }));
+}
 
 /** Sync log entries per page. Short: it is a sidebar timeline, not a report. */
 const SYNC_LOG_PAGE_SIZE = 20;
@@ -174,28 +200,6 @@ async function fetchServicesForContacts(contactIds: string[]): Promise<Map<strin
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Unknown error';
 }
-
-const CRM_FIELDS: { key: CrmFieldKey; label: string; description: string }[] = [
-  { key: 'fullName', label: 'Full Name (Split)', description: 'Splits by space into First/Last name' },
-  { key: 'firstName', label: 'First Name', description: 'Contact first name' },
-  { key: 'lastName', label: 'Last Name', description: 'Contact last name' },
-  { key: 'email', label: 'Email Address', description: 'Primary contact email' },
-  { key: 'preferredName', label: 'Preferred Name', description: 'Nickname / Preferred Name' },
-  { key: 'mobileNumber', label: 'Mobile Number', description: 'Mobile phone number' },
-  { key: 'workPhone', label: 'Work Phone', description: 'Work office phone' },
-  { key: 'address', label: 'Address', description: 'Street address' },
-  { key: 'suburb', label: 'Suburb', description: 'Suburb' },
-  { key: 'state', label: 'State', description: 'State (e.g. NSW)' },
-  { key: 'postcode', label: 'Postcode', description: 'Postal code' },
-  { key: 'country', label: 'Country', description: 'Country' },
-  { key: 'organisationName', label: 'Organisation Name', description: 'Company / Employer name' },
-  { key: 'jobTypeName', label: 'Job Type', description: 'Trade / work category used for segmentation' },
-  { key: 'department', label: 'Department', description: 'Business department' },
-  { key: 'position', label: 'Position / Title', description: 'Job position' },
-  { key: 'isCustomer', label: 'Is Customer?', description: 'True/False flag' },
-  { key: 'subscribedToNewsletter', label: 'Subscribed to Newsletter?', description: 'Sync subscription state' },
-  { key: 'subscribedToPrograms', label: 'Subscribed to Courses?', description: 'Course and training consent' },
-];
 
 export default function App() {
   const [currentView, setCurrentView] = useState<ActiveView>('contacts');
@@ -261,6 +265,14 @@ export default function App() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [jobTypeFilter, setJobTypeFilter] = useState('');
   const [stateFilter, setStateFilter] = useState('');
+  // Any of these tags (tagIds); the full options are kept so the chips keep their names.
+  const [tagFilter, setTagFilter] = useState<TagOption[]>([]);
+  const [organisationFilter, setOrganisationFilter] = useState<OrganisationOption | null>(null);
+  const [industryFilter, setIndustryFilter] = useState('');
+  // Bumped after an industry edit so the filter reloads its server-side options.
+  const [filterOptionsVersion, setFilterOptionsVersion] = useState(0);
+  // The job type catalogue, opened over the drawer without unmounting its draft.
+  const [isJobTypesOpen, setIsJobTypesOpen] = useState(false);
   const [jobTypes, setJobTypes] = useState<ServiceOption[]>([]);
   const [sortKey, setSortKey] = useState('name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
@@ -303,6 +315,10 @@ export default function App() {
   const [rawRows, setRawRows] = useState<Record<string, string>[]>([]);
   const [showPreview, setShowPreview] = useState(false);
   const [columnMapping, setColumnMapping] = useState<ColumnMapping>(emptyColumnMapping());
+  // Headers such as "Industry" that could mean more than one field; never auto-mapped.
+  const [ambiguousHeaders, setAmbiguousHeaders] = useState<AmbiguousHeader[]>([]);
+  // Tags added to every accepted row, on top of each row's own Tags cell.
+  const [commonTags, setCommonTags] = useState<string[]>([]);
 
   // EmailOctopus integrations state
   // Connection status only: the saved API key never reaches the browser (audit H1).
@@ -332,6 +348,9 @@ export default function App() {
     if (searchQuery.trim()) params.set('q', searchQuery.trim());
     if (jobTypeFilter) params.set('jobTypeId', jobTypeFilter);
     if (stateFilter) params.set('state', stateFilter);
+    if (tagFilter.length > 0) params.set('tagIds', tagFilter.map((tag) => tag.id).join(','));
+    if (organisationFilter) params.set('organisationId', organisationFilter.id);
+    if (industryFilter) params.set('industry', industryFilter);
     if (statusFilter === 'lead') params.set('status', 'lead');
     if (statusFilter === 'customer') params.set('status', 'customer');
     if (statusFilter === 'prospect') params.set('status', 'prospect');
@@ -340,7 +359,17 @@ export default function App() {
     params.set('sort', sortKey);
     params.set('dir', sortDir);
     return params.toString();
-  }, [searchQuery, jobTypeFilter, stateFilter, statusFilter, sortKey, sortDir]);
+  }, [
+    searchQuery,
+    jobTypeFilter,
+    stateFilter,
+    tagFilter,
+    organisationFilter,
+    industryFilter,
+    statusFilter,
+    sortKey,
+    sortDir,
+  ]);
 
   const exportQuery = contactQuery ? `&${contactQuery}` : '';
 
@@ -373,12 +402,7 @@ export default function App() {
         .limit(REFERENCE_LIMIT);
       if (serviceError) throw serviceError;
 
-      const { data: jobTypeData, error: jobTypeError } = await db
-        .from('job_types')
-        .select('*')
-        .order('name')
-        .limit(REFERENCE_LIMIT);
-      if (jobTypeError) throw jobTypeError;
+      const jobTypeData = await fetchJobTypes();
 
       const statusResponse = await fetch('/api/integrations/emailoctopus/credentials');
       const statusBody = await statusResponse.json().catch(() => ({}));
@@ -387,7 +411,7 @@ export default function App() {
       }
 
       setServices(((serviceData || []) as ServiceOption[]).map((service) => ({ id: service.id, name: service.name })));
-      setJobTypes(((jobTypeData || []) as ServiceOption[]).map((jobType) => ({ id: jobType.id, name: jobType.name })));
+      setJobTypes(jobTypeData);
       setEmailOctopusStatus(statusBody as EmailOctopusStatus);
       setIsDatabaseConnected(true);
       setConnectionError(null);
@@ -398,6 +422,19 @@ export default function App() {
       setIsDatabaseConnected(false);
       setConnectionError(`Supabase connection failed: ${message}`);
       console.error('Supabase connection failed:', error);
+    }
+  }, []);
+
+  /**
+   * Re-reads only the job types, after the catalogue changes. The drawer, the filter and
+   * the marketing view all read this list, so a rename shows up everywhere at once.
+   */
+  const reloadJobTypes = React.useCallback(async () => {
+    if (!hasSupabaseConfig) return;
+    try {
+      setJobTypes(await fetchJobTypes());
+    } catch (error) {
+      console.error('Failed to reload job types', error);
     }
   }, []);
 
@@ -559,6 +596,8 @@ export default function App() {
     setImportProgress(0);
     setIsMapped(false);
     setShowPreview(false);
+    setAmbiguousHeaders([]);
+    setCommonTags([]);
 
     try {
       const formData = new FormData();
@@ -582,7 +621,9 @@ export default function App() {
       setRawRows(data.rows);
 
       // First guess only -- the mapping screen below is where it gets confirmed.
-      setColumnMapping(autoMapHeaders(data.headers));
+      const { mapping, ambiguous } = analyseHeaders(data.headers);
+      setColumnMapping(mapping);
+      setAmbiguousHeaders(ambiguous);
       setIsMapped(true);
     } catch (err) {
       alert(`Error parsing spreadsheet: ${getErrorMessage(err)}`);
@@ -600,9 +641,11 @@ export default function App() {
 
   // Mapped once per mapping change, so the change preview below is not re-requested on
   // every render.
+  // Common tags are part of the input: changing them yields a new previewImport, which
+  // ImportChangePreview treats as "the import changed" and re-previews.
   const mappedImportRows = React.useMemo(
-    () => mapAndValidateRows(rawRows, columnMapping),
-    [rawRows, columnMapping]
+    () => mapAndValidateRows(rawRows, columnMapping, { commonTags }),
+    [rawRows, columnMapping, commonTags]
   );
 
   /** What the import would change, computed by the database without writing (P3). */
@@ -647,6 +690,8 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
       setRawRows([]);
       setShowPreview(false);
       setIsMapped(false);
+      setAmbiguousHeaders([]);
+      setCommonTags([]);
       setCurrentView('contacts');
     },
     [mappedImportRows, refreshData]
@@ -746,6 +791,24 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
 
   const handleStateChange = (value: string) => {
     setStateFilter(value);
+    setContactsPage(1);
+    clearContactSelection();
+  };
+
+  const handleTagFilterChange = (tags: TagOption[]) => {
+    setTagFilter(tags);
+    setContactsPage(1);
+    clearContactSelection();
+  };
+
+  const handleOrganisationFilterChange = (organisation: OrganisationOption | null) => {
+    setOrganisationFilter(organisation);
+    setContactsPage(1);
+    clearContactSelection();
+  };
+
+  const handleIndustryFilterChange = (value: string) => {
+    setIndustryFilter(value);
     setContactsPage(1);
     clearContactSelection();
   };
@@ -1020,7 +1083,18 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
               resultCount={contactsTotal}
               selectedIds={selectedContactIdList}
               onClearSelection={clearContactSelection}
+              tagFilter={tagFilter}
+              onTagFilterChange={handleTagFilterChange}
+              organisationFilter={organisationFilter}
+              onOrganisationFilterChange={handleOrganisationFilterChange}
+              industryFilter={industryFilter}
+              onIndustryFilterChange={handleIndustryFilterChange}
+              filterOptionsVersion={filterOptionsVersion}
             />
+
+            {/* The selection is kept after tagging: the user may add a second set of
+                tags to the same people, and clearing it is one click away. */}
+            <BulkTagActions selectedIds={selectedContactIdList} onApplied={() => void refreshData()} />
 
             {/* Contacts Table layout */}
             <ContactTable
@@ -1223,6 +1297,8 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
                   </div>
                 )}
 
+                {!importFile && !isImporting && <ImportRequirements label="Which columns do I need?" />}
+
                 {isImporting && (
                   <div className="outerShell">
                     <div className="innerCore" style={{ padding: '32px 24px' }}>
@@ -1250,17 +1326,28 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
                         <div>
                           <h4 style={{ color: 'var(--text-primary)', fontSize: '1.05rem', fontWeight: 600 }}>File Uploaded: {importFile.name}</h4>
                           <span style={{ color: 'var(--text-secondary)', fontSize: '0.78rem' }}>Map spreadsheet columns to CRM field items.</span>
+                          <ImportRequirements />
                         </div>
                         <button 
                           style={{ fontSize: '0.8rem', color: 'var(--danger)', fontWeight: 600, border: 'none', background: 'none', cursor: 'pointer' }}
                           onClick={() => {
                             setImportFile(null);
                             setIsMapped(false);
+                            setAmbiguousHeaders([]);
+                            setCommonTags([]);
                           }}
                         >
                           Reset File
                         </button>
                       </div>
+
+                      <ImportMappingStatus
+                        mapping={columnMapping}
+                        ambiguous={ambiguousHeaders}
+                        onMapColumn={(field, header) =>
+                          setColumnMapping((prev) => ({ ...prev, [field]: header }))
+                        }
+                      />
 
                       <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '20px' }}>
                         <thead>
@@ -1273,7 +1360,12 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
                           {CRM_FIELDS.map((field) => (
                             <tr key={field.key} style={{ borderBottom: '1px solid rgba(34, 38, 43, 0.05)' }}>
                               <td style={{ padding: '12px' }}>
-                                <div style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-primary)' }}>{field.label}</div>
+                                <div style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                                  {field.label}
+                                  {field.requirement && (
+                                    <span className={styles.requirementBadge}>{field.requirement}</span>
+                                  )}
+                                </div>
                                 <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>{field.description}</div>
                               </td>
                               <td style={{ padding: '12px' }}>
@@ -1300,9 +1392,12 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
                         </tbody>
                       </table>
 
+                      <ImportCommonTags value={commonTags} onChange={setCommonTags} />
+
                       <button 
                         className={styles.actionButton} 
                         style={{ width: '100%', justifyContent: 'center' }}
+                        disabled={!isMappingComplete(columnMapping)}
                         onClick={() => setShowPreview(true)}
                       >
                         Preview Validation
@@ -1654,6 +1749,15 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
 
                 {/* Email Marketing Card */}
                 <EmailOctopusSettings status={emailOctopusStatus} onSaved={setEmailOctopusStatus} />
+
+                <JobTypesSettings onChanged={() => void reloadJobTypes()} />
+
+                <OrganisationSettings
+                  onChanged={() => {
+                    setFilterOptionsVersion((version) => version + 1);
+                    void loadContacts();
+                  }}
+                />
               </div>
             </div>
           </>
@@ -1669,7 +1773,16 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
         onRemove={handleRemoveContact}
         availableServices={services}
         jobTypes={jobTypes}
+        onManageJobTypes={() => setIsJobTypesOpen(true)}
+        isSuspended={isJobTypesOpen}
       />
+
+      {isJobTypesOpen && (
+        <JobTypesDialog
+          onClose={() => setIsJobTypesOpen(false)}
+          onChanged={() => void reloadJobTypes()}
+        />
+      )}
     </div>
   );
 }

@@ -227,3 +227,109 @@ describe('FilterBar selection export', () => {
     expect(onClearSelection).toHaveBeenCalled()
   })
 })
+
+describe('FilterBar tag, organisation and industry filters', () => {
+  const VIP = { id: 't-1', name: 'VIP' }
+  const ACME = { id: 'o-1', name: 'Acme Training', industry: 'Education' }
+
+  beforeEach(() => {
+    global.fetch = jest.fn(async (input: string) => {
+      const url = new URL(input, 'https://crm.test')
+      const body =
+        url.pathname === '/api/tags'
+          ? { tags: [VIP], total: 1, page: 1, pageSize: 20, hasMore: false }
+          : url.searchParams.get('facet') === 'industry'
+            ? { industries: ['Education', 'Health'] }
+            : { organisations: [ACME], total: 1, page: 1, pageSize: 20, hasMore: false }
+      return { ok: true, status: 200, json: async () => body }
+    }) as unknown as typeof fetch
+  })
+
+  function renderWithCatalogFilters(overrides: Partial<React.ComponentProps<typeof FilterBar>> = {}) {
+    const handlers = {
+      onTagFilterChange: jest.fn(),
+      onOrganisationFilterChange: jest.fn(),
+      onIndustryFilterChange: jest.fn(),
+    }
+    const base = renderBar({ ...handlers, ...overrides })
+    return { ...base, ...handlers }
+  }
+
+  it('hides the new filters when the page does not handle them', () => {
+    renderBar()
+
+    expect(screen.queryByTestId('tag-filter')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('organisation-filter')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('industry-filter')).not.toBeInTheDocument()
+  })
+
+  it('reports a tag picked from the server catalogue, without offering to create one', async () => {
+    const { onTagFilterChange } = renderWithCatalogFilters()
+
+    const input = screen.getByRole('combobox', { name: 'Tags' })
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: 'Brand new' } })
+    expect(screen.queryByRole('option', { name: /Create/ })).not.toBeInTheDocument()
+
+    fireEvent.change(input, { target: { value: '' } })
+    fireEvent.click(await screen.findByRole('option', { name: 'VIP' }))
+
+    expect(onTagFilterChange).toHaveBeenCalledWith([VIP])
+  })
+
+  it('reports an organisation picked from the server', async () => {
+    const { onOrganisationFilterChange } = renderWithCatalogFilters()
+
+    fireEvent.focus(screen.getByRole('combobox', { name: 'Organisation' }))
+    fireEvent.click(await screen.findByRole('option', { name: /Acme Training/ }))
+
+    expect(onOrganisationFilterChange).toHaveBeenCalledWith(ACME)
+  })
+
+  it('offers industries from the facet endpoint', async () => {
+    const { onIndustryFilterChange } = renderWithCatalogFilters()
+
+    expect(await screen.findByRole('option', { name: 'Health' })).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Industry'), { target: { value: 'Health' } })
+
+    expect(onIndustryFilterChange).toHaveBeenCalledWith('Health')
+  })
+
+  it.each([
+    ['a tag', { tagFilter: [VIP] }],
+    ['an organisation', { organisationFilter: ACME }],
+    ['an industry', { industryFilter: 'Health' }],
+  ])('counts %s as an active filter and clears it with the rest', (_label, active) => {
+    const handlers = renderWithCatalogFilters(active)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
+
+    expect(handlers.onSearchChange).toHaveBeenCalledWith('')
+    if ('tagFilter' in active) expect(handlers.onTagFilterChange).toHaveBeenCalledWith([])
+    if ('organisationFilter' in active) expect(handlers.onOrganisationFilterChange).toHaveBeenCalledWith(null)
+    if ('industryFilter' in active) expect(handlers.onIndustryFilterChange).toHaveBeenCalledWith('')
+  })
+
+  it('leaves untouched filters alone when clearing', () => {
+    const handlers = renderWithCatalogFilters({ industryFilter: 'Health' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
+
+    expect(handlers.onTagFilterChange).not.toHaveBeenCalled()
+    expect(handlers.onOrganisationFilterChange).not.toHaveBeenCalled()
+  })
+
+  it('keeps export and selection behaviour unchanged with the new filters active', () => {
+    renderWithCatalogFilters({
+      tagFilter: [VIP],
+      exportQuery: '&tagIds=t-1',
+      selectedIds: ['c1', 'c2'],
+    })
+
+    expect(screen.getByTestId('export-selection-form')).toHaveAttribute(
+      'action',
+      '/api/contacts/export?tagIds=t-1'
+    )
+    expect(screen.getByText('Export 2 selected')).toBeInTheDocument()
+  })
+})

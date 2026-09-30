@@ -99,6 +99,21 @@ describe('buildContactCsv', () => {
       expect(header).toContain('Organisation')
     })
 
+    it('exports tags joined with the import separator, so the file can be re-imported', () => {
+      const tagged = { ...row, tags: [{ id: 't1', name: 'VIP' }, { id: 't2', name: 'Workshop 2026' }] }
+      const csv = buildContactCsv([tagged as never], 'full')
+      const [header, firstRow] = csv.split('\r\n')
+
+      expect(header.split(',')).toContain('Tags')
+      expect(firstRow).toContain('VIP; Workshop 2026')
+    })
+
+    it('leaves the Tags cell empty for an untagged contact', () => {
+      const [flat] = toExportRows([row as never])
+
+      expect(flat.tags).toBe('')
+    })
+
     it('omits the soft-delete bookkeeping column', () => {
       const [header] = buildContactCsv([row as never], 'full').split('\r\n')
 

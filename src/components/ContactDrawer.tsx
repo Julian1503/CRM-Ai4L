@@ -9,6 +9,7 @@ import { useGSAP } from '@gsap/react';
 
 import { prefersReducedMotion } from '@/lib/motion';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import TagPicker, { type TagOption } from '@/components/contacts/TagPicker';
 
 interface ContactDrawerProps {
   contact: TableContact | null;
@@ -30,10 +31,27 @@ interface ContactDrawerProps {
    * permanently invisible to every job-type segment.
    */
   jobTypes: { id: string; name: string }[];
+  /**
+   * Opens the job-type catalogue (Settings > Job Types). The page must keep this drawer
+   * mounted with the same `contact` object so the unsaved draft survives; pass
+   * `isSuspended` while the catalogue is shown on top.
+   */
+  onManageJobTypes?: () => void;
+  /**
+   * True while another dialog is layered over the drawer. The drawer then stops
+   * trapping focus and handling Escape, and is hidden from assistive technology,
+   * without losing its draft.
+   */
+  isSuspended?: boolean;
 }
 
-type ContactFormData = Partial<Omit<TableContact, 'organisation'>> & {
+export type ContactFormData = Partial<Omit<TableContact, 'organisation' | 'tags'>> & {
   organisationName?: string;
+  /**
+   * Present only when the user changed the tags: absent keeps the saved tags, `[]`
+   * clears them (the save_contact contract).
+   */
+  tagIds?: string[];
 };
 
 type ContactFormValue = string | boolean | string[] | undefined;
@@ -57,8 +75,13 @@ export default function ContactDrawer({
   onRemove,
   availableServices,
   jobTypes,
+  onManageJobTypes,
+  isSuspended = false,
 }: ContactDrawerProps) {
   const [formData, setFormData] = useState<ContactFormData>({});
+  const [tagDraft, setTagDraft] = useState<TagOption[]>([]);
+  const [tagsTouched, setTagsTouched] = useState(false);
+  const suspendedRef = useRef(isSuspended);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -93,6 +116,10 @@ export default function ContactDrawer({
   const suggestionsRef = useRef<HTMLDivElement>(null);
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const addressAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    suspendedRef.current = isSuspended;
+  }, [isSuspended]);
 
   // Close suggestions on outside click
   useEffect(() => {
@@ -236,6 +263,8 @@ export default function ContactDrawer({
         subscribedToNewsletter: contact.subscribedToNewsletter ?? false,
         subscribedToPrograms: contact.subscribedToPrograms ?? false,
       });
+      setTagDraft(contact.tags ?? []);
+      setTagsTouched(false);
       setValidationErrors({});
       setSaveError(null);
     }
@@ -248,6 +277,9 @@ export default function ContactDrawer({
     closeButtonRef.current?.focus();
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      // Another dialog is on top: it owns the keyboard until it closes.
+      if (suspendedRef.current) return;
+
       if (event.key === 'Escape') {
         if (!isSubmitting) onClose();
         return;
@@ -328,7 +360,7 @@ export default function ContactDrawer({
     try {
       setIsSubmitting(true);
       setSaveError(null);
-      await onSave(formData);
+      await onSave(tagsTouched ? { ...formData, tagIds: tagDraft.map((tag) => tag.id) } : formData);
       onClose();
     } catch (err) {
       console.error('Failed to save contact:', err);
@@ -350,7 +382,9 @@ export default function ContactDrawer({
         ref={drawerRef}
         className={`${styles.drawer} ${contact ? styles.drawerActive : ''}`}
         role="dialog"
-        aria-modal="true"
+        aria-modal={isSuspended ? undefined : 'true'}
+        aria-hidden={isSuspended ? 'true' : undefined}
+        inert={isSuspended}
         aria-labelledby="contact-drawer-title"
       >
         <div className={styles.header}>
@@ -479,7 +513,19 @@ export default function ContactDrawer({
               </div>
             </div>
             <div className={styles.field}>
-              <label className={styles.label} htmlFor="contact-job-type">Job Type</label>
+              <div className={styles.labelRow}>
+                <label className={styles.label} htmlFor="contact-job-type">Job Type</label>
+                {onManageJobTypes && (
+                  <button
+                    type="button"
+                    className={styles.inlineAction}
+                    onClick={onManageJobTypes}
+                    data-testid="manage-job-types"
+                  >
+                    Manage job types
+                  </button>
+                )}
+              </div>
               <select id="contact-job-type"
                 className={styles.input}
                 value={formData.jobTypeId || ''}
@@ -496,6 +542,18 @@ export default function ContactDrawer({
               <span className={styles.hint}>
                 Drives the job-type filter and every segment built on it.
               </span>
+            </div>
+            <div className={styles.field}>
+              <TagPicker
+                value={tagDraft}
+                onChange={(next) => {
+                  setTagDraft(next);
+                  setTagsTouched(true);
+                }}
+                label="Tags"
+                hint="Tags are shared across contacts. Type to find one or create a new tag."
+                testId="contact-tags"
+              />
             </div>
           </div>
 

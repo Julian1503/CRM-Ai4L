@@ -52,7 +52,8 @@ describe('GET /api/contacts', () => {
 
     const body = await (await list()).json()
 
-    expect(body.contacts).toEqual([CONTACT])
+    // Every row carries its tags, flattened from the embed; none here.
+    expect(body.contacts).toEqual([{ ...CONTACT, tags: [] }])
     expect(body.total).toBe(3482)
   })
 

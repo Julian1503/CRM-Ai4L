@@ -13,6 +13,8 @@
  *  - a header is consumed by the first field that claims it, so nothing is overwritten.
  */
 
+import { IMPORT_REQUIREMENT_OPTIONS, fieldLabel } from './importFields'
+
 /** CRM fields the importer can fill, in the order the mapping screen lists them. */
 export const CRM_FIELD_KEYS = [
   'fullName',
@@ -34,6 +36,7 @@ export const CRM_FIELD_KEYS = [
   'isCustomer',
   'subscribedToNewsletter',
   'subscribedToPrograms',
+  'tagNames',
 ] as const
 
 export type CrmFieldKey = (typeof CRM_FIELD_KEYS)[number]
@@ -233,10 +236,15 @@ const FIELD_RULES: FieldRule[] = [
       'naics',
     ],
   },
+  // `industry` and `sector` used to land here. They describe the organisation's sector,
+  // which is not the contact's job type, so they are reported as ambiguous instead (see
+  // AMBIGUOUS_HEADER_RULES) and the operator decides. Old files are never silently
+  // reinterpreted either way.
   {
     field: 'jobTypeName',
-    exact: ['job type', 'trade', 'industry', 'category', 'work category', 'sector'],
-    contains: ['job type', 'trade', 'industry'],
+    exact: ['job type', 'trade', 'category', 'work category'],
+    contains: ['job type', 'trade'],
+    exclude: ['industry', 'sector'],
   },
   {
     field: 'department',
@@ -288,6 +296,50 @@ const FIELD_RULES: FieldRule[] = [
     contains: ['newsletter', 'subscrib', 'opt in'],
     exclude: ['program', 'course', 'training'],
   },
+  {
+    field: 'tagNames',
+    exact: [
+      'tags',
+      'tag',
+      'tag names',
+      'tag list',
+      'contact tags',
+      'crm tags',
+      'labels',
+      'label',
+      'etiquetas',
+      'etiqueta',
+    ],
+    contains: ['tags', 'etiqueta'],
+    // A company's tags, a tag id/count or social hashtags are not the contact's CRM tags.
+    exclude: [...COMPANY_SCOPED, 'hashtag', 'id', 'count'],
+  },
+]
+
+/** A header the importer refuses to guess, and the fields the operator may pick for it. */
+export type AmbiguousHeader = {
+  header: string
+  /** Fields that could take this column; leaving it unmapped is always allowed too. */
+  candidates: CrmFieldKey[]
+  reason: string
+}
+
+type AmbiguousHeaderRule = {
+  /** Whole words (after normalising) that make a header ambiguous. */
+  words: string[]
+  candidates: CrmFieldKey[]
+  reason: string
+}
+
+const AMBIGUOUS_HEADER_RULES: AmbiguousHeaderRule[] = [
+  {
+    words: ['industry', 'industries', 'sector', 'sectors'],
+    candidates: ['jobTypeName'],
+    reason:
+      "Industry usually describes the organisation's sector, which is not the contact's Job Type. " +
+      'Map it to Job Type only if the column really holds job types; otherwise leave it unmapped. ' +
+      'Organisation industry cannot be imported yet — set it in Settings.',
+  },
 ]
 
 /**
@@ -327,13 +379,21 @@ function isDisqualified(normalised: string, rule: FieldRule): boolean {
   return Boolean(rule.exclude?.some((fragment) => normalised.includes(fragment)))
 }
 
+/** What the importer guessed from a header row, and what it deliberately did not guess. */
+export type HeaderAnalysis = {
+  mapping: ColumnMapping
+  /** Unmapped headers that need an explicit choice from the operator. */
+  ambiguous: AmbiguousHeader[]
+}
+
 /**
- * Guesses which spreadsheet column feeds which CRM field.
+ * Guesses which spreadsheet column feeds which CRM field, and lists the columns it
+ * refused to guess.
  *
  * Unrecognised columns are simply left out; the mapping screen is where the operator
  * fixes anything this got wrong.
  */
-export function autoMapHeaders(headers: string[]): ColumnMapping {
+export function analyseHeaders(headers: string[]): HeaderAnalysis {
   const mapping = emptyColumnMapping()
   const candidates = headers
     .filter((header) => header.trim() !== '')
@@ -379,5 +439,72 @@ export function autoMapHeaders(headers: string[]): ColumnMapping {
     mapping.fullName = ''
   }
 
-  return mapping
+  const ambiguous = candidates.flatMap(({ header, normalised }) => {
+    if (used.has(header)) return []
+    const words = normalised.split(' ')
+    const rule = AMBIGUOUS_HEADER_RULES.find((candidate) =>
+      candidate.words.some((word) => words.includes(word))
+    )
+    return rule ? [{ header, candidates: [...rule.candidates], reason: rule.reason }] : []
+  })
+
+  return { mapping, ambiguous }
+}
+
+/** The mapping half of analyseHeaders(), for callers that only want the guess. */
+export function autoMapHeaders(headers: string[]): ColumnMapping {
+  return analyseHeaders(headers).mapping
+}
+
+/** A requirement the current mapping does not meet, phrased for the operator. */
+export type MissingRequirement = {
+  /** Fields that would satisfy it; for alternatives, the fields of every option. */
+  fields: CrmFieldKey[]
+  message: string
+}
+
+function joinLabels(keys: readonly CrmFieldKey[]): string {
+  const labels = keys.map(fieldLabel)
+  return labels.length <= 1 ? (labels[0] ?? '') : `${labels.slice(0, -1).join(', ')} and ${labels.at(-1)}`
+}
+
+/**
+ * What the mapping still needs before an import can be previewed, from the same
+ * IMPORT_REQUIREMENT_OPTIONS the help shows. Empty when the mapping is complete.
+ *
+ * Only checks that columns are *mapped*; whether each row's cells are usable (a valid
+ * address, a Full Name that splits in two) is decided per row by mapAndValidateRows().
+ */
+export function describeMissingRequirements(mapping: ColumnMapping): MissingRequirement[] {
+  const isMapped = (key: CrmFieldKey) => Boolean(mapping[key]?.trim())
+  const options = IMPORT_REQUIREMENT_OPTIONS
+  const shared = options[0].fields.filter((key) =>
+    options.every((option) => option.fields.includes(key))
+  )
+
+  const missing: MissingRequirement[] = shared
+    .filter((key) => !isMapped(key))
+    .map((key) => ({ fields: [key], message: `${fieldLabel(key)} is not mapped. Every import needs it.` }))
+
+  const alternatives = options.map((option) => ({
+    option,
+    missing: option.fields.filter((key) => !shared.includes(key) && !isMapped(key)),
+  }))
+
+  if (alternatives.every(({ missing: gaps }) => gaps.length > 0)) {
+    const choices = alternatives.map(
+      ({ option, missing: gaps }) => `map ${joinLabels(gaps)} (for ${option.label})`
+    )
+    missing.push({
+      fields: [...new Set(alternatives.flatMap(({ missing: gaps }) => gaps))],
+      message: `The contact's name is not mapped: ${choices.join(', or ')}.`,
+    })
+  }
+
+  return missing
+}
+
+/** True when the mapping satisfies at least one IMPORT_REQUIREMENT_OPTIONS entry. */
+export function isMappingComplete(mapping: ColumnMapping): boolean {
+  return describeMissingRequirements(mapping).length === 0
 }

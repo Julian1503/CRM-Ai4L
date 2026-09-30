@@ -3,7 +3,7 @@ import { createDbMock, createQueryBuilderMock } from '@/test/supabaseMock'
 import { parseContactFilters } from './query'
 import { applyContactFilters, archiveContact, contactSource, restoreContact,
   findOrganisationIdsMatching, fetchContactsForExport, fetchSelectedContactsForExport,
-  sortSelectedRows, ContactExportLimitError,
+  sortSelectedRows, ContactExportLimitError, contactSelect, fetchContacts, toListRow,
 } from './repository'
 
 describe('contactSource', () => {
@@ -388,5 +388,113 @@ describe('findOrganisationIdsMatching', () => {
     ).resolves.toEqual([])
 
     warn.mockRestore()
+  })
+})
+
+const TAG_A = 'aaaaaaaa-0000-4000-8000-000000000001'
+const TAG_B = 'bbbbbbbb-0000-4000-8000-000000000002'
+const ORG = 'cccccccc-0000-4000-8000-000000000003'
+
+describe('tag, organisation and industry filters', () => {
+  function apply(params: Record<string, string>) {
+    const builder = createQueryBuilderMock()
+    applyContactFilters(builder, parseContactFilters(params))
+    return builder
+  }
+
+  it('matches any of the tags through the filter-only embed', () => {
+    expect(apply({ tagIds: `${TAG_A},${TAG_B}` }).allFor('in')).toContainEqual({
+      method: 'in',
+      args: ['tag_match.tag_id', [TAG_A, TAG_B]],
+    })
+  })
+
+  it('never filters the display embed, which would hide the other tags', () => {
+    const inCalls = apply({ tagIds: TAG_A }).allFor('in')
+    expect(inCalls.some((call) => String(call.args[0]).startsWith('tag_links'))).toBe(false)
+  })
+
+  it('filters by organisation id', () => {
+    expect(apply({ organisationId: ORG }).allFor('eq')).toContainEqual({
+      method: 'eq',
+      args: ['organisation_id', ORG],
+    })
+  })
+
+  it('filters by the normalised industry key', () => {
+    expect(apply({ industry: ' Health Care ' }).allFor('eq')).toContainEqual({
+      method: 'eq',
+      args: ['industry_match.industry_key', 'health care'],
+    })
+  })
+
+  it('combines every family with AND alongside the existing filters', () => {
+    const builder = apply({ tagIds: TAG_A, organisationId: ORG, industry: 'Health', status: 'lead' })
+
+    expect(builder.allFor('in')).toHaveLength(1)
+    expect(builder.allFor('eq')).toHaveLength(3)
+  })
+
+  it('adds no tag or industry filter when none is set', () => {
+    const builder = apply({})
+    expect(builder.allFor('in')).toHaveLength(0)
+    expect(builder.allFor('eq')).toHaveLength(0)
+  })
+})
+
+describe('contactSelect', () => {
+  it('always embeds the tags for display', () => {
+    expect(contactSelect({ tagIds: null, industry: null })).toBe(
+      '*, organisation:organisations(name), job_type:job_types(name), tag_links:contact_tags(tag:tags(id,name))'
+    )
+  })
+
+  it('adds an inner embed only for the filters in use', () => {
+    const select = contactSelect({ tagIds: [TAG_A], industry: 'Health' })
+
+    expect(select).toContain('tag_match:contact_tags!inner(tag_id)')
+    expect(select).toContain('industry_match:organisations!inner(industry_key)')
+  })
+})
+
+describe('toListRow', () => {
+  it('flattens tags sorted by name and drops filter-only embeds', () => {
+    const row = toListRow({
+      id: 'c1',
+      tag_links: [{ tag: { id: 't2', name: 'workshop' } }, { tag: { id: 't1', name: 'VIP' } }, { tag: null }],
+      tag_match: [{ tag_id: 't1' }],
+      industry_match: { industry_key: 'health' },
+    } as never)
+
+    expect(row.tags).toEqual([
+      { id: 't1', name: 'VIP' },
+      { id: 't2', name: 'workshop' },
+    ])
+    expect(row).not.toHaveProperty('tag_links')
+    expect(row).not.toHaveProperty('tag_match')
+    expect(row).not.toHaveProperty('industry_match')
+  })
+
+  it('gives a contact without tags an empty list', () => {
+    expect(toListRow({ id: 'c1' } as never).tags).toEqual([])
+  })
+})
+
+describe('fetchContacts', () => {
+  it('returns each contact once with its tags and an exact total', async () => {
+    const builder = createQueryBuilderMock({
+      data: [{ id: 'c1', tag_links: [{ tag: { id: TAG_A, name: 'VIP' } }], tag_match: [{ tag_id: TAG_A }] }],
+      error: null,
+      count: 1,
+    })
+    const db = createDbMock(builder)
+
+    const page = await fetchContacts(db as never, parseContactFilters({ tagIds: `${TAG_A},${TAG_B}` }))
+
+    expect(builder.argsFor('select')).toEqual([
+      expect.stringContaining('tag_match:contact_tags!inner(tag_id)'),
+      { count: 'exact' },
+    ])
+    expect(page).toEqual({ rows: [{ id: 'c1', tags: [{ id: TAG_A, name: 'VIP' }] }], total: 1 })
   })
 })

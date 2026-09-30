@@ -106,6 +106,28 @@ describe('GET /api/contacts/export', () => {
     expect(builder.allFor('eq')).toContainEqual({ method: 'eq', args: ['status', 'lead'] })
   })
 
+  it('applies the tag, organisation and industry filters to the export', async () => {
+    const builder = setRows([contactRow])
+    const tag = 'aaaaaaaa-0000-4000-8000-000000000001'
+    const org = 'cccccccc-0000-4000-8000-000000000003'
+
+    await get(`?tagIds=${tag}&organisationId=${org}&industry=Health`)
+
+    expect(builder.argsFor('select')?.[0]).toContain('tag_match:contact_tags!inner(tag_id)')
+    expect(builder.allFor('in')).toContainEqual({ method: 'in', args: ['tag_match.tag_id', [tag]] })
+    expect(builder.allFor('eq')).toContainEqual({ method: 'eq', args: ['organisation_id', org] })
+    expect(builder.allFor('eq')).toContainEqual({ method: 'eq', args: ['industry_match.industry_key', 'health'] })
+  })
+
+  it('includes a Tags column in the full export', async () => {
+    setRows([{ ...contactRow, tag_links: [{ tag: { id: 't1', name: 'VIP' } }] }])
+
+    const body = await (await get()).text()
+
+    expect(body).toContain('Tags')
+    expect(body).toContain('VIP')
+  })
+
   it('exports beyond one screen of results but stays bounded', async () => {
     const builder = setRows([contactRow])
 

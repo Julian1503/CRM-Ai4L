@@ -6,6 +6,9 @@ import { MAX_SELECTED_IDS } from '@/lib/contacts/query'
 import { AU_STATES } from '@/lib/contacts/states'
 
 import styles from './FilterBar.module.css'
+import IndustryFilter from './IndustryFilter'
+import OrganisationPicker, { type OrganisationOption } from './OrganisationPicker'
+import TagPicker, { type TagOption } from './TagPicker'
 
 export type StatusFilter = 'all' | 'lead' | 'prospect' | 'customer' | 'newsletter' | 'programs'
 
@@ -33,6 +36,20 @@ interface FilterBarProps {
    */
   selectedIds?: readonly string[]
   onClearSelection?: () => void
+  /**
+   * Tag filter (any of the selected tags). Controlled: the page keeps the ids in the URL
+   * as `tagIds` and the names for the chips. Hidden unless `onTagFilterChange` is given.
+   */
+  tagFilter?: readonly TagOption[]
+  onTagFilterChange?: (tags: TagOption[]) => void
+  /** Organisation filter (`organisationId` in the URL). Hidden without a handler. */
+  organisationFilter?: OrganisationOption | null
+  onOrganisationFilterChange?: (organisation: OrganisationOption | null) => void
+  /** Industry filter (`industry` in the URL); '' means all. Hidden without a handler. */
+  industryFilter?: string
+  onIndustryFilterChange?: (industry: string) => void
+  /** Bump to reload server-side filter options (e.g. after an industry edit). */
+  filterOptionsVersion?: number
 }
 
 const STATUS_TABS: { value: StatusFilter; label: string }[] = [
@@ -60,6 +77,13 @@ export default function FilterBar({
   resultCount,
   selectedIds = [],
   onClearSelection,
+  tagFilter = [],
+  onTagFilterChange,
+  organisationFilter = null,
+  onOrganisationFilterChange,
+  industryFilter = '',
+  onIndustryFilterChange,
+  filterOptionsVersion = 0,
 }: FilterBarProps) {
   const selectedCount = selectedIds.length
   const hasSelection = selectedCount > 0
@@ -70,13 +94,22 @@ export default function FilterBar({
   // the whole query string.
   const filterQuery = exportQuery.startsWith('&') ? exportQuery.slice(1) : exportQuery
   const hasActiveFilters =
-    searchQuery !== '' || statusFilter !== 'all' || jobTypeFilter !== '' || stateFilter !== ''
+    searchQuery !== '' ||
+    statusFilter !== 'all' ||
+    jobTypeFilter !== '' ||
+    stateFilter !== '' ||
+    tagFilter.length > 0 ||
+    organisationFilter !== null ||
+    industryFilter !== ''
 
   const clearAll = () => {
     onSearchChange('')
     onStatusChange('all')
     onJobTypeChange('')
     onStateChange('')
+    if (tagFilter.length > 0) onTagFilterChange?.([])
+    if (organisationFilter !== null) onOrganisationFilterChange?.(null)
+    if (industryFilter !== '') onIndustryFilterChange?.('')
   }
 
   return (
@@ -167,6 +200,35 @@ export default function FilterBar({
             ))}
           </select>
         </div>
+
+        {onTagFilterChange && (
+          <TagPicker
+            value={tagFilter}
+            onChange={onTagFilterChange}
+            label="Tags"
+            placeholder={tagFilter.length ? 'Add tag…' : 'Any tag'}
+            allowCreate={false}
+            variant="compact"
+            testId="tag-filter"
+          />
+        )}
+
+        {onOrganisationFilterChange && (
+          <OrganisationPicker
+            value={organisationFilter}
+            onChange={onOrganisationFilterChange}
+            testId="organisation-filter"
+          />
+        )}
+
+        {onIndustryFilterChange && (
+          <IndustryFilter
+            value={industryFilter}
+            onChange={onIndustryFilterChange}
+            reloadKey={filterOptionsVersion}
+            classNames={{ group: styles.selectGroup, label: styles.selectLabel, select: styles.select }}
+          />
+        )}
 
         {hasActiveFilters && (
           <button type="button" className={styles.clearBtn} onClick={clearAll}>

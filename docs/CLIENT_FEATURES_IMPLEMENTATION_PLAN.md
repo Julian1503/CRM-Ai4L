@@ -1,7 +1,7 @@
 # Plan de implementación: mejoras solicitadas por el cliente
 
 Fecha: 29 de septiembre de 2026.
-Estado: análisis del código terminado; implementación pendiente.
+Estado: fases 0–3 implementadas el 29/09/2026 (ver sección 9); pendientes la verificación con Supabase local y los grupos persistentes por etiquetas.
 
 ## 1. Objetivo y alcance
 
@@ -138,6 +138,8 @@ Añadir una sección **Settings > Job Types**, reutilizando la vista Settings ex
 
 **Dependencia a revisar:** `supabase/sync-job-types.js` relaciona nombres con tags históricos de EmailOctopus. Documentar el efecto de renombrar y comprobar cómo se utiliza antes de ejecutar ese script de nuevo. No convertir automáticamente esos tags en etiquetas CRM.
 
+**Efecto verificado del renombrado (29/09/2026):** `sync-job-types.js` asocia tags de EmailOctopus con job types por nombre exacto (`TAG_TO_JOB_TYPE`: "RTOs" → "Registered Training Organisation", "Learning and Development" → sí mismo). Si se renombra uno de esos dos tipos, el script informa "no matching job_types row" y omite esos contactos; las asignaciones existentes no cambian porque apuntan al ID. Tras renombrar, actualizar `TAG_TO_JOB_TYPE` antes de volver a ejecutar el script. Riesgo: renombrar un tipo y crear otro con el nombre antiguo haría que el script reasigne los contactos etiquetados al tipo nuevo, porque también corrige asignaciones que discrepan del tag.
+
 **Aceptación:** acceder al catálogo sin SQL, crear y renombrar, rechazar duplicados legiblemente, conservar asignaciones y mantener disponibles los filtros y segmentos existentes.
 
 ### D. Filtros por organización e Industry
@@ -249,3 +251,67 @@ Ejecutar primero las suites del área modificada y luego la validación integrad
 - **Segmentos guardados:** si se piden grupos reutilizables por etiquetas, abrir una tarea explícita para `src/lib/marketing/segmentCriteria.ts`, `segments.ts`, `facets.ts`, el editor de segmentos, `segment_contacts()` y sus pruebas. Mantener intactas las puertas de consentimiento y archivado. Ese trabajo no está incluido en el filtro básico de contactos.
 
 Cada entrega debe incluir funcionalidad conectada, pruebas relevantes, archivos modificados, documentación actualizada y limitaciones. Para una futura publicación: aplicar primero migraciones aditivas compatibles, después desplegar aplicación y ejecutar smoke tests; no eliminar las tablas nuevas como estrategia automática de rollback.
+
+## 8. Fase 0 completada: decisiones y contratos fijados (29/09/2026)
+
+### Decisiones
+
+- **Grupos:** selección múltiple **y** grupos persistentes. Los grupos persistentes se implementan como segmentos con criterio de etiquetas (`segmentCriteria.ts`, `segments.ts`, `facets.ts`, editor de segmentos, `segment_contacts()`), en una fase posterior a la base de etiquetas, sin tocar las puertas de consentimiento y archivado.
+- **Industry:** sector de la organización (`organisations.industry`), separado de Job Type, editable en Settings y con filtro propio. En importación, los encabezados `industry`/`sector` pasan a ser ambiguos (no se asignan automáticamente a Job Type).
+
+### Tipos compartidos (`src/lib/db/types.ts`)
+
+`TagRow`, `ContactTagRow`, `TAG_NAME_MAX_LENGTH = 80`, `MAX_TAGS_PER_CONTACT = 50`, `TAG_SEPARATOR = ';'`, `ApplyContactTagsResult`, `ImportContactPayloadRow.tag_names`, `ImportPreview.tags_only_changed | tags_assigned | tags_created`, RPC `apply_contact_tags`.
+
+### Filtros de contactos (URL / `ContactFilters`)
+
+| Param | Campo | Semántica |
+| --- | --- | --- |
+| `tagIds=a,b` | `tagIds: string[] \| null` | Cualquiera de las etiquetas (EXISTS). Máx. 50 IDs; formato UUID. |
+| `organisationId=x` | `organisationId: string \| null` | Igualdad por ID. |
+| `industry=Health` | `industry: string \| null` | Igualdad sin mayúsculas ni espacios extremos sobre `organisations.industry`. |
+
+AND entre familias. Aplican igual a listado, conteo y exportación. Cada contacto aparece una vez.
+
+### API
+
+Todas con `requireSessionOr401` y el envoltorio de `src/lib/api/responses.ts`.
+
+| Endpoint | Entrada | Salida |
+| --- | --- | --- |
+| `GET /api/tags?q=&page=&pageSize=` | | `{ tags: {id,name}[], total, page, pageSize, hasMore }` |
+| `POST /api/tags` | `{ name }` | 201 `{ tag, created: true }`; si ya existe (normalizado) 200 `{ tag, created: false }`; 400 nombre inválido |
+| `POST /api/contacts/tags` | `{ contactIds, tagIds, operation: 'add'\|'remove' }` | 200 `{ updated }`; 400 lista vacía, >2.000 contactos, >50 tags o IDs mal formados; 409 selección obsoleta (contacto inexistente/archivado o etiqueta inexistente) |
+| `GET /api/job-types?q=&page=&pageSize=` | | `{ jobTypes: {id,name}[], total, page, pageSize, hasMore }` |
+| `POST /api/job-types` | `{ name }` | 201 `{ jobType }`; 409 duplicado |
+| `PATCH /api/job-types/[id]` | `{ name }` | 200 `{ jobType }`; 404; 409 duplicado |
+| `GET /api/organisations?q=&page=&pageSize=` | | `{ organisations: {id,name,industry}[], total, page, pageSize, hasMore }` |
+| `GET /api/organisations?facet=industry&q=` | | `{ industries: string[] }` (distintos, ordenados, máx. 200) |
+| `PATCH /api/organisations/[id]` | `{ industry: string \| null, expectedIndustry: string \| null }` | 200 `{ organisation }`; 404; 409 si el valor actual ≠ `expectedIndustry` |
+
+### Guardado de contacto
+
+`ContactSaveInput.tagIds?: string[]`. Ausente ⇒ conserva etiquetas; `[]` ⇒ las elimina. `save_contact` gana `p_tags uuid[] default null` (null = conservar) en una migración nueva; sigue siendo una única transacción con `expectedRevision`. La respuesta de contactos (`fetchContacts`) incluye `tags: {id,name}[]` por fila; `TableContact.tags?: {id:string;name:string}[]`.
+
+### Propiedad de archivos
+
+- **Coordinador:** login, `page.tsx`, `page.module.css`, `page.test.tsx`, este documento.
+- **A (datos/API):** `src/lib/db/types.ts` (desde ahora), `supabase/migrations/2026100600*`, `supabase/tests/`, `query.ts`, `repository.ts`, `save.ts`, `saveHandler.ts`, `export.ts`, `tags.ts`, `organisations.ts`, rutas `api/tags`, `api/contacts/tags`, `api/organisations`, `api/contacts/*`.
+- **B (importación):** `columnMapping.ts`, `importFields.ts`, `excelParser.ts`, `import.ts`, `components/import/`, `docs/IMPORTS.md`. Entrega a A el contrato SQL de `tag_names`.
+- **C (catálogos/UI):** `components/settings/` (nuevos), `components/contacts/` (FilterBar, TagPicker, BulkTagActions, OrganisationPicker), `ContactDrawer.tsx`, `ContactTable.tsx` y sus CSS/tests, rutas `api/job-types`, `src/lib/contacts/jobTypes.ts`.
+
+## 9. Resultado de la implementación (29/09/2026)
+
+**Entregado:** A (ayuda de columnas), B (etiquetas: modelo, RPCs, guardado, lote, importación, filtros, exportación), C (Job Types en Settings y modal sobre el drawer), D (filtros de organización e Industry; edición del sector en Settings), E (mostrar/ocultar contraseña).
+
+**Migraciones nuevas:** `20261006000000_contact_tags.sql` (tablas, RLS, `create_tag`, `apply_contact_tags`, `save_contact` con `p_tags`, `organisations.industry_key` + `organisation_industries`) y `20261006010000_import_contact_tags.sql` (`tag_names` en staging/preview/import). Aplicar antes de desplegar la aplicación.
+
+**Desviaciones del contrato de la sección 8:** CRM07 lleva hint `stale_tags` (→ 409) o `tag_limit` (→ 400); un no miembro recibe 403; guardar con una etiqueta borrada devuelve conflicto. `tagIds` mal formados se descartan; más de 50 se recortan a 50; `organisationId` no UUID e `industry` > 120 caracteres se ignoran. El token del preview también cubre qué etiquetas existen en el catálogo. Las etiquetas comunes de importación se introducen por nombre (no con `TagPicker`) para no crear etiquetas antes de confirmar la importación.
+
+**Verificación ejecutada:** `tsc` limpio; lint 0 errores; Jest 2258 aprobadas (4 fallos preexistentes en `runJobs.test.ts`, presentes en la línea base); `next build` correcto; `src/e2e/auth.spec.ts` 93 aprobadas en 3 navegadores. Migraciones reproducidas en PGlite con `verify_20261006000000` aprobado.
+
+**Sin verificar (requiere Docker + Supabase local):** `npm run db:verify`, `npm run test:integration` (incluido `tags.integration.test.ts`, que comprueba que el filtro por varias etiquetas no duplica contactos) y el comportamiento real de los embeds `!inner` de PostgREST. Recorridos E2E autenticados de etiquetas/filtros/renombrado: pendientes, necesitan credenciales de prueba.
+
+**Pendiente de alcance:** grupos persistentes por etiquetas (criterio de etiquetas en segmentos), según la sección 7.
+
+**Deuda:** `ContactDrawer.tsx` (≈820 líneas) y `page.tsx` superan el límite de 800 líneas.

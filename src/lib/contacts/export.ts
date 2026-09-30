@@ -1,5 +1,7 @@
 import { toCsv, type CsvColumn } from '@/lib/csv'
-import type { ContactRow } from '@/lib/db/types'
+import type { ContactRow, TagSummary } from '@/lib/db/types'
+
+import { formatTagList } from './tags'
 
 /**
  * Contact CSV export shapes.
@@ -46,6 +48,8 @@ const FULL_COLUMNS: CsvColumn[] = [
   { key: 'status', header: 'Status' },
   { key: 'subscribed_to_newsletter', header: 'Newsletter' },
   { key: 'subscribed_to_programs', header: 'Courses & training' },
+  // Same `;` separator the importer reads, so an export can be edited and re-imported.
+  { key: 'tags', header: 'Tags' },
   { key: 'created_at', header: 'Created' },
 ]
 
@@ -58,6 +62,7 @@ const COLUMNS: Record<ExportFormat, CsvColumn[]> = {
 type JoinedContactRow = ContactRow & {
   organisation?: { name: string } | null
   job_type?: { name: string } | null
+  tags?: TagSummary[]
 }
 
 /** Flattens joins and renders values for human consumption. */
@@ -66,6 +71,7 @@ export function toExportRows(rows: JoinedContactRow[]): Record<string, unknown>[
     ...row,
     organisation: row.organisation?.name ?? '',
     job_type: row.job_type?.name ?? '',
+    tags: formatTagList((row.tags ?? []).map((tag) => tag.name)),
     subscribed_to_newsletter: row.subscribed_to_newsletter ? 'Yes' : 'No',
     subscribed_to_programs: row.subscribed_to_programs ? 'Yes' : 'No',
   }))

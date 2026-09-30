@@ -1,0 +1,106 @@
+.wrapper {
+  position: relative;
+  display: inline-flex;
+}
+
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full, 999px);
+  background: var(--bg-card, transparent);
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color var(--transition-fast, 150ms), color var(--transition-fast, 150ms);
+}
+
+.trigger:hover,
+.trigger[aria-expanded='true'] {
+  border-color: var(--primary);
+  color: var(--text-primary);
+}
+
+.trigger:focus-visible {
+  outline: 2px solid var(--border-focus, var(--primary));
+  outline-offset: 2px;
+}
+
+.icon {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: var(--text-on-primary, #fff);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+/* Rendered in the DOM while closed (`hidden`) so aria-describedby always resolves. */
+.panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 20;
+  display: block;
+  width: min(360px, calc(100vw - 32px));
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 10px);
+  background: var(--bg-surface, var(--bg-card, #fff));
+  box-shadow: var(--shadow-lg, 0 12px 32px rgba(0, 0, 0, 0.16));
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  font-weight: 400;
+  line-height: 1.45;
+  text-align: left;
+}
+
+.panel[hidden] {
+  display: none;
+}
+
+.panel p {
+  margin: 0 0 8px;
+}
+
+.panel p:last-child {
+  margin-bottom: 0;
+}
+
+.heading {
+  font-weight: 600;
+}
+
+.options {
+  margin: 0 0 10px;
+  padding-left: 18px;
+}
+
+.options li + li {
+  margin-top: 4px;
+}
+
+.note {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+
+.code {
+  padding: 1px 5px;
+  border-radius: var(--radius-xs, 4px);
+  background: var(--bg-highlight, rgba(0, 0, 0, 0.05));
+  font-size: 0.78rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .trigger {
+    transition: none;
+  }
+}

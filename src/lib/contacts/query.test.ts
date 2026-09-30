@@ -9,6 +9,9 @@ import {
   SEARCH_ORGANISATION_CAP,
   parseContactIds,
   MAX_SELECTED_IDS,
+  MAX_FILTER_TAG_IDS,
+  industryKey,
+  parseTagIds,
 } from './query'
 
 describe('parseContactFilters', () => {
@@ -17,6 +20,9 @@ describe('parseContactFilters', () => {
       q: null,
       ids: null,
       jobTypeId: null,
+      tagIds: null,
+      organisationId: null,
+      industry: null,
       state: null,
       status: null,
       subscribed: null,
@@ -221,6 +227,9 @@ describe('contactFiltersToSearchParams', () => {
       sort: 'organisation',
       dir: 'desc',
       page: '4',
+      tagIds: `${TAG_A},${TAG_B}`,
+      organisationId: ORG,
+      industry: 'Health care',
     })
 
     const reparsed = parseContactFilters(contactFiltersToSearchParams(original))
@@ -316,5 +325,54 @@ describe('parseContactFilters ids', () => {
 
   it('leaves ids null when the param is absent', () => {
     expect(parseContactFilters({ q: 'ada' }).ids).toBeNull()
+  })
+})
+
+const TAG_A = 'aaaaaaaa-0000-4000-8000-000000000001'
+const TAG_B = 'bbbbbbbb-0000-4000-8000-000000000002'
+const ORG = 'cccccccc-0000-4000-8000-000000000003'
+
+describe('tag, organisation and industry filters', () => {
+  it('reads tagIds as a de-duplicated list of UUIDs', () => {
+    expect(parseContactFilters({ tagIds: ` ${TAG_A}, ${TAG_B},${TAG_A.toUpperCase()} ` }).tagIds).toEqual([TAG_A, TAG_B])
+  })
+
+  it('drops malformed tag ids, which could otherwise reach a PostgREST filter', () => {
+    expect(parseTagIds(`${TAG_A},vip,1),tag_id.eq.x`)).toEqual([TAG_A])
+  })
+
+  it('turns the tag filter off when no usable id remains', () => {
+    expect(parseContactFilters({ tagIds: 'vip' }).tagIds).toBeNull()
+    expect(parseContactFilters({ tagIds: '' }).tagIds).toBeNull()
+    expect(parseContactFilters({}).tagIds).toBeNull()
+  })
+
+  it('bounds the number of tag ids', () => {
+    const many = Array.from({ length: 60 }, (_, i) => `aaaaaaaa-0000-4000-8000-${String(i).padStart(12, '0')}`)
+    expect(parseTagIds(many.join(','))).toHaveLength(MAX_FILTER_TAG_IDS)
+  })
+
+  it('accepts only a UUID organisation id', () => {
+    expect(parseContactFilters({ organisationId: ORG }).organisationId).toBe(ORG)
+    expect(parseContactFilters({ organisationId: 'acme' }).organisationId).toBeNull()
+  })
+
+  it('keeps the industry as typed and derives the comparison key', () => {
+    expect(parseContactFilters({ industry: '  Health  ' }).industry).toBe('Health')
+    expect(industryKey(' Health Care ')).toBe('health care')
+  })
+
+  it('ignores an industry longer than any stored one', () => {
+    expect(parseContactFilters({ industry: 'x'.repeat(121) }).industry).toBeNull()
+  })
+
+  it('serialises the new filters with the documented param names', () => {
+    const params = contactFiltersToSearchParams(
+      parseContactFilters({ tagIds: `${TAG_A},${TAG_B}`, organisationId: ORG, industry: 'Health' })
+    )
+
+    expect(params.get('tagIds')).toBe(`${TAG_A},${TAG_B}`)
+    expect(params.get('organisationId')).toBe(ORG)
+    expect(params.get('industry')).toBe('Health')
   })
 })

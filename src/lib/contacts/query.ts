@@ -1,4 +1,4 @@
-import type { ContactStatus } from '@/lib/db/types'
+import { MAX_TAGS_PER_CONTACT, ORGANISATION_INDUSTRY_MAX_LENGTH, type ContactStatus } from '@/lib/db/types'
 import {
   DEFAULT_PAGE_SIZE,
   MAX_PAGE_SIZE,
@@ -8,6 +8,8 @@ import {
   readParam,
   readTrimmed,
 } from '@/lib/pagination'
+
+import { isUuid } from './tags'
 
 /**
  * Contact list filtering, sorting and pagination.
@@ -75,6 +77,19 @@ export type ContactFilters = {
    */
   ids: string[] | null
   jobTypeId: string | null
+  /**
+   * Contacts carrying ANY of these tags. Null when the caller named none. Malformed ids
+   * are dropped; when none survive the filter is off (null) rather than "match nothing",
+   * because a tag filter can only narrow a list the user may already see in full.
+   */
+  tagIds: string[] | null
+  /** Contacts of this organisation (equality by id). */
+  organisationId: string | null
+  /**
+   * The organisation's sector. Compared ignoring case and outer spaces against the
+   * generated `organisations.industry_key` (see 20261006000000_contact_tags.sql).
+   */
+  industry: string | null
   state: string | null
   status: ContactStatus | null
   /** Newsletter consent. Named `subscribed` since before there was a second stream. */
@@ -149,11 +164,39 @@ export function parseContactIds(value: string | null): string[] | null {
   return [...ids]
 }
 
+/** Most tag ids one filter may name; the same bound as tags per contact. */
+export const MAX_FILTER_TAG_IDS = MAX_TAGS_PER_CONTACT
+
+/**
+ * Parses `tagIds=a,b`: valid UUIDs only, deduplicated, at most MAX_FILTER_TAG_IDS.
+ * Returns null when nothing usable was given, so the filter is simply off.
+ */
+export function parseTagIds(value: string | null): string[] | null {
+  if (value === null) return null
+
+  const ids = new Set<string>()
+
+  for (const part of value.split(',')) {
+    const id = part.trim().toLowerCase()
+    if (isUuid(id)) ids.add(id)
+    if (ids.size === MAX_FILTER_TAG_IDS) break
+  }
+
+  return ids.size === 0 ? null : [...ids]
+}
+
+/** The industry comparison key: what `organisations.industry_key` holds for a value. */
+export function industryKey(industry: string): string {
+  return industry.trim().toLowerCase()
+}
+
 export function parseContactFilters(input: ParamInput): ContactFilters {
   const status = readTrimmed(input, 'status') as ContactStatus | null
   const sort = readTrimmed(input, 'sort') as ContactSortKey | null
   const dir = readTrimmed(input, 'dir')
   const state = readTrimmed(input, 'state')
+  const organisationId = readTrimmed(input, 'organisationId')
+  const industry = readTrimmed(input, 'industry')
 
   return {
     q: readTrimmed(input, 'q'),
@@ -161,6 +204,11 @@ export function parseContactFilters(input: ParamInput): ContactFilters {
     // The raw param is used so `ids=` stays distinguishable from an absent `ids`.
     ids: parseContactIds(readParam(input, 'ids')),
     jobTypeId: readTrimmed(input, 'jobTypeId'),
+    tagIds: parseTagIds(readParam(input, 'tagIds')),
+    // Only an id shape reaches the query; anything else leaves the filter off.
+    organisationId: organisationId && isUuid(organisationId) ? organisationId.toLowerCase() : null,
+    // No stored industry is longer, so a longer value cannot match anything anyway.
+    industry: industry && industry.length <= ORGANISATION_INDUSTRY_MAX_LENGTH ? industry : null,
     // State codes are canonical uppercase (NSW, VIC), so normalise rather than
     // forcing the caller to match case.
     state: state ? state.toUpperCase() : null,
@@ -252,6 +300,9 @@ export function contactFiltersToSearchParams(filters: ContactFilters): URLSearch
   if (filters.q) params.set('q', filters.q)
   if (filters.ids !== null) params.set('ids', filters.ids.join(','))
   if (filters.jobTypeId) params.set('jobTypeId', filters.jobTypeId)
+  if (filters.tagIds !== null && filters.tagIds.length > 0) params.set('tagIds', filters.tagIds.join(','))
+  if (filters.organisationId) params.set('organisationId', filters.organisationId)
+  if (filters.industry) params.set('industry', filters.industry)
   if (filters.state) params.set('state', filters.state)
   if (filters.status) params.set('status', filters.status)
   if (filters.subscribed !== null) params.set('subscribed', String(filters.subscribed))

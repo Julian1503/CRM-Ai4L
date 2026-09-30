@@ -555,3 +555,118 @@ describe('job type', () => {
     })
   })
 })
+
+describe('tags', () => {
+  const VIP = { id: 't-1', name: 'VIP' }
+  const WORKSHOP = { id: 't-2', name: 'Workshop 2026' }
+
+  beforeEach(() => {
+    global.fetch = jest.fn(async (input: string) => ({
+      ok: true,
+      status: 200,
+      json: async () =>
+        String(input).startsWith('/api/tags')
+          ? { tags: [VIP, WORKSHOP], total: 2, page: 1, pageSize: 20, hasMore: false }
+          : { suggestions: [] },
+    })) as unknown as typeof fetch
+  })
+
+  it('shows the tags the contact already has', () => {
+    setup({ contact: { ...contact, tags: [VIP] } })
+
+    expect(screen.getByRole('button', { name: 'Remove tag VIP' })).toBeInTheDocument()
+  })
+
+  it('leaves tagIds out of the save when tags were not touched, so they are kept', async () => {
+    const { onSave } = setup({ contact: { ...contact, tags: [VIP] } })
+
+    fireEvent.change(screen.getByLabelText(/preferred name/i), { target: { value: 'Addy' } })
+    fireEvent.click(screen.getByRole('button', { name: /save contact/i }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    expect(onSave.mock.calls[0][0]).not.toHaveProperty('tagIds')
+  })
+
+  it('sends the edited tag ids when a tag is added', async () => {
+    const { onSave } = setup({ contact: { ...contact, tags: [VIP] } })
+
+    fireEvent.focus(screen.getByRole('combobox', { name: 'Tags' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'Workshop 2026' }))
+    fireEvent.click(screen.getByRole('button', { name: /save contact/i }))
+
+    await waitFor(() =>
+      expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ tagIds: ['t-1', 't-2'] }))
+    )
+  })
+
+  it('sends an empty list when every tag is removed, which clears them', async () => {
+    const { onSave } = setup({ contact: { ...contact, tags: [VIP] } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove tag VIP' }))
+    fireEvent.click(screen.getByRole('button', { name: /save contact/i }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ tagIds: [] })))
+  })
+
+  it('does not send the tags array itself', async () => {
+    const { onSave } = setup({ contact: { ...contact, tags: [VIP] } })
+
+    fireEvent.click(screen.getByRole('button', { name: /save contact/i }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    expect(onSave.mock.calls[0][0]).not.toHaveProperty('tags')
+  })
+})
+
+describe('managing job types', () => {
+  it('offers the catalogue only when the page can open it', () => {
+    setup()
+
+    expect(screen.queryByTestId('manage-job-types')).not.toBeInTheDocument()
+  })
+
+  it('asks the page to open the catalogue', () => {
+    const onManageJobTypes = jest.fn()
+    setup({ onManageJobTypes })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Manage job types' }))
+
+    expect(onManageJobTypes).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the draft and ignores Escape while suspended behind another dialog', async () => {
+    const onClose = jest.fn()
+    const onSave = jest.fn().mockResolvedValue(undefined)
+    const props = {
+      contact,
+      onClose,
+      onSave,
+      availableServices: services,
+      jobTypes,
+      onManageJobTypes: jest.fn(),
+    }
+    const { rerender } = render(<ContactDrawer {...props} />)
+
+    fireEvent.change(screen.getByLabelText(/preferred name/i), { target: { value: 'Addy' } })
+    rerender(<ContactDrawer {...props} isSuspended />)
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByRole('dialog', { hidden: true })).toHaveAttribute('aria-hidden', 'true')
+
+    // A renamed job type arrives while the catalogue is open.
+    rerender(
+      <ContactDrawer
+        {...props}
+        jobTypes={[{ id: 'jt-1', name: 'RTO' }, jobTypes[1]]}
+        isSuspended={false}
+      />
+    )
+
+    expect(screen.getByLabelText(/preferred name/i)).toHaveValue('Addy')
+    expect(screen.getByRole('option', { name: 'RTO' })).toBeInTheDocument()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(onClose).toHaveBeenCalled()
+  })
+})

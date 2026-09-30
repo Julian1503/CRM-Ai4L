@@ -1,4 +1,12 @@
-import { autoMapHeaders } from './columnMapping'
+import {
+  analyseHeaders,
+  autoMapHeaders,
+  describeMissingRequirements,
+  emptyColumnMapping,
+  isMappingComplete,
+  type ColumnMapping,
+} from './columnMapping'
+import { CRM_FIELDS, IMPORT_REQUIREMENT_OPTIONS } from './importFields'
 
 /** Header row of `apollo-contacts-export_REQUIRED FIELDS`, in its real order. */
 const APOLLO_HEADERS = [
@@ -54,9 +62,12 @@ describe('autoMapHeaders - Apollo export', () => {
     expect(mapping.address).toBe('')
   })
 
-  it('maps title to position and industry to job type', () => {
+  it('maps title to position but leaves industry for the operator to decide', () => {
+    // Industry is the organisation's sector, not the contact's job type: an old file
+    // must not be silently reinterpreted either way.
     expect(mapping.position).toBe('Title')
-    expect(mapping.jobTypeName).toBe('Industry')
+    expect(mapping.jobTypeName).toBe('')
+    expect(analyseHeaders(APOLLO_HEADERS).ambiguous.map(({ header }) => header)).toEqual(['Industry'])
   })
 
   it('leaves social and metadata columns unmapped', () => {
@@ -249,5 +260,117 @@ describe('autoMapHeaders - glued headers', () => {
     expect(mapping.state).toBe('PostalState')
     expect(mapping.postcode).toBe('PostalPostcode')
     expect(mapping.country).toBe('PostalCountry')
+  })
+})
+
+describe('analyseHeaders - Industry and Sector are ambiguous', () => {
+  it.each(['Industry', 'Sector', 'INDUSTRY', 'Company Industry', 'Industry Sector'])(
+    'does not map %s to Job Type and reports it for a choice',
+    (header) => {
+      const { mapping, ambiguous } = analyseHeaders(['Email', header])
+
+      expect(mapping.jobTypeName).toBe('')
+      expect(Object.values(mapping)).not.toContain(header)
+      expect(ambiguous).toEqual([
+        expect.objectContaining({ header, candidates: ['jobTypeName'] }),
+      ])
+      expect(ambiguous[0].reason).toMatch(/organisation/)
+    }
+  )
+
+  it('still maps an explicit Job Type column next to an Industry one', () => {
+    const { mapping, ambiguous } = analyseHeaders(['Email', 'Industry', 'Job Type'])
+
+    expect(mapping.jobTypeName).toBe('Job Type')
+    expect(ambiguous.map(({ header }) => header)).toEqual(['Industry'])
+  })
+
+  it('keeps trade and category as job type aliases', () => {
+    expect(autoMapHeaders(['Trade']).jobTypeName).toBe('Trade')
+    expect(autoMapHeaders(['Work Category']).jobTypeName).toBe('Work Category')
+  })
+
+  it('does not flag words that merely contain the letters', () => {
+    expect(analyseHeaders(['Industrious Rating', 'Dissector']).ambiguous).toEqual([])
+  })
+
+  it('reports nothing for a sheet without such columns', () => {
+    expect(analyseHeaders(['Email', 'First Name', 'Last Name']).ambiguous).toEqual([])
+  })
+})
+
+describe('autoMapHeaders - Tags', () => {
+  it.each(['Tags', 'tag', 'Labels', 'Etiquetas', 'Contact Tags', 'TagNames'])('maps %s to tags', (header) => {
+    expect(autoMapHeaders(['Email', header]).tagNames).toBe(header)
+  })
+
+  it('leaves company tags, hashtags and tag ids alone', () => {
+    const mapping = autoMapHeaders(['Email', 'Company Tags', 'Hashtags', 'Tag ID'])
+
+    expect(mapping.tagNames).toBe('')
+  })
+})
+
+function mapped(fields: Partial<ColumnMapping>): ColumnMapping {
+  return { ...emptyColumnMapping(), ...fields }
+}
+
+describe('describeMissingRequirements', () => {
+  it('accepts Email + First Name + Last Name', () => {
+    const mapping = mapped({ email: 'E', firstName: 'F', lastName: 'L' })
+
+    expect(describeMissingRequirements(mapping)).toEqual([])
+    expect(isMappingComplete(mapping)).toBe(true)
+  })
+
+  it('accepts Email + Full Name', () => {
+    expect(isMappingComplete(mapped({ email: 'E', fullName: 'N' }))).toBe(true)
+  })
+
+  it('names the email when only the email is missing', () => {
+    const missing = describeMissingRequirements(mapped({ firstName: 'F', lastName: 'L' }))
+
+    expect(missing).toEqual([
+      { fields: ['email'], message: 'Email Address is not mapped. Every import needs it.' },
+    ])
+  })
+
+  it('says exactly which name column is missing for each option', () => {
+    const [missing] = describeMissingRequirements(mapped({ email: 'E', firstName: 'F' }))
+
+    expect(missing.message).toBe(
+      "The contact's name is not mapped: map Last Name (for Email + First Name + Last Name), " +
+        'or map Full Name (Split) (for Email + Full Name).'
+    )
+    expect(missing.fields).toEqual(['lastName', 'fullName'])
+  })
+
+  it('lists every gap for an empty mapping', () => {
+    const missing = describeMissingRequirements(emptyColumnMapping())
+
+    expect(missing).toHaveLength(2)
+    expect(missing[1].message).toContain('map First Name and Last Name (for Email + First Name + Last Name)')
+    expect(isMappingComplete(emptyColumnMapping())).toBe(false)
+  })
+
+  it('treats a whitespace-only selection as unmapped', () => {
+    expect(isMappingComplete(mapped({ email: ' ', fullName: 'N' }))).toBe(false)
+  })
+
+  it('is driven by the same options the help lists', () => {
+    for (const option of IMPORT_REQUIREMENT_OPTIONS) {
+      const mapping = mapped(Object.fromEntries(option.fields.map((field) => [field, 'x'])))
+      expect(isMappingComplete(mapping)).toBe(true)
+    }
+  })
+})
+
+describe('CRM_FIELDS', () => {
+  it('describes every CRM field once, including Tags', () => {
+    const keys = CRM_FIELDS.map(({ key }) => key)
+
+    expect(new Set(keys).size).toBe(keys.length)
+    expect([...keys].sort()).toEqual(Object.keys(emptyColumnMapping()).sort())
+    expect(CRM_FIELDS.find(({ key }) => key === 'tagNames')?.description).toContain('VIP; Workshop 2026')
   })
 })

@@ -211,3 +211,49 @@ describe('ContactTable row selection', () => {
     expect(screen.getByTestId('select-all-contacts')).toBeDisabled();
   });
 });
+
+describe('ContactTable tags', () => {
+  const renderWithTags = (tags: { id: string; name: string }[] | undefined) =>
+    render(
+      <ContactTable
+        contacts={[{ ...mockContacts[0], tags }]}
+        onSelectContact={jest.fn()}
+        onSort={jest.fn()}
+        sortKey=""
+        sortDir="asc"
+      />
+    );
+
+  it('shows a contact\'s tags under the name', () => {
+    renderWithTags([
+      { id: 't-1', name: 'VIP' },
+      { id: 't-2', name: 'Workshop 2026' },
+    ]);
+
+    const list = screen.getByRole('list', { name: 'Tags' });
+    expect(list).toHaveTextContent('VIP');
+    expect(list).toHaveTextContent('Workshop 2026');
+  });
+
+  it('summarises the rest as +N, naming them for assistive technology', () => {
+    renderWithTags([
+      { id: 't-1', name: 'VIP' },
+      { id: 't-2', name: 'Workshop 2026' },
+      { id: 't-3', name: 'Board' },
+      { id: 't-4', name: 'Sydney' },
+    ]);
+
+    expect(screen.queryByText('Board')).not.toBeInTheDocument();
+    const more = screen.getByText('+2');
+    expect(more).toHaveAttribute('title', 'Board, Sydney');
+    expect(more).toHaveAttribute('aria-label', '2 more: Board, Sydney');
+  });
+
+  it('renders no tag list for a contact without tags', () => {
+    renderWithTags([]);
+    expect(screen.queryByRole('list', { name: 'Tags' })).not.toBeInTheDocument();
+
+    renderWithTags(undefined);
+    expect(screen.queryByRole('list', { name: 'Tags' })).not.toBeInTheDocument();
+  });
+});

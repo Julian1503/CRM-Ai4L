@@ -140,6 +140,38 @@
   color: var(--text-secondary);
 }
 
+/* Tags under the name: a compact summary, the drawer holds the full list. */
+.tagList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tagChip {
+  max-width: 10rem;
+  padding: 1px 8px;
+  overflow: hidden;
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: var(--bg-highlight);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-full);
+}
+
+.tagMore {
+  color: var(--text-secondary);
+  background: var(--bg-card);
+  border-color: var(--border);
+  cursor: help;
+}
+
 /* Status Pills & Pulsing Indicators */
 .statusPill {
   display: inline-flex;

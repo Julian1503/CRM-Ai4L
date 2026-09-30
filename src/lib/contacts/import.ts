@@ -87,6 +87,11 @@ export function toImportPayload(rows: MappedContactRow[]): ImportContactPayloadR
       setIfPresent(payload, 'organisation_name', data.organisationName)
       setIfPresent(payload, 'job_type_name', data.jobTypeName)
 
+      // Already merged with the common tags and validated by mapAndValidateRows, so the
+      // preview and the import send the same list. Omitted when empty: import only adds
+      // tags, and "no tags" must keep the contact's existing ones.
+      if (data.tagNames && data.tagNames.length > 0) payload.tag_names = [...data.tagNames]
+
       return payload as unknown as ImportContactPayloadRow
     })
 }

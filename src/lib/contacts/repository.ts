@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
-import type { ContactRow, Database } from '@/lib/db/types'
+import type { ContactRow, Database, TagSummary } from '@/lib/db/types'
 
 import {
   SEARCH_ORGANISATION_CAP,
@@ -8,6 +8,7 @@ import {
   buildSearchOrExpression,
   escapeLikePattern,
   getPageRange,
+  industryKey,
   type ContactFilters,
   type ContactSortKey,
 } from './query'
@@ -64,6 +65,43 @@ export class ContactExportLimitError extends Error {
   }
 }
 
+/**
+ * Embed aliases used only to filter. They are stripped from the rows (see toListRow).
+ *
+ * Tags: `contact_tags!inner` is a to-many embed, which PostgREST renders as one lateral
+ * subquery per contact aggregating the matching links into an array -- never a join
+ * that repeats the contact. `!inner` drops contacts whose filtered array is empty. So
+ * a contact carrying two of the selected tags is still one row, and `count: 'exact'`
+ * counts contacts, not links. A separate alias is used because filtering the display
+ * embed (`tag_links`) would also hide the contact's other tags.
+ *
+ * Industry: a second, to-one embed of the organisation, filtered on the generated
+ * `industry_key` column (lower(btrim(industry))), so the comparison needs no LIKE
+ * escaping and ignores case and outer spaces exactly as the database defines them.
+ */
+const TAG_FILTER_EMBED = 'tag_match'
+const INDUSTRY_FILTER_EMBED = 'industry_match'
+
+/** The select list for a contact page: the row, its lookups, its tags, and filter embeds. */
+export function contactSelect(filters: Pick<ContactFilters, 'tagIds' | 'industry'>): string {
+  const parts = [
+    '*',
+    'organisation:organisations(name)',
+    'job_type:job_types(name)',
+    'tag_links:contact_tags(tag:tags(id,name))',
+  ]
+
+  if (filters.tagIds !== null && filters.tagIds.length > 0) {
+    parts.push(`${TAG_FILTER_EMBED}:contact_tags!inner(tag_id)`)
+  }
+
+  if (filters.industry) {
+    parts.push(`${INDUSTRY_FILTER_EMBED}:organisations!inner(industry_key)`)
+  }
+
+  return parts.join(', ')
+}
+
 /** Applies filters, ordering and a bounded range to a contacts query. */
 export function applyContactFilters<T extends Filterable>(
   query: T,
@@ -87,6 +125,19 @@ export function applyContactFilters<T extends Filterable>(
 
   if (filters.jobTypeId) {
     result = result.eq('job_type_id', filters.jobTypeId)
+  }
+
+  if (filters.tagIds !== null && filters.tagIds.length > 0) {
+    // Any of the tags. Pairs with the !inner embed added by contactSelect().
+    result = result.in(`${TAG_FILTER_EMBED}.tag_id`, filters.tagIds)
+  }
+
+  if (filters.organisationId) {
+    result = result.eq('organisation_id', filters.organisationId)
+  }
+
+  if (filters.industry) {
+    result = result.eq(`${INDUSTRY_FILTER_EMBED}.industry_key`, industryKey(filters.industry))
   }
 
   if (filters.state) {
@@ -121,9 +172,37 @@ export function applyContactFilters<T extends Filterable>(
   return result as T
 }
 
+/** A contact as the list returns it: the row, its lookups and its tags. */
+export type ContactListRow = ContactRow & {
+  organisation?: { name: string } | null
+  job_type?: { name: string } | null
+  tags: TagSummary[]
+}
+
 export type ContactPage = {
-  rows: ContactRow[]
+  rows: ContactListRow[]
   total: number
+}
+
+type RawContactRow = ContactRow & {
+  tag_links?: Array<{ tag: TagSummary | null }> | null
+  [TAG_FILTER_EMBED]?: unknown
+  [INDUSTRY_FILTER_EMBED]?: unknown
+}
+
+/** Flattens the tag embed into `tags` (sorted by name) and drops the filter-only embeds. */
+export function toListRow(raw: RawContactRow): ContactListRow {
+  const { tag_links: links, [TAG_FILTER_EMBED]: _tags, [INDUSTRY_FILTER_EMBED]: _industry, ...row } = raw
+  void _tags
+  void _industry
+
+  const tags = (links ?? [])
+    .map((link) => link.tag)
+    .filter((tag): tag is TagSummary => tag !== null && tag !== undefined)
+    .map((tag) => ({ id: tag.id, name: tag.name }))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+
+  return { ...row, tags }
 }
 
 /**
@@ -166,7 +245,7 @@ export async function fetchContacts(
   db: SupabaseClient<Database>,
   filters: ContactFilters
 ): Promise<ContactPage> {
-  const select = '*, organisation:organisations(name), job_type:job_types(name)'
+  const select = contactSelect(filters)
 
   // Resolved before the contact query so the ids can join the same `.or()` — a contact
   // matches if their own name, email or position matches, *or* their organisation did.
@@ -183,7 +262,7 @@ export async function fetchContacts(
     filters,
     { organisationIds }
   ) as unknown as PromiseLike<{
-    data: ContactRow[] | null
+    data: RawContactRow[] | null
     error: { message: string } | null
     count: number | null
   }>)
@@ -192,7 +271,7 @@ export async function fetchContacts(
     throw new Error(`Could not load contacts: ${error.message}`)
   }
 
-  return { rows: data ?? [], total: count ?? 0 }
+  return { rows: (data ?? []).map(toListRow), total: count ?? 0 }
 }
 
 /**
@@ -262,7 +341,7 @@ export async function fetchSelectedContactsForExport(
   }
 
   const safeChunkSize = Math.max(1, chunkSize)
-  const rows: ContactRow[] = []
+  const rows: ContactListRow[] = []
 
   for (let start = 0; start < ids.length; start += safeChunkSize) {
     const chunk = ids.slice(start, start + safeChunkSize)
@@ -300,7 +379,7 @@ export async function fetchContactsForExport(
   }
 
   const safePageSize = Math.max(1, Math.min(pageSize, maxRows))
-  const rows: ContactRow[] = []
+  const rows: ContactListRow[] = []
   let page = 1
   let total = 0
 

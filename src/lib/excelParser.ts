@@ -1,5 +1,13 @@
 import * as XLSX from 'xlsx';
 
+import {
+  describeTagError,
+  mergeTagNames,
+  parseTagList,
+  type TagNameError,
+} from '@/lib/contacts/tags';
+import { MAX_TAGS_PER_CONTACT } from '@/lib/db/types';
+
 export interface RawParsedSpreadsheet {
   headers: string[];
   rows: Record<string, string>[];
@@ -38,8 +46,23 @@ export interface MappedContactRow {
      */
     subscribedToNewsletter?: boolean;
     subscribedToPrograms?: boolean;
+    /**
+     * The row's `Tags` cell merged with the import's common tags, deduplicated
+     * case-insensitively. Undefined when neither supplied any: the import only ever adds
+     * tags, so "nothing" keeps the contact's existing ones.
+     */
+    tagNames?: string[];
   };
 }
+
+export type MapAndValidateOptions = {
+  /**
+   * Tags applied to every accepted row on top of its own `Tags` cell. Part of the
+   * validation (a merged list over the limit rejects the row), so the preview and the
+   * import see exactly the same tags.
+   */
+  commonTags?: readonly string[];
+};
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -149,10 +172,41 @@ export function parseYesNo(val: unknown): { value?: boolean; invalid?: true } {
   return { invalid: true };
 }
 
+/**
+ * The row's tags: its own `Tags` cell (when mapped) plus the common tags, validated as
+ * the one list that will end up on the contact. Over-limit lists are errors, never cut.
+ */
+function resolveRowTags(
+  cell: string,
+  commonTags: readonly string[],
+  errors: string[]
+): string[] | undefined {
+  const own = parseTagList(cell);
+  const report = (error: TagNameError) => errors.push(`Tags: ${describeTagError(error)}`);
+
+  own.errors.forEach(report);
+  if (own.errors.length > 0) return undefined;
+  if (commonTags.length === 0) return own.names.length > 0 ? own.names : undefined;
+
+  const merged = mergeTagNames(own.names, commonTags);
+  merged.errors.forEach((error) =>
+    error.kind === 'too_many'
+      ? errors.push(
+          `Tags: ${error.count} tags once the common tags are added; a contact can have at most ${MAX_TAGS_PER_CONTACT}.`
+        )
+      : report(error)
+  );
+
+  return merged.errors.length === 0 && merged.names.length > 0 ? merged.names : undefined;
+}
+
 export function mapAndValidateRows(
   rows: Record<string, string>[],
-  mapping: Record<string, string>
+  mapping: Record<string, string>,
+  options: MapAndValidateOptions = {}
 ): MappedContactRow[] {
+  const commonTags = options.commonTags ?? [];
+
   return rows.map((row) => {
     const errors: string[] = [];
     
@@ -166,6 +220,7 @@ export function mapAndValidateRows(
     let firstName = getValue('firstName');
     let lastName = getValue('lastName');
     const fullName = getValue('fullName');
+    let splitFailed = false;
 
     // Handle name split if fullName is mapped
     if (mapping.fullName) {
@@ -176,7 +231,8 @@ export function mapAndValidateRows(
           lastName = parts.slice(1).join(' ');
         } else {
           firstName = parts[0];
-          errors.push('Last Name is required when using Full Name split');
+          splitFailed = true;
+          errors.push('Full Name must contain a first and a last name separated by a space');
         }
       }
     }
@@ -205,9 +261,11 @@ export function mapAndValidateRows(
     const isCustomer = yesNo('isCustomer', 'Customer');
     const subscribedToNewsletter = yesNo('subscribedToNewsletter', 'Newsletter');
     const subscribedToPrograms = yesNo('subscribedToPrograms', 'Courses');
+    const tagNames = resolveRowTags(getValue('tagNames'), commonTags, errors);
 
     // Validation checks
-    if (!firstName || (!lastName && !mapping.fullName)) {
+    // One message per problem: a Full Name that would not split has already said so.
+    if (!firstName || (!lastName && !splitFailed)) {
       errors.push('First Name and Last Name (or Full Name) are required');
     }
 
@@ -242,6 +300,7 @@ export function mapAndValidateRows(
             isCustomer,
             subscribedToNewsletter,
             subscribedToPrograms,
+            tagNames,
           }
         : undefined,
     };

@@ -10,6 +10,35 @@ import type { ContactStatus } from '@/lib/db/types';
 
 type ActiveContactStatus = Exclude<ContactStatus, 'archived'>;
 
+/** Tags shown per row before the rest collapse into a "+N" summary. */
+export const VISIBLE_ROW_TAGS = 2;
+
+function RowTags({ tags }: { tags: { id: string; name: string }[] }) {
+  if (tags.length === 0) return null;
+
+  const visible = tags.slice(0, VISIBLE_ROW_TAGS);
+  const hidden = tags.slice(VISIBLE_ROW_TAGS);
+
+  return (
+    <ul className={styles.tagList} aria-label="Tags">
+      {visible.map((tag) => (
+        <li key={tag.id} className={styles.tagChip}>
+          {tag.name}
+        </li>
+      ))}
+      {hidden.length > 0 && (
+        <li
+          className={`${styles.tagChip} ${styles.tagMore}`}
+          title={hidden.map((tag) => tag.name).join(', ')}
+          aria-label={`${hidden.length} more: ${hidden.map((tag) => tag.name).join(', ')}`}
+        >
+          +{hidden.length}
+        </li>
+      )}
+    </ul>
+  );
+}
+
 /** Shared empty set, so an unselectable table does not allocate one per render. */
 const EMPTY_SELECTION: ReadonlySet<string> = new Set<string>();
 
@@ -40,6 +69,8 @@ export interface TableContact {
   servicesBought?: string[];
   /** The row's revision when loaded; an edit is refused if it has moved on (H8). */
   revision?: number;
+  /** CRM tags on the contact, as returned by the contacts API. */
+  tags?: { id: string; name: string }[];
 }
 
 interface ContactTableProps {
@@ -276,6 +307,7 @@ export default function ContactTable({
                       {contact.preferredName ? ` (${contact.preferredName})` : ''}
                     </span>
                     <span className={styles.emailSubtext}>{contact.email}</span>
+                    {contact.tags && <RowTags tags={contact.tags} />}
                   </div>
                 </td>
                 <td className={styles.td}>

@@ -302,6 +302,33 @@ test.describe('login page', () => {
     await expect(page.getByText('Enter your password.')).toBeVisible()
   })
 
+  test('reveals and hides the password by click and keyboard without submitting', async ({
+    page,
+  }) => {
+    await page.goto('/login')
+
+    const configMissing = await isConfigNoticeShown(page)
+    test.skip(configMissing, 'Supabase not configured, so no form is rendered')
+
+    const password = page.getByLabel('Password', { exact: true })
+    await password.fill('not-a-real-password')
+    await expect(password).toHaveAttribute('type', 'password')
+
+    await page.getByRole('button', { name: 'Show password' }).click()
+    await expect(password).toHaveAttribute('type', 'text')
+    await expect(password).toHaveValue('not-a-real-password')
+
+    const hide = page.getByRole('button', { name: 'Hide password' })
+    await hide.focus()
+    await page.keyboard.press('Enter')
+    await expect(password).toHaveAttribute('type', 'password')
+    await expect(password).toHaveValue('not-a-real-password')
+
+    // A submit would have run validation and shown the missing-email error.
+    await expect(page).toHaveURL(/\/login/)
+    await expect(page.getByText('Enter your email address.')).toHaveCount(0)
+  })
+
   test('states plainly when sign-in is unavailable', async ({ page }) => {
     await page.goto('/login')
 

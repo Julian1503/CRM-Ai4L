@@ -37,6 +37,7 @@ const ALIASES = {
   membership: 'verify_20261002000000.sql',
   delivery: 'verify_20261003000000.sql',
   contacts2: 'verify_20261004000000.sql',
+  tags: 'verify_20261006000000.sql',
 }
 
 function fail(message) {

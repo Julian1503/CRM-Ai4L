@@ -182,6 +182,26 @@
   transform: translateY(0) scale(0.97);
 }
 
+.actionButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* Marks the mapping rows the import cannot run without. */
+.requirementBadge {
+  margin-left: 8px;
+  padding: 1px 6px;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--primary);
+  background: var(--primary-muted);
+  border-radius: 999px;
+  vertical-align: middle;
+}
+
 /* Search and Filters Bar */
 .filterBar {
   display: flex;

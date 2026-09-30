@@ -27,6 +27,8 @@ Roles are read from the database on every request, never from JWT claims or
 | Contacts, imports, exports, segments, templates, schedules, bookings | ✓ | ✓ |
 | Campaign drafting, review, **approval** and sending | ✓ | ✓ |
 | Archive / remove records | ✓ | ✓ |
+| Contact tags: create tags, tag/untag contacts one by one or in bulk (`/api/tags`, `/api/contacts/tags`) | ✓ | ✓ |
+| Organisation industry: read options, edit (`/api/organisations`, `PATCH /api/organisations/[id]`) | ✓ | ✓ |
 | See whether EmailOctopus is configured | ✓ | ✓ |
 | Replace or clear EmailOctopus credentials | – | ✓ |
 | Grant, change or disable membership | – | ✓ (or `npm run db:member`) |
@@ -35,6 +37,20 @@ Roles are read from the database on every request, never from JWT claims or
 approver may be the author. Neither restriction existed before this change, and neither was
 introduced silently. Changing either is a product decision; the hook is
 `requireAdminOr403()` or a new role.
+
+## Contact tags and organisation industry (20261006000000)
+
+`tags` and `contact_tags` follow the same model as every other table: permissive policies
+for the operations each allows, ANDed with the restrictive `Approved CRM members only`
+policy; `anon` has no grant. `authenticated` may read and insert tags (no update, no
+delete: tags are never physically deleted by the application) and read, insert and delete
+tag links (relationship rows, like `contact_services`). `create_tag`, `apply_contact_tags`,
+`save_contact` and `organisation_industries` are SECURITY INVOKER, so RLS applies inside
+them; `apply_contact_tags` also checks `is_crm_member()` first (service role excepted) to
+answer a non-member with 42501 instead of a misleading "contacts missing". Editing an
+organisation's industry uses the existing organisation update policy, conditional on the
+value the editor loaded. Restricting any of this to administrators means changing the API
+guard (`requireAdminOr403()`) and these policies together.
 
 ## Integration credentials
 
@@ -86,5 +102,7 @@ policies or browser access to `credentials` as a recovery shortcut.
 
 - `npm run db:verify -- membership` — anonymous, unapproved, disabled, operator and admin
   paths against the real database engine.
+- `npm run db:verify -- tags` — tags and bulk tagging for anonymous, unapproved and operator
+  callers, plus save/import behaviour.
 - `src/lib/auth/dal.test.ts`, `src/proxy.test.ts`, `src/app/login/actions.test.ts`,
   `src/app/api/integrations/emailoctopus/credentials/route.test.ts`.

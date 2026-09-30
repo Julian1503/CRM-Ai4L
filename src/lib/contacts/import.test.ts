@@ -62,6 +62,26 @@ describe('toImportPayload', () => {
     expect(row).not.toHaveProperty('state')
   })
 
+  it('sends the merged tag names as tag_names', () => {
+    const [row] = toImportPayload([validRow({ tagNames: ['VIP', 'Workshop 2026'] })])
+
+    expect(row.tag_names).toEqual(['VIP', 'Workshop 2026'])
+  })
+
+  it('omits tag_names when a row has no tags, so existing tags are kept', () => {
+    const [none, empty] = toImportPayload([validRow(), validRow({ email: 'b@example.com', tagNames: [] })])
+
+    expect(none).not.toHaveProperty('tag_names')
+    expect(empty).not.toHaveProperty('tag_names')
+  })
+
+  it('does not share the tag array with the validated row', () => {
+    const tagNames = ['VIP']
+    const [row] = toImportPayload([validRow({ tagNames })])
+
+    expect(row.tag_names).not.toBe(tagNames)
+  })
+
   it('always sends is_customer, since the spreadsheet is authoritative for it', () => {
     const [row] = toImportPayload([validRow()])
 

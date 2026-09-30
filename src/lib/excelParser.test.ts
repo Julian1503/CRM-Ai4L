@@ -117,7 +117,9 @@ describe('excelParser - mapAndValidateRows', () => {
     const results = mapAndValidateRows(rawRows, mapping);
     // SingleName: missing last name
     expect(results[0].isValid).toBe(false);
-    expect(results[0].errors).toContain('Last Name is required when using Full Name split');
+    expect(results[0].errors).toEqual([
+      'Full Name must contain a first and a last name separated by a space',
+    ]);
 
     // First Last Name: split correctly
     expect(results[1].isValid).toBe(true);
@@ -253,3 +255,113 @@ describe('yes/no columns keep "said nothing" apart from "no" (audit H9)', () => 
     expect(parseYesNo(input)).toEqual(expected)
   })
 })
+
+describe('excelParser - name requirements', () => {
+  it('rejects a row whose last name is blank when both name columns are mapped', () => {
+    const [row] = mapAndValidateRows(
+      [{ First: 'Ada', Last: '', Email: 'ada@example.com' }],
+      { firstName: 'First', lastName: 'Last', email: 'Email' }
+    );
+
+    expect(row.isValid).toBe(false);
+    expect(row.errors).toEqual(['First Name and Last Name (or Full Name) are required']);
+  });
+
+  it('rejects a blank Full Name cell instead of importing a nameless contact', () => {
+    const [row] = mapAndValidateRows([{ Name: '', Email: 'ada@example.com' }], {
+      fullName: 'Name',
+      email: 'Email',
+    });
+
+    expect(row.isValid).toBe(false);
+    expect(row.errors).toEqual(['First Name and Last Name (or Full Name) are required']);
+  });
+});
+
+describe('excelParser - Tags column', () => {
+  const mapping = { fullName: 'Name', email: 'Email', tagNames: 'Tags' };
+  const row = (tags: string) => ({ Name: 'Ada Lovelace', Email: 'ada@example.com', Tags: tags });
+
+  it('splits a Tags cell on ";" and drops duplicates case-insensitively', () => {
+    const [result] = mapAndValidateRows([row(' VIP ; Workshop 2026; vip;; ')], mapping);
+
+    expect(result.isValid).toBe(true);
+    expect(result.data?.tagNames).toEqual(['VIP', 'Workshop 2026']);
+  });
+
+  it('leaves tags undefined for a blank cell or an unmapped column, so existing tags are kept', () => {
+    const [blank] = mapAndValidateRows([row('  ')], mapping);
+    const [unmapped] = mapAndValidateRows([row('VIP')], { fullName: 'Name', email: 'Email' });
+
+    expect(blank.data?.tagNames).toBeUndefined();
+    expect(unmapped.data?.tagNames).toBeUndefined();
+  });
+
+  it('rejects a row with a tag over the length limit rather than truncating it', () => {
+    const [result] = mapAndValidateRows([row(`VIP; ${'x'.repeat(81)}`)], mapping);
+
+    expect(result.isValid).toBe(false);
+    expect(result.errors?.[0]).toMatch(/^Tags: .*longer than 80 characters/);
+  });
+
+  it('rejects a row with more than 50 tags', () => {
+    const tags = Array.from({ length: 51 }, (_, index) => `t${index}`).join(';');
+    const [result] = mapAndValidateRows([row(tags)], mapping);
+
+    expect(result.isValid).toBe(false);
+    expect(result.errors?.[0]).toMatch(/at most 50/);
+  });
+});
+
+describe('excelParser - common tags', () => {
+  const mapping = { fullName: 'Name', email: 'Email', tagNames: 'Tags' };
+
+  it('merges common tags into every accepted row, row tags first, without duplicates', () => {
+    const [withTags, withoutTags] = mapAndValidateRows(
+      [
+        { Name: 'Ada Lovelace', Email: 'ada@example.com', Tags: 'VIP; Workshop 2026' },
+        { Name: 'Alan Turing', Email: 'alan@example.com', Tags: '' },
+      ],
+      mapping,
+      { commonTags: ['workshop 2026', 'Imported Sept'] }
+    );
+
+    expect(withTags.data?.tagNames).toEqual(['VIP', 'Workshop 2026', 'Imported Sept']);
+    expect(withoutTags.data?.tagNames).toEqual(['workshop 2026', 'Imported Sept']);
+  });
+
+  it('applies common tags even when no Tags column is mapped', () => {
+    const [result] = mapAndValidateRows(
+      [{ Name: 'Ada Lovelace', Email: 'ada@example.com' }],
+      { fullName: 'Name', email: 'Email' },
+      { commonTags: ['VIP'] }
+    );
+
+    expect(result.data?.tagNames).toEqual(['VIP']);
+  });
+
+  it('rejects a row whose own tags plus the common tags exceed the limit', () => {
+    const own = Array.from({ length: 49 }, (_, index) => `t${index}`).join(';');
+    const [result] = mapAndValidateRows(
+      [{ Name: 'Ada Lovelace', Email: 'ada@example.com', Tags: own }],
+      mapping,
+      { commonTags: ['a', 'b'] }
+    );
+
+    expect(result.isValid).toBe(false);
+    expect(result.errors).toEqual([
+      'Tags: 51 tags once the common tags are added; a contact can have at most 50.',
+    ]);
+  });
+
+  it('reports an invalid common tag on the row instead of dropping it', () => {
+    const [result] = mapAndValidateRows(
+      [{ Name: 'Ada Lovelace', Email: 'ada@example.com', Tags: '' }],
+      mapping,
+      { commonTags: ['y'.repeat(81)] }
+    );
+
+    expect(result.isValid).toBe(false);
+    expect(result.errors?.[0]).toMatch(/longer than 80/);
+  });
+});

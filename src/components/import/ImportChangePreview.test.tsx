@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 import type { ImportPreview } from '@/lib/db/types'
 import type { MappedContactRow } from '@/lib/excelParser'
@@ -94,5 +94,80 @@ describe('ImportChangePreview (P3)', () => {
 
     expect(await screen.findByTestId('import-preview-error')).toHaveTextContent('timeout')
     expect(screen.getByTestId('confirm-import')).toBeInTheDocument()
+  })
+
+  it('shows tag changes: contacts receiving tags, tag-only updates and new tags', async () => {
+    render(
+      <ImportChangePreview
+        rows={rows}
+        onPreview={async () => ({
+          ...preview,
+          tags_assigned: 3,
+          tags_only_changed: 1,
+          tags_created: ['VIP', 'Workshop 2026'],
+        })}
+        onCommit={jest.fn()}
+      />
+    )
+
+    expect(await screen.findByTestId('import-preview-tags-assigned')).toHaveTextContent('3 contact(s) will receive new tags')
+    expect(screen.getByTestId('import-preview-tags-only')).toHaveTextContent('1 of the updated contacts change only by receiving tags')
+    expect(screen.getByTestId('import-preview-tags-created')).toHaveTextContent('2 new tag(s) will be created: VIP, Workshop 2026.')
+  })
+
+  it('lists only the first new tags when there are many', async () => {
+    const created = Array.from({ length: 12 }, (_, index) => `t${index}`)
+    render(<ImportChangePreview rows={rows} onPreview={async () => ({ ...preview, tags_created: created })} onCommit={jest.fn()} />)
+
+    expect(await screen.findByTestId('import-preview-tags-created')).toHaveTextContent('t9 and 2 more.')
+  })
+
+  it('says nothing about tags when the preview carries no tag changes', async () => {
+    render(<ImportChangePreview rows={rows} onPreview={async () => preview} onCommit={jest.fn()} />)
+
+    await screen.findByTestId('import-preview-counts')
+    expect(screen.queryByTestId('import-preview-tags-assigned')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('import-preview-tags-created')).not.toBeInTheDocument()
+  })
+
+  it('drops the preview and reloads when what is imported changes (mapping or common tags)', async () => {
+    const first = jest.fn().mockResolvedValue(preview)
+    let resolveSecond: (value: ImportPreview) => void = () => undefined
+    const second = jest.fn(
+      () =>
+        new Promise<ImportPreview>((resolve) => {
+          resolveSecond = resolve
+        })
+    )
+    const onCommit = jest.fn().mockResolvedValue(undefined)
+    const { rerender } = render(<ImportChangePreview rows={rows} onPreview={first} onCommit={onCommit} />)
+    await screen.findByTestId('confirm-import')
+
+    rerender(<ImportChangePreview rows={rows} onPreview={second} onCommit={onCommit} />)
+
+    // The old preview (and its token) can no longer be committed.
+    expect(screen.queryByTestId('confirm-import')).not.toBeInTheDocument()
+    await waitFor(() => expect(second).toHaveBeenCalled())
+    await act(async () => resolveSecond({ ...preview, token: 'tok-new', tags_assigned: 2 }))
+    fireEvent.click(await screen.findByTestId('confirm-import'))
+    await waitFor(() => expect(onCommit).toHaveBeenCalledWith('tok-new'))
+  })
+
+  it('ignores a slower answer to an older preview request', async () => {
+    let resolveOld: (value: ImportPreview) => void = () => undefined
+    const older = jest.fn(
+      () =>
+        new Promise<ImportPreview>((resolve) => {
+          resolveOld = resolve
+        })
+    )
+    const newer = jest.fn().mockResolvedValue({ ...preview, token: 'tok-new', changed: 7 })
+    const { rerender } = render(<ImportChangePreview rows={rows} onPreview={older} onCommit={jest.fn()} />)
+
+    rerender(<ImportChangePreview rows={rows} onPreview={newer} onCommit={jest.fn()} />)
+    expect(await screen.findByTestId('import-preview-counts')).toHaveTextContent('7 updated')
+
+    await act(async () => resolveOld({ ...preview, changed: 99 }))
+    expect(screen.getByTestId('import-preview-counts')).toHaveTextContent('7 updated')
   })
 })

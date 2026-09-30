@@ -1,10 +1,12 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 import styles from '@/app/page.module.css';
 import type { ImportPreview } from '@/lib/db/types';
 import type { MappedContactRow } from '@/lib/excelParser';
+
+import panelStyles from './ImportPanels.module.css';
 
 /**
  * What an import will change, before it changes anything (audit P3).
@@ -14,10 +16,18 @@ import type { MappedContactRow } from '@/lib/excelParser';
  * consent changes are called out on their own because they are the consequential ones.
  * The import then commits with the preview's token and is refused if any matched
  * contact changed in between — the operator is shown a fresh preview instead.
+ *
+ * A preview belongs to the `onPreview` that produced it. The parent recreates
+ * `onPreview` whenever what would be imported changes (mapping, common tags), so a new
+ * function means the shown preview no longer describes the import: it is dropped, a
+ * fresh one is requested, and a late answer to an older request is ignored.
  */
+
+const MAX_LISTED_NEW_TAGS = 10;
 
 type Props = {
   rows: MappedContactRow[];
+  /** Recreate it whenever the rows to import change; that is what invalidates the preview. */
   onPreview: () => Promise<ImportPreview>;
   /** Resolves with a result message; rejects with `stale` true when the preview expired. */
   onCommit: (token: string) => Promise<void>;
@@ -33,20 +43,28 @@ function rejectedRowsCsv(rows: MappedContactRow[]): string {
 }
 
 export default function ImportChangePreview({ rows, onPreview, onCommit }: Props) {
-  const [preview, setPreview] = useState<ImportPreview | null>(null);
+  const [loaded, setLoaded] = useState<{ preview: ImportPreview; source: Props['onPreview'] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isCommitting, setIsCommitting] = useState(false);
+  const latestRequest = useRef(0);
+
+  // Only a preview of the current rows may be shown or committed.
+  const preview = loaded && loaded.source === onPreview ? loaded.preview : null;
 
   const load = useCallback(async () => {
+    const request = ++latestRequest.current;
     setIsLoading(true);
     setError(null);
     try {
-      setPreview(await onPreview());
+      const next = await onPreview();
+      if (request === latestRequest.current) setLoaded({ preview: next, source: onPreview });
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : 'Could not preview the import.');
+      if (request === latestRequest.current) {
+        setError(loadError instanceof Error ? loadError.message : 'Could not preview the import.');
+      }
     } finally {
-      setIsLoading(false);
+      if (request === latestRequest.current) setIsLoading(false);
     }
   }, [onPreview]);
 
@@ -82,6 +100,7 @@ export default function ImportChangePreview({ rows, onPreview, onCommit }: Props
     ? `data:text/csv;charset=utf-8,${encodeURIComponent(rejectedRowsCsv(rows))}`
     : null;
   const importable = preview ? preview.new + preview.changed + preview.unchanged : 0;
+  const newTags = preview?.tags_created ?? [];
 
   return (
     <section aria-labelledby="import-changes-heading" data-testid="import-change-preview">
@@ -121,13 +140,30 @@ export default function ImportChangePreview({ rows, onPreview, onCommit }: Props
             {preview.leaving_customers > 0 && <li><strong>{preview.leaving_customers}</strong> existing customer(s) will become prospects.</li>}
             {preview.withdrawing_newsletter > 0 && <li><strong>{preview.withdrawing_newsletter}</strong> contact(s) will lose newsletter consent.</li>}
             {preview.withdrawing_programs > 0 && <li><strong>{preview.withdrawing_programs}</strong> contact(s) will lose courses consent.</li>}
+            {(preview.tags_assigned ?? 0) > 0 && (
+              <li data-testid="import-preview-tags-assigned">
+                <strong>{preview.tags_assigned}</strong> contact(s) will receive new tags; tags they already have are kept.
+              </li>
+            )}
+            {(preview.tags_only_changed ?? 0) > 0 && (
+              <li data-testid="import-preview-tags-only">
+                <strong>{preview.tags_only_changed}</strong> of the updated contacts change only by receiving tags.
+              </li>
+            )}
+            {newTags.length > 0 && (
+              <li data-testid="import-preview-tags-created">
+                <strong>{newTags.length}</strong> new tag(s) will be created:{' '}
+                {newTags.slice(0, MAX_LISTED_NEW_TAGS).join(', ')}
+                {newTags.length > MAX_LISTED_NEW_TAGS && ` and ${newTags.length - MAX_LISTED_NEW_TAGS} more`}.
+              </li>
+            )}
             <li>Blank or unmapped cells never erase existing details, and an import never re-grants consent someone withdrew.</li>
           </ul>
 
           {preview.samples.length > 0 && (
             <div style={{ maxHeight: '180px', overflowY: 'auto', marginBottom: '12px', border: '1px solid var(--border)', borderRadius: '8px' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
-                <caption className="sr-only">Examples of what will change</caption>
+                <caption className={panelStyles.srOnly}>Examples of what will change</caption>
                 <thead>
                   <tr>
                     <th scope="col" style={{ textAlign: 'left', padding: '6px 12px' }}>Email</th>

@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
-import type { Database } from '@/lib/db/types'
+import { MAX_TAGS_PER_CONTACT, type Database } from '@/lib/db/types'
 
 /**
  * Contact saves through one transactional database call (audit H8).
@@ -31,6 +31,12 @@ export type ContactSaveInput = {
   subscribedToNewsletter?: boolean
   subscribedToPrograms?: boolean
   servicesBought?: string[]
+  /**
+   * The contact's complete tag set. Absent keeps the tags it has; [] removes them all.
+   * The distinction protects clients that predate tags: they send nothing and lose
+   * nothing.
+   */
+  tagIds?: string[]
 }
 
 export type SaveContactResult =
@@ -74,6 +80,17 @@ export function parseContactSaveInput(
     return { ok: false, error: 'servicesBought must be a list of service ids.' }
   }
 
+  let tagIds: string[] | undefined
+  if (body.tagIds !== undefined) {
+    if (!Array.isArray(body.tagIds) || !body.tagIds.every((id) => typeof id === 'string' && UUID.test(id))) {
+      return { ok: false, error: 'tagIds must be a list of tag ids.' }
+    }
+    tagIds = [...new Set((body.tagIds as string[]).map((id) => id.toLowerCase()))]
+    if (tagIds.length > MAX_TAGS_PER_CONTACT) {
+      return { ok: false, error: `A contact can have at most ${MAX_TAGS_PER_CONTACT} tags.` }
+    }
+  }
+
   for (const flag of ['subscribedToNewsletter', 'subscribedToPrograms'] as const) {
     if (body[flag] !== undefined && typeof body[flag] !== 'boolean') {
       return { ok: false, error: `${flag} must be true or false.` }
@@ -103,6 +120,7 @@ export function parseContactSaveInput(
       subscribedToNewsletter: body.subscribedToNewsletter as boolean | undefined,
       subscribedToPrograms: body.subscribedToPrograms as boolean | undefined,
       servicesBought: [...new Set(services as string[])],
+      ...(tagIds === undefined ? {} : { tagIds }),
     },
   }
 }
@@ -139,14 +157,18 @@ export async function saveContact(
   const rpc = db.rpc.bind(db) as unknown as (
     fn: 'save_contact',
     args: Record<string, unknown>
-  ) => PromiseLike<{ data: Record<string, unknown> | null; error: { code?: string; message: string } | null }>
+  ) => PromiseLike<{ data: Record<string, unknown> | null; error: { code?: string; message: string; hint?: string } | null }>
 
   const { data, error } = await rpc('save_contact', {
     p_contact: toRow(params.id, params.input),
     p_services: params.input.servicesBought ?? [],
     p_expected_revision: params.expectedRevision,
+    // null keeps the contact's tags; save_contact only replaces them when given a set.
+    p_tags: params.input.tagIds ?? null,
   })
 
+  // A tag deleted since the drawer loaded is a stale view, like an edit conflict.
+  if (error?.code === 'CRM07' && error.hint === 'stale_tags') return { kind: 'conflict', message: error.message }
   if (error?.code === 'CRM07') return { kind: 'invalid', message: error.message }
   if (error?.code === 'CRM06') return { kind: 'conflict', message: error.message }
   if (error?.code === 'P0002') return { kind: 'not_found' }
