@@ -28,7 +28,7 @@ for (const [label, email] of DENIED_ACCOUNTS) {
     test('is refused with an explanation and leaves no usable session', async ({ page }) => {
       await page.goto('/login')
       await page.getByLabel('Email address').fill(email!)
-      await page.getByLabel('Password').fill(PASSWORD!)
+      await page.getByLabel('Password', { exact: true }).fill(PASSWORD!)
       await page.getByRole('button', { name: 'Sign in' }).click()
 
       await expect(page.getByText(/not approved for CRM access/)).toBeVisible()

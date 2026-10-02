@@ -15,7 +15,7 @@ setup('authenticate the CRM operator once', async ({ page }) => {
 
   await page.goto('/login')
   await page.getByLabel('Email address').fill(email)
-  await page.getByLabel('Password').fill(password)
+  await page.getByLabel('Password', { exact: true }).fill(password)
   await page.getByRole('button', { name: 'Sign in' }).click()
 
   await expect(page.getByRole('heading', { name: 'Dashboard overview', level: 1 })).toBeVisible({
