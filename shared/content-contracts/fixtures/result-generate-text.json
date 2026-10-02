@@ -1,0 +1,51 @@
+{
+  "variants": [
+    {
+      "channel": "linkedin",
+      "style": "direct",
+      "body": "Automating invoices: here is what you need to know.",
+      "hashtags": [
+        "#AI4L",
+        "#Automation"
+      ],
+      "callToAction": "Book a call.",
+      "linkUrl": "https://ai4l.example/workshops",
+      "violations": [
+        "body too short for linkedin (52 < 600 chars)"
+      ],
+      "promptVersion": "ai4l-2026-10-v1"
+    },
+    {
+      "channel": "email",
+      "style": "direct",
+      "body": "Automating invoices: here is what you need to know.",
+      "hashtags": [],
+      "callToAction": "Reserve a place",
+      "linkUrl": null,
+      "fields": {
+        "subject": "Automating invoices | AI4L",
+        "preheader": "What automating invoices means for accountants.",
+        "headline": "Automating invoices",
+        "intro": "A short update from AI4L.",
+        "body": "Automating invoices: here is what you need to know.",
+        "ctaLabel": "Reserve a place"
+      },
+      "violations": [],
+      "promptVersion": "ai4l-2026-10-v1"
+    }
+  ],
+  "failures": [
+    {
+      "channel": "facebook",
+      "errorCode": "llm_transient",
+      "message": "The provider timed out."
+    }
+  ],
+  "promptVersion": "ai4l-2026-10-v1",
+  "model": "mock",
+  "providerRequestId": "mock-0123456789abcdef",
+  "usage": {
+    "promptTokens": 1200,
+    "completionTokens": 400
+  }
+}

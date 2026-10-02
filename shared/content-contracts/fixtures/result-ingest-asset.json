@@ -1,0 +1,31 @@
+{
+  "status": "ready",
+  "files": {
+    "original": {
+      "path": "library/44444444-4444-4444-8444-444444444444/original.jpg",
+      "mimeType": "image/jpeg",
+      "byteSize": 412345,
+      "width": 2048,
+      "height": 1536,
+      "checksum": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "renditions": {
+      "social": {
+        "path": "library/44444444-4444-4444-8444-444444444444/social.jpg",
+        "mimeType": "image/jpeg",
+        "byteSize": 201234,
+        "width": 1440,
+        "height": 1080,
+        "checksum": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "email": {
+        "path": "library/44444444-4444-4444-8444-444444444444/email.jpg",
+        "mimeType": "image/jpeg",
+        "byteSize": 150321,
+        "width": 1200,
+        "height": 900,
+        "checksum": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    }
+  }
+}

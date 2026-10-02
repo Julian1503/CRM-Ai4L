@@ -1,0 +1,9 @@
+{
+  "$comment": "Cross-language vector for the worker HMAC (app/signing.py, src/lib/content-studio/workerAuth.ts). signature = 'v1=' + hex(hmac_sha256(secret, `${timestamp}.${method}.${path}.${body}`)). Test-only secret.",
+  "secret": "test-worker-secret-0123456789abcdef-not-real",
+  "timestamp": 1800000000,
+  "method": "POST",
+  "path": "/api/internal/content-worker/v1/claim",
+  "body": "{\"workerId\":\"worker-1\",\"kinds\":[\"ingest_asset\"],\"limit\":1,\"leaseSeconds\":120}",
+  "signature": "v1=c9dba1df97aaf92a8ec3c0220f063d428a15603dfc779d03b3301bf5ae1757eb"
+}

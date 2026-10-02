@@ -1,0 +1,25 @@
+{
+  "kind": "publish_social",
+  "publicationId": "55555555-5555-4555-8555-555555555555",
+  "platform": "facebook",
+  "account": {
+    "id": "66666666-6666-4666-8666-666666666666",
+    "provider": "meta",
+    "externalId": "1234567890",
+    "authorKind": "page",
+    "displayName": "AI4L",
+    "accessToken": "test-token-not-real"
+  },
+  "text": "Automating invoices saves hours every month.\n\nBook a call.\n\n#AI4L #Automation",
+  "linkUrl": null,
+  "images": [
+    {
+      "url": "https://project.supabase.co/storage/v1/object/public/content-public/p/88888888-8888-4888-8888-888888888888/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg",
+      "alt": "A laptop on a desk",
+      "mimeType": "image/jpeg",
+      "width": 1440,
+      "height": 1080
+    }
+  ],
+  "checkpoint": {}
+}

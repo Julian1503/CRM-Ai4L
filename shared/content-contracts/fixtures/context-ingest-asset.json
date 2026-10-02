@@ -1,0 +1,39 @@
+{
+  "kind": "ingest_asset",
+  "assetId": "44444444-4444-4444-8444-444444444444",
+  "source": {
+    "signedUrl": "https://project.supabase.co/storage/v1/object/sign/content-quarantine/uploads/44444444-4444-4444-8444-444444444444/photo.jpg?token=test-download-token-not-real",
+    "mimeType": "image/jpeg",
+    "byteSize": 245760,
+    "filename": "photo.jpg"
+  },
+  "uploadPrefix": "library/44444444-4444-4444-8444-444444444444/",
+  "uploads": [
+    {
+      "path": "library/44444444-4444-4444-8444-444444444444/original.jpg",
+      "signedUrl": "https://project.supabase.co/storage/v1/object/upload/sign/content-library/library/44444444-4444-4444-8444-444444444444/original.jpg?token=test-upload-token-not-real",
+      "token": "test-upload-token-not-real"
+    },
+    {
+      "path": "library/44444444-4444-4444-8444-444444444444/original.png",
+      "signedUrl": "https://project.supabase.co/storage/v1/object/upload/sign/content-library/library/44444444-4444-4444-8444-444444444444/original.png?token=test-upload-token-not-real",
+      "token": "test-upload-token-not-real"
+    },
+    {
+      "path": "library/44444444-4444-4444-8444-444444444444/social.jpg",
+      "signedUrl": "https://project.supabase.co/storage/v1/object/upload/sign/content-library/library/44444444-4444-4444-8444-444444444444/social.jpg?token=test-upload-token-not-real",
+      "token": "test-upload-token-not-real"
+    },
+    {
+      "path": "library/44444444-4444-4444-8444-444444444444/email.jpg",
+      "signedUrl": "https://project.supabase.co/storage/v1/object/upload/sign/content-library/library/44444444-4444-4444-8444-444444444444/email.jpg?token=test-upload-token-not-real",
+      "token": "test-upload-token-not-real"
+    },
+    {
+      "path": "library/44444444-4444-4444-8444-444444444444/email.png",
+      "signedUrl": "https://project.supabase.co/storage/v1/object/upload/sign/content-library/library/44444444-4444-4444-8444-444444444444/email.png?token=test-upload-token-not-real",
+      "token": "test-upload-token-not-real"
+    }
+  ],
+  "maxDimension": 2048
+}

@@ -1,0 +1,97 @@
+{
+  "$comment": [
+    "Shared contract for composing a post's single blob of text.",
+    "",
+    "Two implementations exist and must agree: engine `compose_post_text` in",
+    "services/content-engine/app/social/rules.py, which is the text actually posted,",
+    "and the CRM's TypeScript `composePostText`, which backs preview and Copy",
+    "button. They are hand-mirrored across languages, so nothing but a shared",
+    "fixture stops them drifting — each suite asserting its own hardcoded",
+    "strings would let one side change and both stay green, and the first",
+    "symptom would be a copied post that differs from the published one.",
+    "",
+    "Both suites iterate every case below. Add cases here, not in one suite.",
+    "The database stores hashtags without '#'; both implementations add it when missing."
+  ],
+  "cases": [
+    {
+      "name": "body, call to action and hashtags, in that order",
+      "body": "Join our spring workshop.",
+      "call_to_action": "Save your seat.",
+      "hashtags": [
+        "#AI4L",
+        "#Workshops"
+      ],
+      "expected": "Join our spring workshop.\n\nSave your seat.\n\n#AI4L #Workshops"
+    },
+    {
+      "name": "no call to action",
+      "body": "Join our spring workshop.",
+      "call_to_action": null,
+      "hashtags": [
+        "#AI4L"
+      ],
+      "expected": "Join our spring workshop.\n\n#AI4L"
+    },
+    {
+      "name": "no hashtags",
+      "body": "Join our spring workshop.",
+      "call_to_action": "Save your seat.",
+      "hashtags": [],
+      "expected": "Join our spring workshop.\n\nSave your seat."
+    },
+    {
+      "name": "blank hashtag entries are dropped, not emitted as spaces",
+      "body": "Join us.",
+      "call_to_action": null,
+      "hashtags": [
+        "#AI4L",
+        "  ",
+        ""
+      ],
+      "expected": "Join us.\n\n#AI4L"
+    },
+    {
+      "name": "surrounding whitespace is trimmed from every section",
+      "body": "  Join us.  ",
+      "call_to_action": "  Go.  ",
+      "hashtags": [
+        "  #AI4L  "
+      ],
+      "expected": "Join us.\n\nGo.\n\n#AI4L"
+    },
+    {
+      "name": "an empty call to action is treated as absent",
+      "body": "Join us.",
+      "call_to_action": "   ",
+      "hashtags": [],
+      "expected": "Join us."
+    },
+    {
+      "name": "nothing to say produces nothing",
+      "body": "",
+      "call_to_action": null,
+      "hashtags": [],
+      "expected": ""
+    },
+    {
+      "name": "blank lines inside the body survive untouched",
+      "body": "Line one.\n\nLine two.",
+      "call_to_action": "Go.",
+      "hashtags": [],
+      "expected": "Line one.\n\nLine two.\n\nGo."
+    },
+    {
+      "name": "hashtags stored without '#' get one; ones that have it keep a single '#'",
+      "body": "Join us.",
+      "call_to_action": null,
+      "hashtags": [
+        "AI4L",
+        "#Workshops",
+        "  automation  ",
+        ""
+      ],
+      "expected": "Join us.\n\n#AI4L #Workshops #automation"
+    }
+  ]
+}

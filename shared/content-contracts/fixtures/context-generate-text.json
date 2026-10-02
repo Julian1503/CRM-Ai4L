@@ -1,0 +1,96 @@
+{
+  "kind": "generate_text",
+  "brand": {
+    "id": "77777777-7777-4777-8777-777777777777",
+    "slug": "ai4l",
+    "name": "AI4L",
+    "tone": "clear, practical and warm",
+    "audience": "small-business owners",
+    "region": "Spain",
+    "approvedFacts": [
+      {
+        "id": "fact-1",
+        "text": "Workshops run online every month.",
+        "source": "brand profile"
+      }
+    ],
+    "channelRules": {
+      "linkedin": {
+        "cta": "Book a call.",
+        "structure": "hook + insight + call to action"
+      },
+      "email": {
+        "cta": "Reserve a place"
+      }
+    },
+    "hashtagSeeds": [
+      "AI4L",
+      "Automation"
+    ],
+    "imageDirection": "bright editorial photography, natural light",
+    "allowedLinkOrigins": [
+      "https://ai4l.example"
+    ]
+  },
+  "input": {
+    "itemId": "33333333-3333-4333-8333-333333333333",
+    "channels": [
+      "linkedin",
+      "email",
+      "facebook"
+    ],
+    "stylesPerChannel": 2,
+    "brief": {
+      "topic": "Automating invoices",
+      "audience": "accountants",
+      "objective": "workshop sign-ups",
+      "notes": "Mention the free first session.",
+      "referenceUrl": "https://ai4l.example/workshops",
+      "sourceFacts": [
+        "The first session is free."
+      ]
+    }
+  },
+  "baseRevision": {
+    "body": "Previous draft about invoices.",
+    "hashtags": [
+      "#AI4L"
+    ],
+    "callToAction": "Book a call.",
+    "linkUrl": null,
+    "fields": {},
+    "assets": [
+      {
+        "assetId": "44444444-4444-4444-8444-444444444444",
+        "alt": "A laptop on a desk",
+        "order": 0
+      }
+    ]
+  },
+  "platformLimits": {
+    "facebook": {
+      "maxChars": 63206,
+      "maxHashtags": 100,
+      "maxImages": 10,
+      "requiresImage": false
+    },
+    "instagram": {
+      "maxChars": 2200,
+      "maxHashtags": 30,
+      "maxImages": 10,
+      "requiresImage": true
+    },
+    "linkedin": {
+      "maxChars": 3000,
+      "maxHashtags": 100,
+      "maxImages": 20,
+      "requiresImage": false
+    },
+    "email": {
+      "maxChars": 1200,
+      "maxHashtags": 0,
+      "maxImages": 1,
+      "requiresImage": false
+    }
+  }
+}
