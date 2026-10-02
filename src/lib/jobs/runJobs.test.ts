@@ -26,9 +26,12 @@ function progress(pending: number, claimed = 10) {
   }
 }
 
-function setup(sending: Array<{ id: string }> = []) {
+function setup(sending: Array<{ id: string; content_snapshot_id?: string | null }> = []) {
   const campaigns = createQueryBuilderMock({ data: sending, error: null })
-  return { db: createDbMock(campaigns) as never, campaigns }
+  // Parked Calendly events: none, so step 3 reads and moves on.
+  const reconciliation = createQueryBuilderMock({ data: [], error: null })
+  const db = createDbMock((table: string) => (table === 'campaigns' ? campaigns : reconciliation))
+  return { db: db as never, campaigns }
 }
 
 describe('runJobs', () => {
@@ -66,13 +69,46 @@ describe('runJobs', () => {
     expect(mockAdvance).toHaveBeenCalledTimes(1)
   })
 
-  it('does not attempt sends without provider credentials or an app origin', async () => {
+  it('recovers expired Content Studio leases once per run, after the other priorities', async () => {
+    const { db } = setup()
+    const rpc = (db as unknown as { rpc: jest.Mock }).rpc
+    rpc.mockImplementation(async (name: string) => (name === 'recover_content_jobs' ? { data: 2, error: null } : { data: null, error: null }))
+
+    const report = await runJobs({ db, credentials, baseUrl: 'https://crm', preferencesOrigin: null, budgetMs: 60_000 })
+
+    expect(rpc.mock.calls.filter(([name]) => name === 'recover_content_jobs')).toHaveLength(1)
+    expect(report.content).toEqual({ recovered: 2 })
+  })
+
+  it('surfaces a failed content lease recovery instead of swallowing it', async () => {
+    const { db } = setup()
+    const rpc = (db as unknown as { rpc: jest.Mock }).rpc
+    rpc.mockImplementation(async (name: string) =>
+      name === 'recover_content_jobs' ? { data: null, error: { message: 'boom' } } : { data: null, error: null },
+    )
+
+    await expect(runJobs({ db, credentials, baseUrl: 'https://crm', preferencesOrigin: null, budgetMs: 60_000 })).rejects.toThrow(
+      'Could not recover content jobs: boom',
+    )
+  })
+
+  it('does not attempt sends without provider credentials', async () => {
     const { db, campaigns } = setup([{ id: 'camp-1' }])
 
-    await runJobs({ db, credentials: null, baseUrl: null, preferencesOrigin: null, budgetMs: 60_000 })
+    await runJobs({ db, credentials: null, baseUrl: 'https://crm', preferencesOrigin: null, budgetMs: 60_000 })
 
     expect(campaigns.calls).toHaveLength(0)
     expect(mockAdvance).not.toHaveBeenCalled()
+  })
+
+  it('without an app origin, sends only Studio campaigns (their CTA may not book)', async () => {
+    mockAdvance.mockResolvedValue(progress(0))
+    const { db } = setup([{ id: 'legacy-1', content_snapshot_id: null }, { id: 'studio-1', content_snapshot_id: 'snap-1' }])
+
+    await runJobs({ db, credentials, baseUrl: null, preferencesOrigin: null, budgetMs: 60_000 })
+
+    expect(mockAdvance).toHaveBeenCalledTimes(1)
+    expect(mockAdvance).toHaveBeenCalledWith(expect.anything(), 'studio-1', expect.objectContaining({ baseUrl: null }))
   })
 
   it('returns when the budget is spent and says so', async () => {

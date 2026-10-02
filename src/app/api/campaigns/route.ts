@@ -10,9 +10,9 @@ import {
   serverError,
 } from '@/lib/api/responses'
 import type { CampaignStatus, ConsentStream } from '@/lib/db/types'
-import { isArchiveRuleError } from '@/lib/lifecycle/lifecycle'
 import { CAMPAIGN_TRANSITIONS } from '@/lib/marketing/campaignStatus'
 import { parseConsentStream } from '@/lib/marketing/consentStream'
+import { createCampaign } from '@/lib/marketing/createCampaign'
 import { readCampaignSendSummaries } from '@/lib/marketing/sendStatus'
 import { buildPageMeta, getPageRange, readPageParams } from '@/lib/pagination'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
@@ -80,17 +80,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 /**
- * Creates a campaign as a draft.
+ * Creates a campaign as a draft, through the shared `createCampaign` service.
  *
  * Status is never accepted from the caller — the database trigger rejects any insert
  * that is not `draft`, and the approval gate is the only way forward.
  *
- * The consent stream comes from the chosen template, read here rather than trusted from
- * the client: the template *is* the stream, and a client that sent a course template
- * with `newsletter` would otherwise spend the wrong consent. With no template (an
- * automation id typed by hand) the caller must name the stream — there is nothing else
- * to take it from, and falling back to the newsletter is how every campaign used to end
- * up filed there.
+ * The consent stream comes from the chosen template, read there rather than trusted from
+ * the client: the template *is* the stream. With no template (an automation id typed by
+ * hand) the caller must name the stream. Merge fields are checked against the
+ * template's contract: reserved fields and unknown keys are refused.
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const guard = await requireSessionOr401()
@@ -108,15 +106,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return badRequest('A campaign name is required.')
   }
 
-  const mergeFields =
-    typeof body.mergeFields === 'object' && body.mergeFields !== null
-      ? Object.fromEntries(
-          Object.entries(body.mergeFields as Record<string, unknown>)
-            .filter(([, value]) => typeof value === 'string')
-            .map(([key, value]) => [key, String(value)])
-        )
-      : {}
-
   const templateId = typeof body.templateId === 'string' ? body.templateId.trim() : ''
   const requestedStream = parseConsentStream(body.consentStream)
 
@@ -127,64 +116,30 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     const db = await createSupabaseServerClient()
 
-    let source: {
-      templateId: string | null
-      automationId: string | null
-      stream: ConsentStream
+    const outcome = await createCampaign(db, {
+      name,
+      segmentId: typeof body.segmentId === 'string' ? body.segmentId : null,
+      source: templateId
+        ? { kind: 'template', templateId }
+        : {
+            kind: 'manual',
+            automationId: typeof body.providerAutomationId === 'string' ? body.providerAutomationId.trim() : null,
+            // Checked above: without a template the stream was named explicitly.
+            stream: requestedStream as ConsentStream,
+          },
+      mergeFields:
+        typeof body.mergeFields === 'object' && body.mergeFields !== null && !Array.isArray(body.mergeFields)
+          ? (body.mergeFields as Record<string, unknown>)
+          : undefined,
+      subject: typeof body.subject === 'string' ? body.subject.trim() : null,
+      notes: typeof body.notes === 'string' ? body.notes.trim() : null,
+    })
+
+    if (!outcome.ok) {
+      return outcome.reason === 'bad_request' ? badRequest(outcome.message) : conflict(outcome.message)
     }
 
-    if (templateId) {
-      const { data: template, error: templateError } = await db
-        .from('campaign_templates')
-        .select('id, provider_automation_id, consent_stream, archived_at')
-        .eq('id', templateId)
-        .maybeSingle()
-
-      if (templateError) throw new Error(templateError.message)
-
-      if (!template || template.archived_at) {
-        return badRequest('That template does not exist or has been archived.')
-      }
-
-      source = {
-        templateId: template.id,
-        automationId: template.provider_automation_id,
-        stream: template.consent_stream,
-      }
-    } else {
-      source = {
-        templateId: null,
-        automationId:
-          typeof body.providerAutomationId === 'string'
-            ? body.providerAutomationId.trim()
-            : null,
-        // Checked above: without a template the stream was named explicitly.
-        stream: requestedStream as ConsentStream,
-      }
-    }
-
-    const { data, error } = await db
-      .from('campaigns')
-      .insert({
-        name,
-        segment_id: typeof body.segmentId === 'string' ? body.segmentId : null,
-        template_id: source.templateId,
-        provider_automation_id: source.automationId,
-        subject: typeof body.subject === 'string' ? body.subject.trim() : null,
-        notes: typeof body.notes === 'string' ? body.notes.trim() : null,
-        // Frozen on the campaign rather than read from its template at send time: a
-        // template that is later re-pointed must not change who a campaign was allowed
-        // to reach.
-        consent_stream: source.stream,
-        merge_fields: mergeFields,
-      })
-      .select('*')
-      .single()
-
-    if (isArchiveRuleError(error)) return conflict(error?.message ?? 'That segment is archived.')
-    if (error) throw new Error(error.message)
-
-    return ok({ campaign: data })
+    return ok({ campaign: outcome.campaign })
   } catch (error) {
     return serverError(error, 'Could not create campaign.')
   }

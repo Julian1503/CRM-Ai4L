@@ -6,6 +6,7 @@ import { generateCampaignCopy, type GenerationUsage, type MessagesApi } from './
 import type { ScheduleBrief } from './prompt'
 import { parseSegmentCriteria } from './segmentCriteria'
 import { measureSegmentAudience } from './segments'
+import { resolveContract, type TemplateContract } from './templateContracts'
 
 /**
  * Writes copy for one campaign and stores it.
@@ -40,7 +41,7 @@ export async function generateForCampaign(
   const { data: campaign, error: loadError } = await db
     .from('campaigns')
     .select(
-      'id, name, status, notes, segment_id, consent_stream, segment:segments(name, description, definition)'
+      'id, name, status, notes, segment_id, consent_stream, template_id, content_snapshot_id, segment:segments(name, description, definition)'
     )
     .eq('id', campaignId)
     .maybeSingle()
@@ -55,6 +56,25 @@ export async function generateForCampaign(
       ok: false,
       reason: 'conflict',
       message: `A campaign in "${campaign.status}" cannot be rewritten. Move it back to draft first.`,
+    }
+  }
+
+  // A Studio email's copy is its snapshot; rewriting it here would bypass the Studio's
+  // review and the snapshot hash the approval binds to.
+  if (campaign.content_snapshot_id) {
+    return {
+      ok: false,
+      reason: 'conflict',
+      message: "This campaign's content comes from the Content Studio. Edit it there and create a new email.",
+    }
+  }
+
+  const contract = await loadContract(db, campaign.template_id)
+  if (contract.delivery !== 'legacy') {
+    return {
+      ok: false,
+      reason: 'conflict',
+      message: 'This template takes its content from the Content Studio, so the CRM does not write its copy.',
     }
   }
 
@@ -111,7 +131,7 @@ export async function generateForCampaign(
       status: filters.status,
       search: filters.q,
     },
-  })
+  }, { contract })
 
   if (!result.ok) throw new Error(result.error)
 
@@ -142,6 +162,20 @@ export async function generateForCampaign(
     generation: { attempts: result.attempts, usage: result.usage },
     audience: { size: audience.total, truncated: audience.truncated },
   }
+}
+
+/** The template's contract; no template means the built-in legacy-v1. */
+async function loadContract(db: SupabaseClient<Database>, templateId: string | null): Promise<TemplateContract> {
+  if (!templateId) return resolveContract(null)
+
+  const { data, error } = await db
+    .from('campaign_templates')
+    .select('contract_id, contract_version')
+    .eq('id', templateId)
+    .maybeSingle()
+
+  if (error) throw new Error(error.message)
+  return resolveContract(data)
 }
 
 async function nameOf(

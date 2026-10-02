@@ -9,7 +9,14 @@ import { join, relative, sep } from 'node:path'
 // deploy-time data breach, not a runtime failure, so it is asserted structurally.
 
 const SRC_ROOT = join(process.cwd(), 'src')
-const SERVER_ONLY_ENV = ['SUPABASE_SERVICE_ROLE_KEY', 'STRIPE_SECRET_KEY', 'ANTHROPIC_API_KEY']
+const SERVER_ONLY_ENV = [
+  'SUPABASE_SERVICE_ROLE_KEY',
+  'STRIPE_SECRET_KEY',
+  'ANTHROPIC_API_KEY',
+  'CONTENT_WORKER_SECRET',
+  'CONTENT_ENGINE_SECRET',
+  'CONTENT_TOKEN_ENCRYPTION_KEY',
+]
 
 function collectSourceFiles(dir: string, acc: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {

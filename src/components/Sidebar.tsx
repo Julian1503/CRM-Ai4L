@@ -7,7 +7,7 @@ import { useGSAP } from '@gsap/react';
 
 import { prefersReducedMotion } from '@/lib/motion';
 
-export const ACTIVE_VIEWS = ['contacts', 'archive', 'campaigns', 'bookings', 'imports', 'integrations', 'settings'] as const;
+export const ACTIVE_VIEWS = ['contacts', 'archive', 'campaigns', 'content', 'bookings', 'imports', 'integrations', 'settings'] as const;
 
 export type ActiveView = (typeof ACTIVE_VIEWS)[number];
 
@@ -64,6 +64,16 @@ export default function Sidebar({ currentView, onViewChange, badges = {} }: Side
       ),
     },
     {
+      id: 'content' as ActiveView,
+      label: 'Content Studio',
+      icon: (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 20h9" />
+          <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+        </svg>
+      ),
+    },
+    {
       id: 'bookings' as ActiveView,
       label: 'Bookings',
       icon: (
@@ -109,7 +119,7 @@ export default function Sidebar({ currentView, onViewChange, badges = {} }: Side
     },
   ];
   const mobileSecondaryItems = navItems.filter((item) =>
-    ['archive', 'imports', 'integrations', 'settings'].includes(item.id)
+    ['archive', 'content', 'imports', 'integrations', 'settings'].includes(item.id)
   );
 
   useGSAP(() => {

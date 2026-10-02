@@ -1,6 +1,6 @@
 import type { ConsentStream } from '@/lib/db/types'
 
-import { CAMPAIGN_COPY_FIELDS } from './mergeFields'
+import { generatedSlots, LEGACY_V1, type CtaMode, type TemplateContract } from './templateContracts'
 
 /**
  * Prompt construction for campaign copy generation.
@@ -41,6 +41,22 @@ export const BOOKING_CTA_REQUIREMENT = `Every campaign drives one action: bookin
 time, so write the label and the surrounding copy, never a URL. The consultation is
 genuinely free — say so once, plainly, and do not dress it up as a limited offer or a
 discount that expires.`
+
+/** The action for an email whose button links to an approved page, not a booking. */
+export const EXTERNAL_CTA_REQUIREMENT = `The email has one button that links to a page chosen
+by the operator. Write its label and the copy that earns the click, never a URL. Do not
+promise a consultation, a booking or a discount unless the notes say so.`
+
+/** The action for an email with no button at all. */
+export const NO_CTA_REQUIREMENT = `This email has no button. It informs; it does not ask
+the reader to book or click anything. Do not write a call to action or a URL.`
+
+/** What the copy must drive, by the template's call-to-action mode. */
+export function ctaRequirement(ctaMode: CtaMode): string {
+  if (ctaMode === 'external_url') return EXTERNAL_CTA_REQUIREMENT
+  if (ctaMode === 'none') return NO_CTA_REQUIREMENT
+  return BOOKING_CTA_REQUIREMENT
+}
 
 /**
  * Australian Spam Act 2003 framing.
@@ -160,8 +176,12 @@ export function redactPii(text: string): string {
 /**
  * The system prompt. Stable across campaigns, which also makes it the cacheable prefix.
  */
-export function buildSystemPrompt(brandVoice: string = DEFAULT_BRAND_VOICE): string {
-  const slots = CAMPAIGN_COPY_FIELDS.map(
+export function buildSystemPrompt(
+  brandVoice: string = DEFAULT_BRAND_VOICE,
+  contract: TemplateContract = LEGACY_V1,
+  ctaMode: CtaMode = contract.ctaModes[0]
+): string {
+  const slots = generatedSlots(contract, ctaMode).map(
     (field) => `- ${field.tag} (max ${field.maxLength} characters): ${field.description}`
   ).join('\n')
 
@@ -173,7 +193,7 @@ export function buildSystemPrompt(brandVoice: string = DEFAULT_BRAND_VOICE): str
     brandVoice.trim(),
     '',
     'THE ACTION',
-    BOOKING_CTA_REQUIREMENT.trim(),
+    ctaRequirement(ctaMode).trim(),
     '',
     'COMPLIANCE',
     COMPLIANCE_REQUIREMENT.trim(),

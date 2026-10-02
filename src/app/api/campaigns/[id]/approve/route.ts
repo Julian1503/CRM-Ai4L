@@ -11,6 +11,8 @@ import {
   serverError,
 } from '@/lib/api/responses'
 import { isArchiveRuleError } from '@/lib/lifecycle/lifecycle'
+import { isEmailDynamicEnabled } from '@/lib/content-studio/flags'
+import { assessContent, ContentResolutionError, resolveSendContent } from '@/lib/marketing/campaignContent'
 import { checkApprovable } from '@/lib/marketing/campaignStatus'
 import { countCampaignAudience } from '@/lib/marketing/runs'
 import { SEGMENT_MEMBER_CAP } from '@/lib/marketing/segments'
@@ -58,7 +60,7 @@ export async function POST(
 
     const { data: campaign, error: loadError } = await db
       .from('campaigns')
-      .select('id, status, revision, consent_stream, provider_automation_id, segment_id, archived_at, removed_at')
+      .select('id, status, revision, consent_stream, provider_automation_id, segment_id, archived_at, removed_at, merge_fields, content_snapshot_id')
       .eq('id', id)
       .maybeSingle()
 
@@ -66,10 +68,25 @@ export async function POST(
     if (!campaign || campaign.removed_at) return notFound('Campaign not found.')
     if (campaign.archived_at) return conflict('This campaign is archived. Restore it before approving it.')
 
+    // A Studio email is approved as its snapshot: re-validated against its contract,
+    // and refused while its delivery mode is switched off. Approving the source post
+    // never authorised this; this is the email's own gate.
+    let contentProblems: string[] = []
+    if (campaign.content_snapshot_id) {
+      try {
+        const content = await resolveSendContent(db, campaign)
+        contentProblems = assessContent(content, { dynamicEnabled: isEmailDynamicEnabled() })
+      } catch (error) {
+        if (!(error instanceof ContentResolutionError)) throw error
+        contentProblems = [error.message]
+      }
+    }
+
     const check = checkApprovable({
       status: campaign.status,
       providerAutomationId: campaign.provider_automation_id,
       segmentId: campaign.segment_id,
+      contentProblems,
     })
 
     if (!check.ok) {

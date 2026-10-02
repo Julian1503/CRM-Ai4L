@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from 'react'
 import LifecycleActions from '@/components/ui/LifecycleActions'
 import type { CampaignTemplateRow, ConsentStream } from '@/lib/db/types'
 import { CONSENT_STREAM_LABELS, parseConsentStream } from '@/lib/marketing/consentStream'
+import { findContract, LEGACY_V1, TEMPLATE_CONTRACTS } from '@/lib/marketing/templateContracts'
 
 import { describeAutomationCheck, type AutomationStatus } from './AutomationConnectionField'
 import styles from './marketing.module.css'
@@ -23,7 +24,14 @@ import StreamPill from './StreamPill'
 type Template = Pick<
   CampaignTemplateRow,
   'id' | 'name' | 'description' | 'provider_automation_id' | 'consent_stream' | 'archived_at'
->
+> &
+  Partial<Pick<CampaignTemplateRow, 'contract_id' | 'contract_version'>>
+
+/** How a template's contract reads in the list. Rows from before contracts are legacy-v1. */
+export function contractLabel(template: Pick<Template, 'contract_id' | 'contract_version'>): string {
+  const contract = findContract(template.contract_id, template.contract_version)
+  return contract ? `${contract.id} · ${contract.label}` : `${template.contract_id ?? 'unknown'} (unknown contract)`
+}
 
 async function readError(response: Response): Promise<string> {
   const body = await response.json().catch(() => ({}))
@@ -41,6 +49,8 @@ export default function EmailTemplateRegistry() {
   const [automationId, setAutomationId] = useState('')
   // Never pre-selected: every campaign built on the template inherits it.
   const [stream, setStream] = useState<ConsentStream | ''>('')
+  // The HTML contract the automation was built for. Fixed once a campaign uses it.
+  const [contractId, setContractId] = useState<string>(LEGACY_V1.id)
 
   const check = useCallback(async (ids: string[]) => {
     const wanted = [...new Set(ids.map((id) => id.trim()).filter((id) => id !== ''))]
@@ -128,6 +138,7 @@ export default function EmailTemplateRegistry() {
           description,
           providerAutomationId: automationId,
           consentStream: stream,
+          contractId,
         }),
       })
 
@@ -137,6 +148,7 @@ export default function EmailTemplateRegistry() {
       setDescription('')
       setAutomationId('')
       setStream('')
+      setContractId(LEGACY_V1.id)
       await load()
     } catch (createError) {
       setError(
@@ -233,6 +245,25 @@ export default function EmailTemplateRegistry() {
             Campaigns built on this template only reach contacts who agreed to this stream.
           </span>
         </label>
+        <label className={styles.field}>
+          <span className={styles.label}>Template contract</span>
+          <select
+            className={styles.input}
+            value={contractId}
+            onChange={(event) => setContractId(event.target.value)}
+            data-testid="template-contract"
+          >
+            {TEMPLATE_CONTRACTS.map((contract) => (
+              <option key={contract.id} value={contract.id}>
+                {contract.label}
+              </option>
+            ))}
+          </select>
+          <span className={styles.fieldHint}>
+            {findContract(contractId)?.description} It cannot change once a campaign uses the template;
+            register a new template for a new version.
+          </span>
+        </label>
       </div>
 
       <div className={styles.templateActions}>
@@ -276,6 +307,9 @@ export default function EmailTemplateRegistry() {
                   {template.description ? `${template.description} · ` : ''}
                   {template.provider_automation_id}
                   {template.archived_at && ' · archived'}
+                </span>
+                <span className={styles.itemMeta} data-testid={`template-contract-${template.id}`}>
+                  Contract: {contractLabel(template)}
                 </span>
                 {message && !template.archived_at && (
                   <span

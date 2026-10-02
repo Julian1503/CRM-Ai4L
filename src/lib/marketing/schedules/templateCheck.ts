@@ -2,6 +2,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { Database } from '@/lib/db/types'
 
+import { findContract } from '../templateContracts'
+
 /**
  * Why a template cannot carry a newsletter schedule, or null when it can.
  *
@@ -14,7 +16,7 @@ export async function newsletterTemplateProblem(
 ): Promise<string | null> {
   const { data, error } = await db
     .from('campaign_templates')
-    .select('consent_stream, archived_at, provider_automation_id')
+    .select('consent_stream, archived_at, provider_automation_id, contract_id, contract_version')
     .eq('id', templateId)
     .maybeSingle()
 
@@ -26,6 +28,9 @@ export async function newsletterTemplateProblem(
   }
   if (!data.provider_automation_id?.trim()) {
     return 'That template has no EmailOctopus automation, so it could never send.'
+  }
+  if (findContract(data.contract_id, data.contract_version)?.delivery !== 'legacy') {
+    return 'Recurring emails are written by the CRM, so they need a classic (legacy-v1) template. Content Studio templates take their content from the Studio.'
   }
 
   return null

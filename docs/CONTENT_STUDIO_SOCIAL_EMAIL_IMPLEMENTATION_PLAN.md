@@ -1,7 +1,7 @@
 # Content Studio: redes sociales y EmailOctopus en CRM AI4L
 
 Fecha del análisis: 29 de septiembre de 2026.
-Estado: propuesta de implementación basada en ambos repositorios. No implementada.
+Estado (02-10-2026): fases 0 a 3A/3B implementadas y verificadas con mocks; fases 4-5 (validación con proveedores reales, piloto) pendientes de credenciales y autorización. Decisiones y contratos: `CONTENT_STUDIO_CONTRACTS.md`; operación: `CONTENT_STUDIO_OPERATIONS.md`; pendientes externos: `CONTENT_STUDIO_PROVIDER_VALIDATION.md`.
 
 ## 1. Respuesta y recomendación
 

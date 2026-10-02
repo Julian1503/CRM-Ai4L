@@ -101,13 +101,17 @@ jobs:
       - run: npm ci
 
       - name: Start local Supabase (replays all migrations from empty)
-        run: supabase start -x studio,imgproxy,vector,logflare,inbucket,realtime,storage-api,edge-runtime,supavisor,postgres-meta
+        run: supabase start -x studio,imgproxy,vector,logflare,inbucket,realtime,edge-runtime,supavisor,postgres-meta
 
       - name: Export test-stack environment
         run: |
           supabase status -o env             --override-name api.url=NEXT_PUBLIC_SUPABASE_URL             --override-name auth.anon_key=NEXT_PUBLIC_SUPABASE_ANON_KEY             --override-name auth.service_role_key=SUPABASE_SERVICE_ROLE_KEY             | grep -E '^(NEXT_PUBLIC_SUPABASE_URL|NEXT_PUBLIC_SUPABASE_ANON_KEY|SUPABASE_SERVICE_ROLE_KEY)='             | sed 's/"//g' >> "$GITHUB_ENV"
           echo "E2E_PASSWORD=$(openssl rand -hex 16)" >> "$GITHUB_ENV"
           echo "PREFERENCES_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          # Content Studio: enabled for the E2E build; the fake worker in src/e2e signs with
+          # the same throwaway secret. No real content engine or provider is involved.
+          echo "CONTENT_STUDIO_ENABLED=true" >> "$GITHUB_ENV"
+          echo "CONTENT_WORKER_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
           echo "E2E environment: local Supabase stack, revision ${GITHUB_SHA}"
 
       - name: Database verification suites
@@ -123,6 +127,8 @@ jobs:
         env:
           SUPABASE_INTEGRATION_URL: ${{ env.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_INTEGRATION_SERVICE_KEY: ${{ env.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_INTEGRATION_ANON_KEY: ${{ env.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          SUPABASE_INTEGRATION_STORAGE: 'true'
 
       - name: Production build against the test stack
         run: npm run build
@@ -145,3 +151,31 @@ jobs:
           name: playwright-report-integration
           path: playwright-report/
           retention-days: 7
+
+  # The Content Studio engine (services/content-engine): tests run on mocks only —
+  # LLM_MOCK and PUBLISH_MOCK default to true and no provider credential exists here.
+  content-engine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: services/content-engine
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          cache: pip
+          cache-dependency-path: services/content-engine/pyproject.toml
+
+      - run: pip install -e ".[dev]"
+
+      - name: Lint
+        run: ruff check app tests && ruff format --check app tests
+
+      - name: Types
+        run: mypy app
+
+      - name: Tests (including shared contract fixtures)
+        run: pytest -q

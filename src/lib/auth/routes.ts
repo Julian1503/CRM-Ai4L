@@ -53,6 +53,25 @@ export const WEBHOOK_PATHS = [
  */
 export const CRON_PATHS = ['/api/cron/newsletters', '/api/cron/jobs'] as const
 
+/**
+ * The content-engine worker protocol (docs/CONTENT_STUDIO_CONTRACTS.md §3). The worker is
+ * a separate service with no session; each handler verifies an HMAC signature over the
+ * timestamp, method, path and body (src/lib/content-studio/workerAuth.ts), and every
+ * mutation also needs the job's claim token.
+ *
+ * Exact allowlist, fail-closed: the user-facing /api/content-studio routes stay behind
+ * the session gate, and no prefix under /api/internal is exempted wholesale.
+ */
+export const INTERNAL_WORKER_PATHS = [
+  '/api/internal/content-worker/v1/claim',
+  '/api/internal/content-worker/v1/heartbeat',
+  '/api/internal/content-worker/v1/context',
+  '/api/internal/content-worker/v1/checkpoint',
+  '/api/internal/content-worker/v1/begin-dispatch',
+  '/api/internal/content-worker/v1/complete',
+  '/api/internal/content-worker/v1/fail',
+] as const
+
 function normalise(pathname: string): string {
   // Treat '/x/' and '/x' identically, but keep the root as '/'.
   return pathname.length > 1 && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname
@@ -77,6 +96,13 @@ export function isCronPath(pathname: string): boolean {
   const path = normalise(pathname)
 
   return CRON_PATHS.some((cronPath) => path === cronPath)
+}
+
+/** True only for an exact content-worker protocol endpoint. */
+export function isInternalWorkerPath(pathname: string): boolean {
+  const path = normalise(pathname)
+
+  return INTERNAL_WORKER_PATHS.some((workerPath) => path === workerPath)
 }
 
 /** True for API routes, which should receive a 401 rather than a redirect. */

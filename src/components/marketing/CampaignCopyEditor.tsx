@@ -2,9 +2,11 @@
 
 import React, { useMemo, useState } from 'react'
 
-import { CAMPAIGN_COPY_FIELDS, type CampaignCopyField } from '@/lib/marketing/mergeFields'
+import type { CampaignCopyField } from '@/lib/marketing/mergeFields'
+import { LEGACY_V1, type TemplateContract } from '@/lib/marketing/templateContracts'
 
 import styles from './marketing.module.css'
+import StudioCampaignContent from './StudioCampaignContent'
 
 /**
  * The human gate on generated copy, laid out as the email it becomes.
@@ -48,6 +50,13 @@ export type CampaignCopyEditorProps = {
   revision?: number
   onSaved: (mergeFields: Record<string, string>, status?: string, revision?: number) => void
   onError: (message: string) => void
+  /**
+   * The contract the copy is written for. Hand-written campaigns are legacy-v1; the
+   * composer below is laid out for it, and any other text slot lands in the tail list.
+   */
+  contract?: TemplateContract
+  /** Set for a Content Studio email: its content is a read-only snapshot. */
+  snapshotId?: string | null
 }
 
 /** Merge tags the composer places by hand; anything else falls through to the tail. */
@@ -68,7 +77,14 @@ async function readError(response: Response): Promise<string> {
   return body.error || `Request failed (HTTP ${response.status})`
 }
 
-export default function CampaignCopyEditor({
+export default function CampaignCopyEditor(props: CampaignCopyEditorProps) {
+  // A Studio email is not edited here: its words, images and link are an approved-by-hash
+  // snapshot. It is shown read-only with a way back to the Studio.
+  if (props.snapshotId) return <StudioCampaignContent campaignId={props.campaignId} />
+  return <CopyComposer {...props} />
+}
+
+function CopyComposer({
   campaignId,
   campaignName,
   editable,
@@ -78,25 +94,30 @@ export default function CampaignCopyEditor({
   audienceSize,
   onSaved,
   onError,
+  contract = LEGACY_V1,
 }: CampaignCopyEditorProps) {
+  const copyFields: readonly CampaignCopyField[] = useMemo(
+    () => contract.slots.filter((slot) => slot.kind === 'text'),
+    [contract]
+  )
   const [draft, setDraft] = useState<Record<string, string>>(mergeFields)
   const [busy, setBusy] = useState<'generate' | 'save' | null>(null)
   const [generatedAt, setGeneratedAt] = useState<string | null>(null)
 
   const overruns = useMemo(
     () =>
-      CAMPAIGN_COPY_FIELDS.filter(
+      copyFields.filter(
         (field) => (draft[field.tag] ?? '').trim().length > field.maxLength
       ).map((field) => field.tag),
-    [draft]
+    [draft, copyFields]
   )
 
   const empties = useMemo(
     () =>
-      CAMPAIGN_COPY_FIELDS.filter((field) => !(draft[field.tag] ?? '').trim()).map(
+      copyFields.filter((field) => !(draft[field.tag] ?? '').trim()).map(
         (field) => field.tag
       ),
-    [draft]
+    [draft, copyFields]
   )
 
   const hasCopy = empties.length === 0
@@ -113,7 +134,7 @@ export default function CampaignCopyEditor({
    * no home. Rather than disappear from the only screen that can edit it, it lands in a
    * plain list under the message.
    */
-  const unslotted = CAMPAIGN_COPY_FIELDS.filter(
+  const unslotted = copyFields.filter(
     (field) => !SLOTTED_TAGS.includes(field.tag as (typeof SLOTTED_TAGS)[number])
   )
 
@@ -152,7 +173,7 @@ export default function CampaignCopyEditor({
 
     try {
       const trimmed: Record<string, string> = {}
-      for (const field of CAMPAIGN_COPY_FIELDS) {
+      for (const field of copyFields) {
         trimmed[field.tag] = (draft[field.tag] ?? '').trim()
       }
 
@@ -179,7 +200,7 @@ export default function CampaignCopyEditor({
     }
   }
 
-  const fieldByTag = new Map(CAMPAIGN_COPY_FIELDS.map((field) => [field.tag, field]))
+  const fieldByTag = new Map(copyFields.map((field) => [field.tag, field]))
 
   /**
    * One editable slot.

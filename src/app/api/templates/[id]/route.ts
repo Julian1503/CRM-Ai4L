@@ -20,6 +20,8 @@ import {
   type LifecycleAction,
 } from '@/lib/lifecycle/lifecycle'
 import { parseConsentStream } from '@/lib/marketing/consentStream'
+import { findContract } from '@/lib/marketing/templateContracts'
+import { slotsForContract } from '@/lib/marketing/templates'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 
 export const runtime = 'nodejs'
@@ -90,6 +92,18 @@ export async function PATCH(
     patch.consent_stream = consentStream
   }
 
+  // The database refuses this once any campaign uses the template (CRM06): its sent
+  // copy is only interpretable against the contract it was written for.
+  if (body.contractId !== undefined) {
+    const contract = findContract(typeof body.contractId === 'string' ? body.contractId : null, 1)
+
+    if (!contract) return badRequest('Unknown template contract.')
+
+    patch.contract_id = contract.id
+    patch.contract_version = contract.version
+    patch.slots = slotsForContract(contract)
+  }
+
   if (Object.keys(patch).length === 0) {
     return badRequest('Nothing to update.')
   }
@@ -110,6 +124,10 @@ export async function PATCH(
       .maybeSingle()
 
     if (error) {
+      if (error.code === 'CRM06') {
+        return conflict('This template is used by campaigns, so its contract cannot change. Register a new template for the new contract.')
+      }
+
       if (error.code === '23505') {
         return NextResponse.json(
           { error: `A template named "${patch.name}" already exists.` },

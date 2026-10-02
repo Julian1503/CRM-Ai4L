@@ -3,7 +3,10 @@ import type { NextResponse } from 'next/server'
 
 import { badRequest, conflict, notFound, ok, requireSessionOr401, serverError } from '@/lib/api/responses'
 import { isSendable } from '@/lib/marketing/campaignStatus'
-import { loadEmailOctopusStatus } from '@/lib/marketing/providers/credentials'
+import { isEmailDynamicEnabled } from '@/lib/content-studio/flags'
+import { ContentResolutionError, resolveSendContent } from '@/lib/marketing/campaignContent'
+import { loadEmailOctopusCredentials, loadEmailOctopusStatus } from '@/lib/marketing/providers/credentials'
+import { studioPreflight, type StudioPreflight } from '@/lib/marketing/studioPreflight'
 import { measureSegmentAudience, SEGMENT_MEMBER_CAP } from '@/lib/marketing/segments'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 
@@ -26,7 +29,7 @@ export async function GET(
     const db = await createSupabaseServerClient()
     const { data: campaign, error } = await db
       .from('campaigns')
-      .select('id, status, send_run, segment_id, provider_automation_id, consent_stream, segment:segments(definition)')
+      .select('id, status, send_run, segment_id, provider_automation_id, consent_stream, merge_fields, content_snapshot_id, segment:segments(definition)')
       .eq('id', id)
       .maybeSingle()
 
@@ -45,6 +48,23 @@ export async function GET(
     const segment = campaign.segment as unknown as { definition: Record<string, unknown> } | null
     if (!segment) return conflict('The campaign audience no longer exists.')
 
+    // Studio emails also check their snapshot, images, provider fields and CTA. Hand-
+    // written campaigns answer exactly as before.
+    let studio: StudioPreflight | null = null
+    if (campaign.content_snapshot_id) {
+      try {
+        studio = await studioPreflight(db, await resolveSendContent(db, campaign), {
+          dynamicEnabled: isEmailDynamicEnabled(),
+          credentials: await loadEmailOctopusCredentials(),
+        })
+      } catch (error) {
+        if (!(error instanceof ContentResolutionError)) throw error
+        return conflict(error.message)
+      }
+    }
+    const contentReady = !studio || studio.problems.length === 0
+    const extra = studio ? { studio } : {}
+
     // Once a run's audience is materialised, the send goes to that snapshot (minus anyone
     // who becomes ineligible), not to whatever the segment matches now.
     const { data: run, error: runError } = await db
@@ -56,7 +76,7 @@ export async function GET(
     if (runError) throw new Error(runError.message)
 
     if (run?.audience_status === 'prepared') {
-      return ok({ ready: run.prepared_count > 0, total: run.prepared_count, truncated: false, prepared: true })
+      return ok({ ready: run.prepared_count > 0 && contentReady, total: run.prepared_count, truncated: false, prepared: true, ...extra })
     }
 
     const members = await measureSegmentAudience(
@@ -66,11 +86,12 @@ export async function GET(
     )
     return ok({
       // Over the cap is refused outright rather than sent to the first N (audit H7).
-      ready: members.total > 0 && !members.truncated,
+      ready: members.total > 0 && !members.truncated && contentReady,
       total: members.total,
       truncated: members.truncated,
       limit: SEGMENT_MEMBER_CAP,
       prepared: false,
+      ...extra,
     })
   } catch (error) {
     return serverError(error, 'Could not run campaign preflight.')

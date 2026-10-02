@@ -18,6 +18,7 @@ import type { EmailOctopusCredentials } from '@/lib/marketing/providers/credenti
  *   2. notifications        booking confirmations, retried apart from payment (H10)
  *   3. booking reconciliation  Calendly events that matched nothing yet (M4)
  *   4. sending campaigns    a send no longer depends on a browser tab (audit H3)
+ *   5. content job leases   backstop for the Content Studio worker (plan §10)
  */
 
 export type JobsReport = {
@@ -25,6 +26,7 @@ export type JobsReport = {
   notifications: NotificationResult
   reconciliation: { retried: number; resolved: number }
   campaigns: Array<{ id: string; outcome: string; sent?: number; pending?: number }>
+  content: { recovered: number }
   stoppedForBudget: boolean
 }
 
@@ -54,6 +56,7 @@ export async function runJobs(options: JobsOptions): Promise<JobsReport> {
     notifications: { claimed: 0, sent: 0, skipped: 0, retried: 0 },
     reconciliation: { retried: 0, resolved: 0 },
     campaigns: [],
+    content: { recovered: 0 },
     stoppedForBudget: false,
   }
 
@@ -111,16 +114,19 @@ export async function runJobs(options: JobsOptions): Promise<JobsReport> {
   }
 
   // 4. Campaigns left sending — a closed tab, a crash, or a deploy mid-send.
-  if (options.credentials && options.baseUrl) {
+  // Without an app origin, only Studio campaigns are attempted: a hand-written campaign
+  // always books, and dispatch refuses a booking campaign without an origin anyway.
+  if (options.credentials) {
     const { data, error } = await options.db
       .from('campaigns')
-      .select('id')
+      .select('id, content_snapshot_id')
       .eq('status', 'sending')
       .order('started_at', { ascending: true, nullsFirst: true })
       .limit(MAX_CAMPAIGNS_PER_RUN)
     if (error) throw new Error(`Could not list sending campaigns: ${error.message}`)
 
-    for (const { id } of data ?? []) {
+    for (const { id, content_snapshot_id: snapshotId } of data ?? []) {
+      if (!options.baseUrl && !snapshotId) continue
       let hasMore = true
       while (hasMore && now() < deadline) {
         const outcome = await advanceCampaignSend(options.db, id, {
@@ -141,6 +147,16 @@ export async function runJobs(options: JobsOptions): Promise<JobsReport> {
         }
       }
     }
+  }
+
+  // 5. Content Studio leases. One bounded call per run: an expired lease goes back to the
+  //    queue before begin-dispatch and becomes 'uncertain' after it. The engine does this on
+  //    every claim; this is the backstop while the engine is down, so Operations still sees
+  //    stuck publications. Generation itself never runs here.
+  if (now() < deadline) {
+    const { data, error } = await options.db.rpc('recover_content_jobs')
+    if (error) throw new Error(`Could not recover content jobs: ${error.message}`)
+    report.content = { recovered: typeof data === 'number' ? data : 0 }
   }
 
   report.stoppedForBudget = now() >= deadline

@@ -154,6 +154,14 @@ monthly newsletter needs. Test it after deploying with
 `curl -H "Authorization: Bearer $CRON_SECRET" https://<host>/api/cron/newsletters` —
 a second call must not create a second campaign for the same day.
 
+#### Content Studio
+
+Optional and off by default. Variables, order of activation and rollback are in
+`docs/CONTENT_STUDIO_OPERATIONS.md`; the feature is checked by `npm run preflight` as
+`content-studio` and can be listed in `CRM_DISABLED_FEATURES`. It also needs the separate
+content engine service (`services/content-engine`), deployed with the same
+`CONTENT_WORKER_SECRET`.
+
 ### Do **not** set these on Vercel
 
 | Variable | Where it actually lives |

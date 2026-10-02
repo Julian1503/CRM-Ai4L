@@ -157,6 +157,12 @@ export type CampaignRow = {
   removed_by: string | null
   created_at: string
   updated_at: string
+  /** Studio email content (20261007010000). Null for hand-written campaigns. */
+  content_snapshot_id: string | null
+  /** Idempotency key of the Studio conversion that created this campaign. */
+  source_idempotency_key: string | null
+  /** The snapshot hash the approval applies to; dispatch requires it to still match. */
+  approved_content_hash: string | null
 }
 
 /** A manual segment membership decision. See 20260929000000_segment_control.sql. */
@@ -258,6 +264,9 @@ export type CampaignTemplateRow = {
   slots: TemplateSlot[]
   /** Which consent a campaign built on this template spends. */
   consent_stream: ConsentStream
+  /** Versioned slot contract (src/lib/marketing/templateContracts.ts); frozen once used. */
+  contract_id: string
+  contract_version: number
   brief: string | null
   /** Retired from the pickers, but kept: sent campaigns still reference it. */
   archived_at: string | null
@@ -310,6 +319,11 @@ export type CampaignRunRow = {
   prepared_count: number
   prepared_at: string | null
   created_at: string
+  /** Evidence stamped by the database from the campaign when the run is written. */
+  content_snapshot_id: string | null
+  content_hash: string | null
+  provider_automation_id: string | null
+  cta_mode: 'booking' | 'external_url' | 'none' | null
 }
 
 /** A recipient handed to a worker by claim_campaign_sends(). */
@@ -585,6 +599,10 @@ export type ContactConsentEventRow = {
 // (`select('*, organisation:organisations(name)')`) must declare them, or postgrest-js
 // resolves the embed to SelectQueryError instead of the joined row.
 // `npm run db:types` fills these in properly against the live schema.
+import type { ContentStudioFunctions, ContentStudioTables } from './contentStudioTypes'
+
+export type * from './contentStudioTypes'
+
 type TableDef<
   Row,
   Insert = Partial<Row>,
@@ -660,7 +678,7 @@ export interface Database {
       newsletter_topics: TableDef<NewsletterTopicRow>
       segment_overrides: TableDef<SegmentOverrideRow>
       bookings: TableDef<BookingRow>
-    }
+    } & ContentStudioTables
     Views: {
       /** contacts filtered to deleted_at IS NULL (security_invoker). */
       active_contacts: { Row: ContactRow; Relationships: [] }
@@ -769,7 +787,7 @@ export interface Database {
         Args: Record<string, never>
         Returns: import('@/lib/operations/types').OperationsSummary
       }
-    }
+    } & ContentStudioFunctions
     Enums: {
       contact_status: ContactStatus
       campaign_status: CampaignStatus

@@ -247,6 +247,7 @@ describe('runDueSchedules', () => {
     ['archived', { ...TEMPLATE, archived_at: '2026-09-01T00:00:00Z' }],
     ['a courses template', { ...TEMPLATE, consent_stream: 'programs' }],
     ['without an automation', { ...TEMPLATE, provider_automation_id: null }],
+    ['a Content Studio template', { ...TEMPLATE, contract_id: 'studio-static-v1', contract_version: 1 }],
   ])('refuses to draft on a template that is %s', async (_label, template) => {
     const { db, tables } = setup({ templates: [{ data: template, error: null }] })
 

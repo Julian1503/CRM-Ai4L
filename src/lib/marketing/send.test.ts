@@ -288,4 +288,68 @@ describe('executeCampaignSends', () => {
       expect(outcomes[0].status).toBe('pending')
     })
   })
+  describe('call-to-action modes (Content Studio emails)', () => {
+    it.each(['external_url', 'none'] as const)(
+      'a %s email never creates a booking nor writes BookingUrl, even with an app origin',
+      async (ctaMode) => {
+        const { db, rpc, outcomes } = ledger([{}, {}])
+        const { fake, setContactFields, triggerSend } = provider()
+
+        await executeCampaignSends(db, fake, campaign, {
+          bucket: fastBucket(),
+          baseUrl: 'https://crm.example.com',
+          content: { fields: { Headline: 'News', CtaUrl: 'https://ai4l.com.au/x' }, ctaMode },
+        })
+
+        expect(rpc.mock.calls.map(([fn]) => fn)).not.toContain('create_campaign_booking')
+        for (const [, fields] of setContactFields.mock.calls as unknown as [string, Record<string, string>][]) {
+          expect(fields).not.toHaveProperty(BOOKING_URL_MERGE_FIELD)
+          expect(fields.Headline).toBe('News')
+        }
+        expect(triggerSend).toHaveBeenCalledTimes(2)
+        expect(outcomes.map((row) => row.status)).toEqual(['sent', 'sent'])
+      }
+    )
+
+    it('a booking email still mints a link per recipient', async () => {
+      const { db, rpc } = ledger([{}])
+      const { fake, setContactFields } = provider()
+
+      await executeCampaignSends(db, fake, campaign, {
+        bucket: fastBucket(),
+        baseUrl: 'https://crm.example.com',
+        content: { fields: { Headline: 'Book' }, ctaMode: 'booking' },
+      })
+
+      expect(rpc).toHaveBeenCalledWith('create_campaign_booking', expect.anything())
+      const [, fields] = setContactFields.mock.calls[0] as unknown as [string, Record<string, string>]
+      expect(fields[BOOKING_URL_MERGE_FIELD]).toMatch(/\/book\//)
+    })
+
+    it('never forwards reserved fields stored in content', async () => {
+      const { db } = ledger([{}])
+      const { fake, setContactFields } = provider()
+
+      await executeCampaignSends(
+        db,
+        fake,
+        { ...campaign, merge_fields: { Headline: 'Hi', PrefsUrl: 'https://forged', BookingUrl: 'https://stale', Newsletter: 'yes' } },
+        { bucket: fastBucket(), content: { fields: { Headline: 'Hi', PrefsUrl: 'https://forged' }, ctaMode: 'none' } }
+      )
+
+      const [, fields] = setContactFields.mock.calls[0] as unknown as [string, Record<string, string>]
+      expect(fields).toEqual({ Headline: 'Hi' })
+    })
+
+    it('writes no fields at all for a static automation', async () => {
+      const { db, outcomes } = ledger([{}])
+      const { fake, setContactFields, triggerSend } = provider()
+
+      await executeCampaignSends(db, fake, campaign, { bucket: fastBucket(), baseUrl: 'https://crm', content: { fields: {}, ctaMode: 'none' } })
+
+      expect(setContactFields).not.toHaveBeenCalled()
+      expect(triggerSend).toHaveBeenCalledTimes(1)
+      expect(outcomes[0].status).toBe('sent')
+    })
+  })
 })

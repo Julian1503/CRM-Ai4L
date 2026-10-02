@@ -18,7 +18,8 @@
  * schema one.
  */
 
-import { CAMPAIGN_COPY_FIELDS } from './mergeFields'
+import { CAMPAIGN_COPY_FIELDS, PREFERENCES_URL_MERGE_FIELD } from './mergeFields'
+import type { TemplateContract } from './templateContracts'
 
 export type TemplateSlot = {
   /** The provider merge tag, referenced in the template as `{{Tag}}`. */
@@ -83,4 +84,31 @@ export function parseTemplateSlots(input: unknown): TemplateSlot[] | null {
   }
 
   return slots
+}
+
+/**
+ * The descriptive `slots` a template row stores for its contract.
+ *
+ * The contract in code is the authority (templateContracts.ts); the column mirrors it for
+ * readers of the table. The database requires a non-empty array, so a static contract
+ * (no content fields) records the one field its Automation still merges: the
+ * preferences link.
+ */
+export function slotsForContract(contract: TemplateContract): TemplateSlot[] {
+  if (contract.slots.length === 0) {
+    return [
+      {
+        tag: PREFERENCES_URL_MERGE_FIELD,
+        label: 'Email preferences link',
+        description: 'Set by the consent sync. A static Automation merges nothing else.',
+        maxLength: 500,
+      },
+    ]
+  }
+  return contract.slots.map((slot) => ({
+    tag: slot.tag,
+    label: slot.label,
+    description: slot.description,
+    maxLength: slot.maxLength,
+  }))
 }

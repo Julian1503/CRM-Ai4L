@@ -32,6 +32,9 @@ Roles are read from the database on every request, never from JWT claims or
 | See whether EmailOctopus is configured | ✓ | ✓ |
 | Replace or clear EmailOctopus credentials | – | ✓ |
 | Grant, change or disable membership | – | ✓ (or `npm run db:member`) |
+| Content Studio: create, generate, edit, review/approve, publish to a connected account, create email drafts and exports | ✓ | ✓ |
+| Content Studio: connect or disconnect social accounts (`/api/social/oauth/*`, `PATCH /api/social/accounts/[id]`) | – | ✓ |
+| Content Studio: edit the brand profile — tone, approved facts, channel rules, allowed link origins (`PATCH /api/content-studio/brand`, `update_content_brand_profile`) | – (read only) | ✓ |
 
 **Recorded decisions** (plan section 14.1): approval stays available to operators, and the
 approver may be the author. Neither restriction existed before this change, and neither was
@@ -51,6 +54,24 @@ answer a non-member with 42501 instead of a misleading "contacts missing". Editi
 organisation's industry uses the existing organisation update policy, conditional on the
 value the editor loaded. Restricting any of this to administrators means changing the API
 guard (`requireAdminOr403()`) and these policies together.
+
+## Content Studio (20261007000000, 20261007010000)
+
+- Every new table carries the restrictive membership policy; members read the editorial
+  tables and write only through the SECURITY DEFINER functions that enforce the rules
+  (stale-revision refusal, current-revision-only review, idempotency, publication checks).
+- `social_account_secrets` and `social_oauth_states` have no permissive policy and no grant
+  to browser roles: only the server reads them with the service role, after checking the
+  caller. Tokens are AES-256-GCM encrypted (`src/lib/crypto/secretBox.ts`).
+- Storage: no `storage.objects` policy for `anon`/`authenticated`. Uploads use signed URLs for
+  paths the server chose; previews use short-lived signed URLs; only immutable copies in
+  `content-public` are readable by URL, and nothing can be listed.
+- The content worker has no session. `/api/internal/content-worker/v1/*` is an exact
+  allowlist in `src/lib/auth/routes.ts`; every request is HMAC-signed with
+  `CONTENT_WORKER_SECRET` and every mutation also needs the job's claim token. Worker
+  functions are executable by `service_role` only.
+- Approving a social post does not authorise an email: an email draft goes through the
+  campaign approval above, bound to its snapshot hash.
 
 ## Integration credentials
 

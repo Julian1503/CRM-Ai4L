@@ -123,6 +123,36 @@ describe('OperationsPanel', () => {
       expect(list).toHaveTextContent(/4 consent change\(s\) are waiting/)
     })
 
+    it('lists stuck Content Studio work', async () => {
+      routeFetch({
+        summary: () =>
+          jsonResponse({
+            summary: {
+              ...SUMMARY,
+              attention: {
+                uncertainSends: 0,
+                expiredSendClaims: 0,
+                consentSyncPending: 0,
+                consentSyncFailed: 0,
+                contentJobsStale: 1,
+                contentJobsFailed: 2,
+                contentJobsUncertain: 3,
+                socialAccountsUnhealthy: 4,
+                socialPublicationsUncertain: 5,
+              },
+            },
+          }),
+      })
+      render(<OperationsPanel />)
+
+      const list = await screen.findByTestId('attention-list')
+      expect(list).toHaveTextContent(/1 content job\(s\) lost their worker/)
+      expect(list).toHaveTextContent(/2 content job\(s\) failed in the last 7 days/)
+      expect(list).toHaveTextContent(/3 content job\(s\) have an unknown outcome/)
+      expect(list).toHaveTextContent(/4 social account\(s\) need to be reconnected/)
+      expect(list).toHaveTextContent(/5 social post\(s\) may or may not have been published/)
+    })
+
     it('says plainly when nothing is waiting', async () => {
       routeFetch({
         summary: () =>

@@ -30,6 +30,11 @@ export type ApprovalCandidate = {
   status: CampaignStatus
   providerAutomationId: string | null
   segmentId: string | null
+  /**
+   * Why the content cannot be sent as it stands (a Studio snapshot that fails its
+   * contract, or a delivery mode that is switched off). Empty or omitted: none.
+   */
+  contentProblems?: readonly string[]
 }
 
 export type ApprovalCheck = { ok: true } | { ok: false; reason: string }
@@ -62,6 +67,10 @@ export function checkApprovable(campaign: ApprovalCandidate): ApprovalCheck {
         'campaign via API, so the automation must be authored in EmailOctopus with the ' +
         '"Started via API" trigger and its id recorded here.',
     }
+  }
+
+  if (campaign.contentProblems && campaign.contentProblems.length > 0) {
+    return { ok: false, reason: campaign.contentProblems.join(' ') }
   }
 
   return { ok: true }

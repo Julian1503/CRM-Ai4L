@@ -233,6 +233,27 @@ export default function OperationsPanel() {
 }
 
 /**
+ * Content Studio work that needs a person. A payload from a server that predates these
+ * counts has none of them, so each is read as zero when missing.
+ */
+function contentAttention(attention: NonNullable<OperationsSummary['attention']>): (string | false)[] {
+  const n = (value: number | undefined) => value ?? 0
+
+  return [
+    n(attention.contentJobsUncertain) > 0 &&
+      `${attention.contentJobsUncertain} content job(s) have an unknown outcome. Check the provider, then resolve each job in the Content Studio.`,
+    n(attention.socialPublicationsUncertain) > 0 &&
+      `${attention.socialPublicationsUncertain} social post(s) may or may not have been published. Check the account before retrying.`,
+    n(attention.socialAccountsUnhealthy) > 0 &&
+      `${attention.socialAccountsUnhealthy} social account(s) need to be reconnected before anything can be published.`,
+    n(attention.contentJobsFailed) > 0 &&
+      `${attention.contentJobsFailed} content job(s) failed in the last 7 days. Open the item to retry.`,
+    n(attention.contentJobsStale) > 0 &&
+      `${attention.contentJobsStale} content job(s) lost their worker. The content engine recovers them on its next claim; if this persists, check that the engine is running.`,
+  ]
+}
+
+/**
  * Work that stopped moving on its own. Listed only when present, each with what to do,
  * so an empty list means nothing needs a person.
  */
@@ -248,6 +269,7 @@ function AttentionList({ attention }: { attention?: OperationsSummary['attention
       `${attention.consentSyncFailed} consent change(s) could not reach EmailOctopus after repeated attempts. Check the connection in Settings.`,
     attention.consentSyncPending > 0 &&
       `${attention.consentSyncPending} consent change(s) are waiting to reach EmailOctopus.`,
+    ...contentAttention(attention),
   ].filter((item): item is string => typeof item === 'string')
 
   if (items.length === 0) {

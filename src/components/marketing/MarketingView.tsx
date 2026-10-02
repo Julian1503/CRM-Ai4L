@@ -36,6 +36,8 @@ type Campaign = {
   provider_automation_id: string | null
   consent_stream: ConsentStream
   merge_fields: Record<string, string>
+  /** Set for a Content Studio email: its content is an immutable snapshot. */
+  content_snapshot_id?: string | null
   /** Moves on every content change; approvals and edits name the one they saw (H6). */
   revision: number
   segment?: { name: string } | null
@@ -221,7 +223,13 @@ async function readError(response: Response): Promise<string> {
   return body.error || `Request failed (HTTP ${response.status})`
 }
 
-export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] }) {
+type MarketingViewProps = {
+  jobTypes: JobTypeOption[]
+  /** A campaign to open for review on arrival, e.g. a draft just created from the Content Studio. */
+  initialCampaignId?: string
+}
+
+export default function MarketingView({ jobTypes, initialCampaignId }: MarketingViewProps) {
 
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [campaignsPage, setCampaignsPage] = useState(1)
@@ -263,7 +271,15 @@ export default function MarketingView({ jobTypes }: { jobTypes: JobTypeOption[] 
 
   // Which campaign's copy is open for review. One at a time: reviewing is a focused
   // act, and two expanded editors invite editing the wrong one.
-  const [reviewingId, setReviewingId] = useState<string | null>(null)
+  const [reviewingId, setReviewingId] = useState<string | null>(initialCampaignId ?? null)
+
+  // Arriving for one campaign (a link from the Content Studio): open it, and bring it
+  // into view once the list has it.
+  useEffect(() => {
+    if (!initialCampaignId) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setReviewingId(initialCampaignId)
+  }, [initialCampaignId])
 
   // Campaign draft
   const [campaignName, setCampaignName] = useState('')
@@ -920,7 +936,16 @@ You will approve it again before anything leaves, and EmailOctopus only delivers
             }
 
             return (
-            <li key={campaign.id} className={styles.campaignItem}>
+            <li
+              key={campaign.id}
+              id={`campaign-${campaign.id}`}
+              className={styles.campaignItem}
+              ref={
+                campaign.id === initialCampaignId
+                  ? (node) => node?.scrollIntoView?.({ block: 'nearest' })
+                  : undefined
+              }
+            >
               <div className={styles.campaignMain}>
                 <span className={styles.itemName}>
                   {campaign.name}{' '}
@@ -1160,6 +1185,7 @@ You will approve it again before anything leaves, and EmailOctopus only delivers
               {reviewingId === campaign.id && (
                 <CampaignCopyEditor
                   campaignId={campaign.id}
+                  snapshotId={campaign.content_snapshot_id ?? null}
                   campaignName={campaign.name}
                   audienceLabel={campaign.segment?.name ?? undefined}
                   audienceSize={reviewingAudience}

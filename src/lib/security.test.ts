@@ -4,7 +4,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 
-import { CRON_PATHS, PUBLIC_PATHS, WEBHOOK_PATHS } from '@/lib/auth/routes'
+import { CRON_PATHS, INTERNAL_WORKER_PATHS, PUBLIC_PATHS, WEBHOOK_PATHS } from '@/lib/auth/routes'
 
 /**
  * Structural security invariants.
@@ -78,6 +78,25 @@ function verifiesCronSecret(route: RouteFile): boolean {
   return inline || viaHelper
 }
 
+/** True when the route is an exact content-worker protocol endpoint (docs/CONTENT_STUDIO_CONTRACTS.md §3). */
+function isWorkerRoute(route: RouteFile): boolean {
+  return (INTERNAL_WORKER_PATHS as readonly string[]).includes(route.urlPath)
+}
+
+/** The shared gate every worker route must go through; its behaviour is tested in workerOps/workerAuth tests. */
+const WORKER_HELPER = readFileSync(join(process.cwd(), 'src/lib/content-studio/workerOps.ts'), 'utf8')
+const WORKER_AUTH = readFileSync(join(process.cwd(), 'src/lib/content-studio/workerAuth.ts'), 'utf8')
+
+function verifiesWorkerSignature(route: RouteFile): boolean {
+  return (
+    /from '@\/lib\/content-studio\/workerOps'/.test(route.content) &&
+    /handleWorkerRequest\s*\(/.test(route.content) &&
+    /await authenticateWorkerRequest\(request\)/.test(WORKER_HELPER) &&
+    /await readBoundedBody\(request, MAX_WORKER_BODY_BYTES\)/.test(WORKER_AUTH) &&
+    /timingSafeEqual\s*\(/.test(WORKER_AUTH)
+  )
+}
+
 /** True when the route is a documented public endpoint. */
 function isPublicRoute(route: RouteFile): boolean {
   return (PUBLIC_PATHS as readonly string[]).some(
@@ -106,7 +125,8 @@ describe('API route authentication', () => {
       const authenticated =
         checksSession(route) ||
         (isWebhookRoute(route) && verifiesSignature(route)) ||
-        (isCronRoute(route) && verifiesCronSecret(route))
+        (isCronRoute(route) && verifiesCronSecret(route)) ||
+        (isWorkerRoute(route) && verifiesWorkerSignature(route))
 
       expect(authenticated || isPublicRoute(route)).toBe(true)
     }
@@ -143,6 +163,22 @@ describe('API route authentication', () => {
     expect(verifiesCronSecret(route)).toBe(true)
   })
 
+  it('covers every worker protocol endpoint with a route file', () => {
+    expect(routeFiles.filter(isWorkerRoute).map((route) => route.urlPath).sort()).toEqual(
+      [...INTERNAL_WORKER_PATHS].sort(),
+    )
+  })
+
+  it.each(
+    routeFiles
+      .filter((route) => isWorkerRoute(route))
+      .map((route) => [route.urlPath, route] as const)
+  )('%s verifies the worker signature, since it has no session', (_path, route) => {
+    // Exempt from the session gate and writing with the service-role key through the
+    // job RPCs: without the signature anyone could claim jobs or read a publish context.
+    expect(verifiesWorkerSignature(route)).toBe(true)
+  })
+
   it('keeps the public API surface small and deliberate', () => {
     const publicRoutes = routeFiles.filter(
       (route) => isPublicRoute(route) && !checksSession(route)
@@ -169,7 +205,7 @@ describe('service-role usage', () => {
     // behalf of a signed-in user must go through the session-bound client so RLS still
     // applies. Scheduled jobs have no user, like webhooks.
     const offenders = adminUsers
-      .filter((route) => !isWebhookRoute(route) && !isCronRoute(route) && !isPublicRoute(route))
+      .filter((route) => !isWebhookRoute(route) && !isCronRoute(route) && !isWorkerRoute(route) && !isPublicRoute(route))
       .map((route) => route.urlPath)
 
     expect(offenders).toEqual([])

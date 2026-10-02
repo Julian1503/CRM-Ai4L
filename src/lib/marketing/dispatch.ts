@@ -2,6 +2,9 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { CampaignRow, Database } from '@/lib/db/types'
 
+import { isEmailDynamicEnabled } from '@/lib/content-studio/flags'
+
+import { assessContent, ContentResolutionError, resolveSendContent, type ResolvedContent } from './campaignContent'
 import { isSendable } from './campaignStatus'
 import type { EmailOctopusCredentials } from './providers/credentials'
 import { createEmailOctopusProvider } from './providers/emailOctopus'
@@ -38,10 +41,13 @@ export type AdvanceOutcome =
 
 type AdvanceOptions = {
   credentials: EmailOctopusCredentials
-  baseUrl: string
+  /** Origin for booking links. Required only for campaigns whose CTA is a booking. */
+  baseUrl: string | null
   chunkSize: number
   /** Injected in tests. */
   provider?: CampaignProvider
+  /** Defaults to CONTENT_EMAIL_DYNAMIC_ENABLED. */
+  dynamicEnabled?: boolean
 }
 
 async function requeueFailed(db: SupabaseClient<Database>, campaign: CampaignRow): Promise<void> {
@@ -112,6 +118,23 @@ export async function advanceCampaignSend(
     }
   }
 
+  // What this campaign sends. A Studio campaign's snapshot is re-assessed on every step,
+  // so switching the dynamic-fields flag off stops new deliveries at once.
+  let content: ResolvedContent
+  try {
+    content = await resolveSendContent(db, campaign)
+  } catch (error) {
+    if (error instanceof ContentResolutionError) return { kind: 'conflict', message: error.message }
+    throw error
+  }
+  const problems = assessContent(content, { dynamicEnabled: options.dynamicEnabled ?? isEmailDynamicEnabled() })
+  if (problems.length > 0) return { kind: 'conflict', message: problems.join(' ') }
+  // A Studio booking email without an origin would send a dead button. (Hand-written
+  // campaigns keep their long-standing behaviour: the callers always pass an origin.)
+  if (content.snapshot && content.ctaMode === 'booking' && !options.baseUrl) {
+    return { kind: 'conflict', message: 'Booking links need the app origin (NEXT_PUBLIC_APP_URL) before this campaign can send.' }
+  }
+
   if (status === 'failed') {
     if (!(await transition(db, campaign, 'failed', { status: 'approved', completed_at: null }))) {
       return { kind: 'conflict', message: 'This campaign changed or was already claimed for retry. Reload and try again.' }
@@ -142,7 +165,8 @@ export async function advanceCampaignSend(
   const provider = options.provider ?? createEmailOctopusProvider(options.credentials)
   const progress = await executeCampaignSends(db, provider, campaign, {
     maxToProcess: options.chunkSize,
-    baseUrl: options.baseUrl,
+    baseUrl: options.baseUrl ?? undefined,
+    content: { fields: content.fields, ctaMode: content.ctaMode },
   })
 
   const summary = await readCampaignSendSummary(db, campaign.id)

@@ -1,10 +1,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { Database, NewsletterScheduleRow } from '@/lib/db/types'
-import { isArchiveRuleError } from '@/lib/lifecycle/lifecycle'
 import type { MessagesApi } from '@/lib/marketing/generateCampaign'
 import { generateForCampaign } from '@/lib/marketing/generateForCampaign'
 import type { ScheduleBrief } from '@/lib/marketing/prompt'
+import { createCampaign } from '@/lib/marketing/createCampaign'
+import { findContract, type TemplateContract } from '@/lib/marketing/templateContracts'
 
 import { advanceSchedule, localDate } from './nextRun'
 import { sendReviewNotification } from './reviewEmail'
@@ -141,7 +142,7 @@ async function claim(db: Db, schedule: NewsletterScheduleRow, nextRunAt: Date): 
   return (data ?? []).length > 0
 }
 
-type UsableTemplate = { id: string; provider_automation_id: string }
+type UsableTemplate = { id: string; provider_automation_id: string; contract: TemplateContract }
 
 /**
  * The schedule's template, if it can still send a newsletter. The database stops a
@@ -151,7 +152,7 @@ type UsableTemplate = { id: string; provider_automation_id: string }
 async function loadUsableTemplate(db: Db, templateId: string): Promise<UsableTemplate | null> {
   const { data, error } = await db
     .from('campaign_templates')
-    .select('id, provider_automation_id, consent_stream, archived_at')
+    .select('id, provider_automation_id, consent_stream, archived_at, contract_id, contract_version')
     .eq('id', templateId)
     .maybeSingle()
 
@@ -166,7 +167,12 @@ async function loadUsableTemplate(db: Db, templateId: string): Promise<UsableTem
     return null
   }
 
-  return { id: data.id, provider_automation_id: data.provider_automation_id }
+  // Scheduled issues are written by the CRM's copy generator, which fills the legacy
+  // seven-field contract. A Studio template gets its content from the Studio instead.
+  const contract = findContract(data.contract_id, data.contract_version)
+  if (!contract || contract.delivery !== 'legacy') return null
+
+  return { id: data.id, provider_automation_id: data.provider_automation_id, contract }
 }
 
 type DraftedCampaign = { id: string; name: string }
@@ -181,26 +187,25 @@ async function draftCampaign(
   template: UsableTemplate,
   scheduledFor: string
 ): Promise<DraftedCampaign | 'already_drafted' | 'segment_archived'> {
-  const { data, error } = await db
-    .from('campaigns')
-    .insert({
-      name: `${schedule.name} — ${scheduledFor}`,
-      segment_id: schedule.segment_id,
-      template_id: template.id,
-      provider_automation_id: template.provider_automation_id,
-      consent_stream: 'newsletter',
-      schedule_id: schedule.id,
-      scheduled_for: scheduledFor,
-      merge_fields: {},
-    })
-    .select('id, name')
-    .single()
+  const outcome = await createCampaign(db, {
+    name: `${schedule.name} — ${scheduledFor}`,
+    segmentId: schedule.segment_id,
+    source: {
+      kind: 'resolved',
+      templateId: template.id,
+      automationId: template.provider_automation_id,
+      stream: 'newsletter',
+      contract: template.contract,
+    },
+    mergeFields: {},
+    scheduleId: schedule.id,
+    scheduledFor,
+  })
 
-  if (error?.code === '23505') return 'already_drafted'
-  if (isArchiveRuleError(error)) return 'segment_archived'
-  if (error) throw new Error(`Could not draft the campaign: ${error.message}`)
-
-  return data as DraftedCampaign
+  if (outcome.ok) return { id: outcome.campaign.id, name: outcome.campaign.name }
+  if (outcome.reason === 'duplicate') return 'already_drafted'
+  if (outcome.reason === 'segment_archived') return 'segment_archived'
+  throw new Error(`Could not draft the campaign: ${outcome.message}`)
 }
 
 async function writeAndSubmit(

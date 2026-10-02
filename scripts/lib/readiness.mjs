@@ -33,6 +33,18 @@ function strongSecret(value) {
   return value.length >= MIN_SECRET_LENGTH ? null : `must be at least ${MIN_SECRET_LENGTH} characters`
 }
 
+function aes256Key(value) {
+  try {
+    return Buffer.from(value, 'base64').length === 32 ? null : 'must be 32 bytes, base64-encoded'
+  } catch {
+    return 'must be 32 bytes, base64-encoded'
+  }
+}
+
+function positiveInteger(value) {
+  return /^[1-9]\d{0,3}$/.test(value) ? null : 'must be a positive integer'
+}
+
 function emailList(value) {
   const entries = value.split(',').map((entry) => entry.trim()).filter(Boolean)
   return entries.length > 0 && entries.every((entry) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(entry))
@@ -113,6 +125,20 @@ export const FEATURES = [
     label: 'Address autocomplete (Geoapify)',
     canDisable: true,
     requires: [{ name: 'GEOAPIFY_API_KEY' }],
+  },
+  {
+    // docs/CONTENT_STUDIO_CONTRACTS.md §5. The worker secret signs the engine protocol;
+    // the encryption key protects stored social tokens.
+    id: 'content-studio',
+    label: 'Content Studio (content engine worker)',
+    canDisable: true,
+    requires: [
+      { name: 'CONTENT_WORKER_SECRET', validate: strongSecret },
+      { name: 'CONTENT_ENGINE_SECRET', validate: strongSecret },
+      { name: 'CONTENT_TOKEN_ENCRYPTION_KEY', validate: aes256Key },
+      { name: 'CONTENT_TOKEN_ENCRYPTION_KEY_VERSION', validate: positiveInteger },
+      { name: 'CONTENT_ENGINE_URL', validate: httpsUrl },
+    ],
   },
 ]
 

@@ -1,16 +1,19 @@
 import Anthropic from '@anthropic-ai/sdk'
 
-import {
-  buildCopyToolSchema,
-  validateCampaignCopy,
-  type CampaignCopy,
-} from './mergeFields'
+import type { CampaignCopy } from './mergeFields'
 import {
   buildRetryPrompt,
   buildSystemPrompt,
   buildUserPrompt,
   type CampaignBrief,
 } from './prompt'
+import {
+  buildToolSchema,
+  LEGACY_V1,
+  validateCopy,
+  type CtaMode,
+  type TemplateContract,
+} from './templateContracts'
 
 /**
  * Campaign copy generation.
@@ -67,14 +70,17 @@ export type MessagesApi = {
   ): Promise<Anthropic.Message>
 }
 
-function copyTool(): Anthropic.Tool {
+/** The template contract the copy is written for; legacy-v1 (booking) when omitted. */
+export type CopyTarget = { contract: TemplateContract; ctaMode?: CtaMode }
+
+function copyTool(target: CopyTarget): Anthropic.Tool {
   return {
     name: COPY_TOOL_NAME,
     description:
       'Submit the campaign copy. Every slot is required and each has a hard ' +
       'character limit. Plain text only.',
     strict: true,
-    input_schema: buildCopyToolSchema() as unknown as Anthropic.Tool.InputSchema,
+    input_schema: buildToolSchema(target.contract, target.ctaMode) as unknown as Anthropic.Tool.InputSchema,
   }
 }
 
@@ -109,9 +115,10 @@ function extractToolInput(
  */
 export async function generateCampaignCopy(
   messages: MessagesApi,
-  brief: CampaignBrief
+  brief: CampaignBrief,
+  target: CopyTarget = { contract: LEGACY_V1 }
 ): Promise<GenerationResult> {
-  const system = buildSystemPrompt(brief.brandVoice ?? undefined)
+  const system = buildSystemPrompt(brief.brandVoice ?? undefined, target.contract, target.ctaMode)
   const conversation: Anthropic.MessageParam[] = [
     { role: 'user', content: buildUserPrompt(brief) },
   ]
@@ -127,7 +134,7 @@ export async function generateCampaignCopy(
         model: COPY_MODEL,
         max_tokens: 16000,
         system,
-        tools: [copyTool()],
+        tools: [copyTool(target)],
         messages: conversation,
       })
     } catch (error) {
@@ -142,7 +149,7 @@ export async function generateCampaignCopy(
       return { ok: false, error: extracted.reason, attempts: attempt }
     }
 
-    const validation = validateCampaignCopy(extracted.input)
+    const validation = validateCopy(target.contract, extracted.input, { ctaMode: target.ctaMode })
 
     if (validation.ok) {
       return {

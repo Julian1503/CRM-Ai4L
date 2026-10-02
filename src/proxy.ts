@@ -2,7 +2,7 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 import { fetchActiveRole } from '@/lib/auth/membership'
-import { isApiPath, isCronPath, isPublicPath, isWebhookPath } from '@/lib/auth/routes'
+import { isApiPath, isCronPath, isInternalWorkerPath, isPublicPath, isWebhookPath } from '@/lib/auth/routes'
 import { getSupabaseConfig } from '@/lib/supabase/config'
 
 /**
@@ -24,8 +24,9 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   const { pathname } = request.nextUrl
 
   // Third-party webhooks have no session and authenticate by signature instead; the
-  // scheduled jobs authenticate with CRON_SECRET.
-  if (isWebhookPath(pathname) || isCronPath(pathname)) {
+  // scheduled jobs authenticate with CRON_SECRET; the content worker signs each request
+  // with CONTENT_WORKER_SECRET.
+  if (isWebhookPath(pathname) || isCronPath(pathname) || isInternalWorkerPath(pathname)) {
     return NextResponse.next()
   }
 

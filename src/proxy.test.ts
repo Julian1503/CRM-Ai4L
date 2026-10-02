@@ -175,6 +175,23 @@ describe('proxy', () => {
     expect(mockCreateServerClient).not.toHaveBeenCalled()
   })
 
+  it('lets the content worker protocol through, which authenticates by signature', async () => {
+    anonymous()
+
+    const response = await proxy(request('/api/internal/content-worker/v1/claim'))
+
+    expect(response.status).toBe(200)
+    expect(mockCreateServerClient).not.toHaveBeenCalled()
+  })
+
+  it('keeps the user-facing content studio API behind the session gate', async () => {
+    anonymous()
+
+    const response = await proxy(request('/api/content-studio/items'))
+
+    expect(response.status).toBe(401)
+  })
+
   it('does not exempt the emailoctopus sync route, which acts for a user', async () => {
     anonymous()
 

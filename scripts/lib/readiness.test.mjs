@@ -24,6 +24,11 @@ const COMPLETE = {
   CAMPAIGN_REVIEW_EMAILS: 'a@example.com, b@example.com',
   ANTHROPIC_API_KEY: 'sk-ant',
   GEOAPIFY_API_KEY: 'geo',
+  CONTENT_WORKER_SECRET: SECRET,
+  CONTENT_ENGINE_SECRET: 'y'.repeat(40),
+  CONTENT_TOKEN_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
+  CONTENT_TOKEN_ENCRYPTION_KEY_VERSION: '1',
+  CONTENT_ENGINE_URL: 'https://engine.example.com',
 }
 
 function stateOf(result, id) {
@@ -55,6 +60,27 @@ test('an intentionally disabled feature passes and is reported as disabled', () 
   const result = assessFeatures({ ...env, CRM_DISABLED_FEATURES: 'newsletter-schedules' })
   assert.equal(result.ok, true)
   assert.equal(stateOf(result, 'newsletter-schedules'), 'disabled')
+})
+
+test('content studio rejects an encryption key that is not 32 bytes', () => {
+  const result = assessFeatures({ ...COMPLETE, CONTENT_TOKEN_ENCRYPTION_KEY: Buffer.alloc(16).toString('base64') })
+  assert.equal(result.ok, false)
+  assert.equal(stateOf(result, 'content-studio'), 'misconfigured')
+})
+
+test('content studio rejects a weak worker secret and a bad key version', () => {
+  assert.equal(stateOf(assessFeatures({ ...COMPLETE, CONTENT_WORKER_SECRET: 'short' }), 'content-studio'), 'misconfigured')
+  assert.equal(
+    stateOf(assessFeatures({ ...COMPLETE, CONTENT_TOKEN_ENCRYPTION_KEY_VERSION: '0' }), 'content-studio'),
+    'misconfigured',
+  )
+})
+
+test('content studio can be disabled', () => {
+  const { CONTENT_WORKER_SECRET: _omit, ...env } = COMPLETE
+  const result = assessFeatures({ ...env, CRM_DISABLED_FEATURES: 'content-studio' })
+  assert.equal(result.ok, true)
+  assert.equal(stateOf(result, 'content-studio'), 'disabled')
 })
 
 test('core and consent cannot be disabled', () => {

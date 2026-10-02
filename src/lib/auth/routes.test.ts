@@ -1,9 +1,11 @@
 import {
   CRON_PATHS,
+  INTERNAL_WORKER_PATHS,
   PUBLIC_PATHS,
   WEBHOOK_PATHS,
   isApiPath,
   isCronPath,
+  isInternalWorkerPath,
   isPublicPath,
   isWebhookPath,
 } from './routes'
@@ -89,6 +91,26 @@ describe('auth/routes', () => {
 
     it('does not exempt the schedule routes an operator uses', () => {
       expect(isCronPath('/api/newsletter-schedules')).toBe(false)
+    })
+  })
+
+  describe('isInternalWorkerPath', () => {
+    it.each(INTERNAL_WORKER_PATHS)('exempts %s from the session gate', (path) => {
+      expect(isInternalWorkerPath(path)).toBe(true)
+    })
+
+    it('matches on exact path only', () => {
+      expect(isInternalWorkerPath('/api/internal')).toBe(false)
+      expect(isInternalWorkerPath('/api/internal/content-worker')).toBe(false)
+      expect(isInternalWorkerPath('/api/internal/content-worker/v1')).toBe(false)
+      expect(isInternalWorkerPath('/api/internal/content-worker/v1/anything-else')).toBe(false)
+      expect(isInternalWorkerPath('/api/internal/content-worker/v1/claim/extra')).toBe(false)
+      expect(isInternalWorkerPath('/api/internal/content-worker/v2/claim')).toBe(false)
+    })
+
+    it('does not exempt the user-facing content routes', () => {
+      expect(isInternalWorkerPath('/api/content-studio/items')).toBe(false)
+      expect(isInternalWorkerPath('/api/social/accounts')).toBe(false)
     })
   })
 

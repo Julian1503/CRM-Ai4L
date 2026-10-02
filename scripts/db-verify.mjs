@@ -38,6 +38,8 @@ const ALIASES = {
   delivery: 'verify_20261003000000.sql',
   contacts2: 'verify_20261004000000.sql',
   tags: 'verify_20261006000000.sql',
+  content: 'verify_20261007000000.sql',
+  snapshots: 'verify_20261007010000.sql',
 }
 
 function fail(message) {

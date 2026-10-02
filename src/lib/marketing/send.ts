@@ -6,6 +6,7 @@ import type { CampaignRow, ClaimedCampaignSend, Database } from '@/lib/db/types'
 import { BOOKING_URL_MERGE_FIELD } from './mergeFields'
 import type { CampaignProvider } from './providers/types'
 import { TokenBucket } from './rateLimiter'
+import { stripReservedFields, type CtaMode } from './templateContracts'
 
 /**
  * Campaign send fan-out (audit H3, H4).
@@ -61,6 +62,15 @@ export type SendProgress = {
 }
 
 type DispatchCampaign = Pick<CampaignRow, 'id' | 'provider_automation_id' | 'merge_fields' | 'send_run'>
+
+/**
+ * What goes to each recipient's contact fields, and whether the email books.
+ *
+ * Resolved by the caller (`resolveSendContent`): a Studio campaign's approved snapshot,
+ * or a hand-written campaign's merge fields with a booking CTA. Omitted, the campaign's
+ * own merge fields are sent in booking mode — the behaviour before contracts existed.
+ */
+export type SendContent = { fields: Record<string, string>; ctaMode: CtaMode }
 
 type Outcome = 'sent' | 'failed' | 'pending' | 'uncertain'
 
@@ -131,11 +141,17 @@ export async function executeCampaignSends(
   options: {
     maxToProcess?: number
     bucket?: TokenBucket
-    /** Origin for booking links. When set, each recipient gets a single-use link. */
+    /** Origin for booking links. In booking mode, when set, each recipient gets a single-use link. */
     baseUrl?: string
     leaseSeconds?: number
+    content?: SendContent
   } = {}
 ): Promise<SendProgress> {
+  // Reserved fields are the system's (booking link, preferences link, consent state).
+  // Content never carries them, whatever was stored — stripped here as the last gate.
+  const contentFields = stripReservedFields(options.content?.fields ?? campaign.merge_fields)
+  const ctaMode: CtaMode = options.content?.ctaMode ?? 'booking'
+
   const bucket =
     options.bucket ??
     new TokenBucket({
@@ -181,9 +197,11 @@ export async function executeCampaignSends(
 
     // Minted per attempt: only the token's hash is stored, so an earlier token cannot be
     // reconstructed on a retry. A superseded booking is harmless and expires.
-    const mergeFields: Record<string, string> = { ...(campaign.merge_fields ?? {}) }
+    const mergeFields: Record<string, string> = { ...contentFields }
 
-    if (options.baseUrl) {
+    // Only a booking email mints a booking. An external-link or no-CTA email never
+    // creates one and never writes BookingUrl; its template must not reference it.
+    if (ctaMode === 'booking' && options.baseUrl) {
       try {
         const { token } = await createBooking(db, { contactId: row.contact_id, campaignId: campaign.id })
         mergeFields[BOOKING_URL_MERGE_FIELD] = `${options.baseUrl.replace(/\/$/, '')}/book/${token}`

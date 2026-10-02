@@ -55,7 +55,7 @@ const publicProjects = browserDefinitions.map(({ name, device }) => ({
 
 const authenticatedProjects = browserDefinitions.map(({ name, device }) => ({
   name: `authenticated-${name}`,
-  testMatch: /(smoke|archive|membership)\.spec\.ts/,
+  testMatch: /(smoke|archive|membership|content-studio)\.spec\.ts/,
   grepInvert: SIGN_OUT_TEST,
   dependencies: hasCredentials ? ['auth-setup'] : [],
   use: {

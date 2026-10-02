@@ -93,13 +93,31 @@ export async function PATCH(
 
     const { data: existing, error: loadError } = await db
       .from('campaigns')
-      .select('id, status, consent_stream, archived_at, removed_at')
+      .select('id, status, consent_stream, archived_at, removed_at, content_snapshot_id')
       .eq('id', id)
       .maybeSingle()
 
     if (loadError) throw new Error(loadError.message)
     if (!existing || existing.removed_at) return notFound('Campaign not found.')
     if (existing.archived_at) return conflict('This campaign is archived. Restore it before changing it.')
+
+    // A Studio email's words, images, link and automation are its snapshot, bound to the
+    // approval by hash. New content means a new email from the Studio (the database
+    // refuses this too, CRM07 snapshot_content_locked).
+    if (existing.content_snapshot_id) {
+      if (body.templateId !== undefined || body.providerAutomationId !== undefined) {
+        return conflict(
+          "This campaign's template and EmailOctopus automation are fixed by its Content Studio snapshot. " +
+            'Create a new email from the Studio to use another template.'
+        )
+      }
+      if (body.mergeFields !== undefined || body.subject !== undefined) {
+        return conflict(
+          "This campaign's content comes from the Content Studio. Edit the post there and create a new email; " +
+            'the name, notes and segment can still be changed here.'
+        )
+      }
+    }
 
     const updates: Partial<CampaignRow> = {}
 
@@ -207,7 +225,7 @@ export async function PATCH(
 
     // An archived segment, chosen here or archived since.
     if (isArchiveRuleError(error)) return conflict(error?.message ?? 'That segment is archived.')
-    if (error?.code === 'CRM03') return conflict(error.message)
+    if (error?.code === 'CRM03' || error?.code === 'CRM07') return conflict(error.message)
     if (error) throw new Error(error.message)
     if (!data) {
       return conflict('Someone else changed this campaign while you were editing. Reload to see their changes.')

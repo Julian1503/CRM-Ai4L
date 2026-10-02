@@ -171,6 +171,31 @@ Contacts who received the first run are in that audience. Without this setting t
 provider refuses each of them, and the campaign ends `failed` with the refusal shown
 per recipient in the Recipients dialog.
 
+### Content Studio templates
+
+Register each automation in **Integrations → Email templates** with its **template
+contract**. The contract cannot change once a campaign uses the template; a new version of
+the email is a new automation and a new template row, never an edit in place.
+
+- **`studio-static-v1` (the default route for Studio emails).** Author the email as fixed
+  HTML in a new automation ("Started via API"), using the HTML the Studio exports
+  (`Export HTML`) as the reference. Set its subject in EmailOctopus: the CRM's subject is
+  recorded in the snapshot but is not sent (EO-3). The button, if any, links to the fixed
+  page in the HTML. **Do not reference `{{BookingUrl}}`** — a static email has no booking
+  link, and a stale one from an earlier campaign would show. Keep `{{PrefsUrl}}` in the
+  footer. Record the automation id, version and test date; do not edit it once used.
+- **`studio-newsletter-v1` (dynamic, off by default).** The template merges `{{Preheader}}`,
+  `{{Headline}}`, `{{Intro}}`, `{{Body}}`, `{{HeroImageUrl}}` (as an `img src`),
+  `{{HeroImageAlt}}`, `{{CtaLabel}}` and `{{CtaUrl}}`. Its campaigns are refused until
+  `CONTENT_EMAIL_DYNAMIC_ENABLED=true`, which may only be set after the provider matrix in
+  `docs/CONTENT_STUDIO_PROVIDER_VALIDATION.md` passes. Only a template used in booking
+  mode may reference `{{BookingUrl}}`.
+
+`GET /api/integrations/emailoctopus/fields?templateId=<id>` checks exactly the fields that
+template's contract needs (`POST` creates them). Images in Studio emails are immutable
+public copies in the `content-public` bucket; the CRM never sends signed previews,
+`blob:`, `data:` or localhost URLs.
+
 ---
 
 ## 3. Rate limit and send duration

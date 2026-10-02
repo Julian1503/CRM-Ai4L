@@ -1,0 +1,77 @@
+/* Rendered through <Portal>; above the mobile bottom bar (100/110) and drawers (1000). */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1050;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-md);
+  background: rgba(15, 15, 15, 0.55);
+}
+
+.dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(30rem, 100%);
+  max-height: calc(100dvh - 2rem);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.22);
+}
+
+.dialogWide {
+  width: min(46rem, 100%);
+}
+
+.dialog:focus-visible {
+  outline: none;
+}
+
+.dialogHeader {
+  padding: var(--space-lg) var(--space-lg) var(--space-sm);
+}
+
+.dialogTitle {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: 1.15rem;
+  color: var(--text-primary);
+}
+
+.dialogHint {
+  margin: 0.25rem 0 0;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+.dialogBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-lg) var(--space-lg);
+  overflow-y: auto;
+}
+
+.dialogSection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.dialogFooter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+  padding: var(--space-md) var(--space-lg);
+  border-top: 1px solid var(--border);
+}
+
+@media (max-width: 640px) {
+  .dialogFooter > button {
+    flex: 1 1 auto;
+  }
+}

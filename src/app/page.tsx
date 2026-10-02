@@ -57,12 +57,15 @@ import MarketingView from '@/components/marketing/MarketingView';
 import EmailTemplateRegistry from '@/components/marketing/EmailTemplateRegistry';
 import NewsletterSchedules from '@/components/marketing/NewsletterSchedules';
 import ArchiveHub from '@/components/archive/ArchiveHub';
+import ContentStudioView from '@/components/content-studio/ContentStudioView';
 import { requestLifecycle } from '@/lib/lifecycle/client';
 import BookingsView from '@/components/bookings/BookingsView';
 import OperationsPanel from '@/components/operations/OperationsPanel';
 import Pagination from '@/components/ui/Pagination';
 import EmailOctopusSettings, { type EmailOctopusStatus } from '@/components/settings/EmailOctopusSettings';
 import JobTypesSettings from '@/components/settings/JobTypesSettings';
+import SocialConnectionsSettings from '@/components/settings/SocialConnectionsSettings';
+import BrandProfileSettings from '@/components/settings/BrandProfileSettings';
 import JobTypesDialog from '@/components/settings/JobTypesDialog';
 import OrganisationSettings from '@/components/settings/OrganisationSettings';
 import type { ContactStatus } from '@/lib/db/types';
@@ -203,6 +206,8 @@ function getErrorMessage(error: unknown) {
 
 export default function App() {
   const [currentView, setCurrentView] = useState<ActiveView>('contacts');
+  // A campaign drafted from the Content Studio opens directly in Campaigns.
+  const [campaignToOpen, setCampaignToOpen] = useState<string | undefined>(undefined);
   const [awaitingApproval, setAwaitingApproval] = useState(0);
   const mainContentRef = useRef<HTMLElement>(null);
 
@@ -995,7 +1000,12 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
       {/* Navigation Sidebar */}
       <Sidebar
         currentView={currentView}
-        onViewChange={setCurrentView}
+        onViewChange={(view) => {
+          // A campaign handed over by the Content Studio opens once; navigating by hand
+          // afterwards must not reopen it.
+          setCampaignToOpen(undefined);
+          setCurrentView(view);
+        }}
         badges={{ campaigns: awaitingApproval }}
       />
 
@@ -1162,8 +1172,33 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
               </div>
             </header>
 
-            <MarketingView jobTypes={jobTypes} />
+            <MarketingView jobTypes={jobTypes} initialCampaignId={campaignToOpen} />
             <NewsletterSchedules />
+          </>
+        )}
+
+        {currentView === 'content' && (
+          <>
+            <header className={styles.headerSection}>
+              <div className={styles.titleGroup}>
+                <div className={styles.eyebrow}>
+                  <span className={styles.eyebrowDot} />
+                  Content
+                </div>
+                <h1 className={styles.pageTitle}>Content Studio</h1>
+                <span className={styles.pageSubtitle}>
+                  Write once for social and email. Every channel is reviewed and approved on its own.
+                </span>
+              </div>
+            </header>
+
+            <ContentStudioView
+              onOpenSettings={() => setCurrentView('settings')}
+              onOpenCampaign={(campaignId) => {
+                setCampaignToOpen(campaignId);
+                setCurrentView('campaigns');
+              }}
+            />
           </>
         )}
 
@@ -1749,6 +1784,12 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
 
                 {/* Email Marketing Card */}
                 <EmailOctopusSettings status={emailOctopusStatus} onSaved={setEmailOctopusStatus} />
+
+                {/* Connect/disconnect is admin-only on the server; the component shows the reason if refused. */}
+                <SocialConnectionsSettings allowMock={process.env.NODE_ENV !== 'production'} />
+
+                {/* Grounds every Content Studio generation; admin-only edits, enforced in the database. */}
+                <BrandProfileSettings />
 
                 <JobTypesSettings onChanged={() => void reloadJobTypes()} />
 

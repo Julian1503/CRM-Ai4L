@@ -65,6 +65,9 @@ async function checkDatabase(url, serviceRoleKey) {
     'campaign_templates',
     'bookings',
     'integration_deliveries',
+    'content_items',
+    'content_jobs',
+    'social_accounts',
   ];
 
   for (const table of requiredTables) {
@@ -111,7 +114,7 @@ async function checkAccessBoundary(url, anonKey) {
   }
 
   const anon = createClient(url, anonKey, { auth: { persistSession: false, autoRefreshToken: false } });
-  for (const table of ['contacts', 'credentials', 'crm_members']) {
+  for (const table of ['contacts', 'credentials', 'crm_members', 'social_account_secrets', 'content_items']) {
     const { data, error } = await anon.from(table).select('*').limit(1);
     const denied = Boolean(error) || (data ?? []).length === 0;
     record(denied, `anonymous read of ${table} denied`, error ? 'refused' : `${(data ?? []).length} rows`);

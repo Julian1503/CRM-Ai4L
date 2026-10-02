@@ -137,8 +137,30 @@ describe('EmailTemplateRegistry', () => {
         description: 'Second semester',
         providerAutomationId: 'auto-9',
         consentStream: 'programs',
+        contractId: 'legacy-v1',
       })
     )
+  })
+
+  it("registers a Studio contract when one is chosen, and shows each row's contract", async () => {
+    routeFetch({
+      ...defaultHandlers,
+      'GET /api/templates': jsonResponse({
+        templates: [TEMPLATE, { ...TEMPLATE, id: 't2', name: 'Static v1', contract_id: 'studio-static-v1', contract_version: 1 }],
+      }),
+    })
+    render(<EmailTemplateRegistry />)
+
+    expect(await screen.findByTestId('template-contract-t1')).toHaveTextContent('legacy-v1')
+    expect(screen.getByTestId('template-contract-t2')).toHaveTextContent('studio-static-v1')
+
+    fireEvent.change(screen.getByTestId('template-name'), { target: { value: 'Studio news' } })
+    fireEvent.change(screen.getByTestId('template-automation'), { target: { value: 'auto-7' } })
+    fireEvent.change(screen.getByTestId('template-stream'), { target: { value: 'newsletter' } })
+    fireEvent.change(screen.getByTestId('template-contract'), { target: { value: 'studio-newsletter-v1' } })
+    fireEvent.click(screen.getByTestId('create-template'))
+
+    await waitFor(() => expect(bodyOf(callTo('/api/templates', 'POST')!)).toMatchObject({ contractId: 'studio-newsletter-v1' }))
   })
 
   it('will not register a name with no id, or an id with no name', async () => {

@@ -70,3 +70,47 @@ ledger.
 - `npm run test:integration` (local stack) — real two-worker race, audience above the row
   cap, interrupted preparation, provider success followed by ledger failure, stale worker,
   consent convergence and backoff.
+
+## Content Studio emails (20261007010000)
+
+Campaigns can also be created from a Content Studio post (`Create email` on a variant).
+The rules above all still apply; these are added.
+
+| Guarantee | Mechanism |
+| --- | --- |
+| The approved content is an immutable snapshot | `campaign_content_snapshots` holds the fields, CTA mode and link, subject, published images (asset, published copy, checksum, alt, order) and the rendered HTML/text, with a SQL-computed `content_hash`. Rows cannot be updated or deleted. The campaign's `merge_fields`/`subject` mirror it and are locked (`CRM07 snapshot_content_locked`); new content means a new email from the Studio. |
+| Approval binds to the snapshot | Approval records `approved_content_hash`; `begin_campaign_dispatch` refuses a send whose snapshot hash no longer matches. The approve route re-validates the snapshot against its template contract first (`assessContent`). |
+| Each run keeps its evidence | `campaign_runs` is stamped (by trigger) with the snapshot, hash, automation and CTA mode it sent. |
+| A run never mixes two versions | Editing the content of a failed campaign whose run already has `sent`/`uncertain` rows starts a new run and needs a new approval. Recipients already accepted stay visible in the old run's ledger. |
+| Creation is idempotent and always a draft | `create_content_email_snapshot` creates snapshot + draft campaign in one transaction, keyed by the request's idempotency key. Stream, automation and contract come from the template only. Approving the post never approves the email. |
+| Booking only when the email books | `executeCampaignSends` creates a booking and writes `BookingUrl` only in `booking` mode. `external_url` and `none` never do, and reserved fields (`BookingUrl`, `PrefsUrl`, `Newsletter`, `Courses`) are stripped from any content before it reaches the provider. The cron sends Studio campaigns without `NEXT_PUBLIC_APP_URL`; booking campaigns still need it. |
+
+### Template contracts and delivery modes
+
+`src/lib/marketing/templateContracts.ts`; the template pins one (`contract_id`/`version`),
+frozen once a campaign uses it (`CRM06 template_in_use` → 409).
+
+| Contract | What travels per contact | CTA modes | Sendable |
+| --- | --- | --- | --- |
+| `legacy-v1` | The seven fields + `BookingUrl` | booking | Always (unchanged) |
+| `studio-static-v1` | Nothing (fixed HTML in a versioned Automation) | external_url, none | Always |
+| `studio-newsletter-v1` | Preheader, Headline, Intro, Body, HeroImageUrl/Alt, CtaLabel, CtaUrl | external_url, none, booking | Only with `CONTENT_EMAIL_DYNAMIC_ENABLED=true` |
+
+**Why dynamic is off.** Contact fields are shared: two campaigns writing the same
+contact's fields can swap content before EmailOctopus renders the email (plan §8.2). Until
+the provider matrix in `CONTENT_STUDIO_PROVIDER_VALIDATION.md` (EO-4, EO-5) proves the
+content is fixed per delivery, a dynamic Studio draft can be created and reviewed but is
+refused at approval, at preflight and at every send step. Switching the flag off stops
+new deliveries of already-approved dynamic campaigns at the next chunk.
+
+**HTML export** (`email-export`) renders the same email for a campaign managed in the
+EmailOctopus dashboard. It is recorded as an export snapshot and is never reported as a
+delivery.
+
+### Preflight for Studio campaigns
+
+`GET /api/campaigns/[id]/preflight` adds `studio`: contract problems, images that are not
+the source revision's, provider fields missing for the contract, and a manual checklist
+(the API cannot read Automation HTML): the template must not reference `{{BookingUrl}}`
+for `external_url`/`none`; a static Automation must be the registered version.
+`ready` is false while any problem remains.

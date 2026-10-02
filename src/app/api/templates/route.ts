@@ -3,7 +3,8 @@ import { NextResponse } from 'next/server'
 
 import { badRequest, ok, readJsonBody, requireSessionOr401, serverError } from '@/lib/api/responses'
 import { parseConsentStream } from '@/lib/marketing/consentStream'
-import { BUILT_IN_TEMPLATE_SLOTS } from '@/lib/marketing/templates'
+import { findContract } from '@/lib/marketing/templateContracts'
+import { slotsForContract } from '@/lib/marketing/templates'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 
 export const runtime = 'nodejs'
@@ -90,6 +91,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return badRequest('Choose which consent stream this template sends to.')
   }
 
+  // Which versioned contract the automation's HTML was built for. Omitted means the
+  // classic seven fields, as every template registered before contracts existed.
+  const contract = findContract(typeof body.contractId === 'string' ? body.contractId : null, 1)
+
+  if (!contract) {
+    return badRequest('Unknown template contract. Choose legacy-v1, studio-newsletter-v1 or studio-static-v1.')
+  }
+
   try {
     const db = await createSupabaseServerClient()
 
@@ -100,9 +109,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         description: typeof body.description === 'string' ? body.description.trim() || null : null,
         provider_automation_id: automationId,
         consent_stream: consentStream,
-        // Registering a name does not yet mean designing a new slot set; every
-        // template starts on the contract the copy generator already writes for.
-        slots: BUILT_IN_TEMPLATE_SLOTS,
+        contract_id: contract.id,
+        contract_version: contract.version,
+        // Descriptive mirror of the contract; the contract in code is the authority.
+        slots: slotsForContract(contract),
       })
       .select('*')
       .single()
