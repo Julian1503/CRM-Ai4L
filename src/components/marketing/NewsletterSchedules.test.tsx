@@ -246,3 +246,79 @@ describe('NewsletterSchedules', () => {
     })
   })
 })
+
+describe('NewsletterSchedules — occurrences that need attention (H12)', () => {
+  const FAILED = {
+    id: 'o1',
+    schedule_id: 's1',
+    scheduled_for: '2026-09-07',
+    status: 'failed',
+    attempts: 3,
+    last_error: 'template_unusable',
+    skip_reason: null,
+  }
+  const SKIPPED = {
+    id: 'o2',
+    schedule_id: 's1',
+    scheduled_for: '2026-08-31',
+    status: 'skipped',
+    attempts: 0,
+    last_error: null,
+    skip_reason: 'Missed while the scheduler was not running.',
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    routeFetch({
+      ...defaultHandlers,
+      'GET /api/newsletter-schedules/occurrences': jsonResponse({ occurrences: [FAILED, SKIPPED] }),
+    })
+  })
+
+  it('shows failed and skipped issues under their schedule with the reason', async () => {
+    render(<NewsletterSchedules />)
+
+    const failed = await screen.findByTestId('occurrence-o1')
+    expect(failed).toHaveTextContent('Failed')
+    expect(failed).toHaveTextContent('template_unusable (after 3 attempts)')
+    expect(screen.getByTestId('occurrence-o2')).toHaveTextContent('Missed while the scheduler was not running.')
+  })
+
+  it.each([
+    [{ status: 'in_review' }, /waiting for approval/],
+    [{ status: 'needs_attention' }, /could not be written/],
+    [{ status: 'skipped', reason: 'queued' }, /Queued again/],
+    [{ status: 'skipped', reason: 'already_drafted' }, /already has a campaign/],
+    [{ status: 'failed', reason: 'boom', occurrenceStatus: 'pending' }, /retried automatically/],
+    [{ status: 'failed', reason: 'boom', occurrenceStatus: 'failed' }, /failed again: boom/],
+  ])('retries an issue and reports %j', async (run, message) => {
+    routeFetch({
+      ...defaultHandlers,
+      'GET /api/newsletter-schedules/occurrences': jsonResponse({ occurrences: [FAILED] }),
+      'POST /api/newsletter-schedules/occurrences/o1/retry': jsonResponse({ run }),
+    })
+    render(<NewsletterSchedules />)
+
+    fireEvent.click(await screen.findByTestId('retry-occurrence-o1'))
+
+    expect(await screen.findByText(message)).toBeInTheDocument()
+    expect(mockFetch).toHaveBeenCalledWith('/api/newsletter-schedules/occurrences/o1/retry', { method: 'POST' })
+  })
+
+  it('shows a refused retry', async () => {
+    routeFetch({
+      ...defaultHandlers,
+      'GET /api/newsletter-schedules/occurrences': jsonResponse({ occurrences: [FAILED] }),
+      'POST /api/newsletter-schedules/occurrences/o1/retry': jsonResponse(
+        { error: 'Only a failed or skipped occurrence can be retried.' },
+        false,
+        409
+      ),
+    })
+    render(<NewsletterSchedules />)
+
+    fireEvent.click(await screen.findByTestId('retry-occurrence-o1'))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Only a failed or skipped occurrence can be retried.')
+  })
+})

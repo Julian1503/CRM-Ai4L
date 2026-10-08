@@ -7,6 +7,7 @@ import { isEmailDynamicEnabled } from '@/lib/content-studio/flags'
 import { ContentResolutionError, resolveSendContent } from '@/lib/marketing/campaignContent'
 import { loadEmailOctopusCredentials, loadEmailOctopusStatus } from '@/lib/marketing/providers/credentials'
 import { studioPreflight, type StudioPreflight } from '@/lib/marketing/studioPreflight'
+import { readTestStatus } from '@/lib/marketing/testSend'
 import { measureSegmentAudience, SEGMENT_MEMBER_CAP } from '@/lib/marketing/segments'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 
@@ -29,7 +30,7 @@ export async function GET(
     const db = await createSupabaseServerClient()
     const { data: campaign, error } = await db
       .from('campaigns')
-      .select('id, status, send_run, segment_id, provider_automation_id, consent_stream, merge_fields, content_snapshot_id, segment:segments(definition)')
+      .select('id, status, revision, send_run, segment_id, provider_automation_id, consent_stream, merge_fields, content_snapshot_id, segment:segments(definition)')
       .eq('id', id)
       .maybeSingle()
 
@@ -63,7 +64,17 @@ export async function GET(
       }
     }
     const contentReady = !studio || studio.problems.length === 0
-    const extra = studio ? { studio } : {}
+
+    // Informational, never blocking: whether the content as it is now reached a test
+    // recipient (UX plan P0.2). A failure to read it must not stop a send.
+    let testSend: { currentRevisionTested: boolean; lastSuccessful: unknown } | null = null
+    try {
+      testSend = await readTestStatus(db, campaign, studio?.contentHash ?? null)
+    } catch (testError) {
+      console.error('Could not read campaign test sends.', testError instanceof Error ? testError.message : testError)
+      testSend = null
+    }
+    const extra = { ...(studio ? { studio } : {}), testSend }
 
     // Once a run's audience is materialised, the send goes to that snapshot (minus anyone
     // who becomes ineligible), not to whatever the segment matches now.

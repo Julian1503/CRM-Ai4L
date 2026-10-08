@@ -97,6 +97,8 @@ export type BookingReconciliationRow = {
   scheduled_at: string | null
   tracking_booking_id: string | null
   old_invitee_uri: string | null
+  /** Stored with a parked event so a reschedule cancel replays as a reschedule (20261008020000). */
+  rescheduled: boolean
   reason: string
   attempts: number
   created_at: string
@@ -599,9 +601,13 @@ export type ContactConsentEventRow = {
 // (`select('*, organisation:organisations(name)')`) must declare them, or postgrest-js
 // resolves the embed to SelectQueryError instead of the joined row.
 // `npm run db:types` fills these in properly against the live schema.
+import type { CampaignTestSendTables } from './campaignTestSendTypes'
 import type { ContentStudioFunctions, ContentStudioTables } from './contentStudioTypes'
+import type { ScheduleOccurrenceFunctions, ScheduleOccurrenceTables } from './scheduleOccurrenceTypes'
 
 export type * from './contentStudioTypes'
+export type * from './campaignTestSendTypes'
+export type * from './scheduleOccurrenceTypes'
 
 type TableDef<
   Row,
@@ -678,7 +684,7 @@ export interface Database {
       newsletter_topics: TableDef<NewsletterTopicRow>
       segment_overrides: TableDef<SegmentOverrideRow>
       bookings: TableDef<BookingRow>
-    } & ContentStudioTables
+    } & ContentStudioTables & CampaignTestSendTables & ScheduleOccurrenceTables
     Views: {
       /** contacts filtered to deleted_at IS NULL (security_invoker). */
       active_contacts: { Row: ContactRow; Relationships: [] }
@@ -787,7 +793,7 @@ export interface Database {
         Args: Record<string, never>
         Returns: import('@/lib/operations/types').OperationsSummary
       }
-    } & ContentStudioFunctions
+    } & ContentStudioFunctions & ScheduleOccurrenceFunctions
     Enums: {
       contact_status: ContactStatus
       campaign_status: CampaignStatus

@@ -89,7 +89,7 @@ export async function runJobs(options: JobsOptions): Promise<JobsReport> {
     const since = new Date(now() - RECONCILIATION_WINDOW_MS).toISOString()
     const { data: parked, error: parkedError } = await options.db
       .from('booking_reconciliation')
-      .select('event_type, invitee_uri, event_uri, email, scheduled_at, tracking_booking_id, old_invitee_uri')
+      .select('event_type, invitee_uri, event_uri, email, scheduled_at, tracking_booking_id, old_invitee_uri, rescheduled')
       .is('resolved_at', null)
       .gte('created_at', since)
       .order('created_at', { ascending: true })
@@ -105,7 +105,8 @@ export async function runJobs(options: JobsOptions): Promise<JobsReport> {
         scheduledAt: row.scheduled_at,
         email: row.email,
         trackingBookingId: row.tracking_booking_id,
-        rescheduled: false,
+        // A parked reschedule cancel must replay as a reschedule, not as a cancellation.
+        rescheduled: row.rescheduled === true,
         oldInviteeUri: row.old_invitee_uri,
       })
       report.reconciliation.retried += 1
