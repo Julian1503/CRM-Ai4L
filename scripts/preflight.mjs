@@ -71,7 +71,9 @@ async function checkDatabase(url, serviceRoleKey) {
   ];
 
   for (const table of requiredTables) {
-    const { error } = await db.from(table).select('*', { head: true, count: 'exact' }).limit(1);
+    // A real read, not HEAD: a HEAD request for a missing table comes back without an
+    // error object in supabase-js, which reported unapplied migrations as "available".
+    const { error } = await db.from(table).select('*').limit(1);
     record(!error, `database table ${table}`, error?.message ?? 'available');
   }
 
@@ -90,7 +92,7 @@ async function checkDatabase(url, serviceRoleKey) {
   record(!member.error, 'membership enforcement installed', member.error?.message ?? 'is_crm_member() present');
   const admins = await db
     .from('crm_members')
-    .select('user_id', { count: 'exact', head: true })
+    .select('user_id', { count: 'exact' })
     .eq('role', 'admin')
     .eq('active', true);
   record(
