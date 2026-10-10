@@ -30,7 +30,7 @@ export const PUBLIC_PATHS = [
 ] as const
 
 /** Public legal notices are exact paths; no nested CRM route inherits this exemption. */
-export const PUBLIC_LEGAL_PATHS = ['/privacy', '/terms', '/data-deletion'] as const
+export const PUBLIC_LEGAL_PATHS = ['/privacy', '/terms', '/data-deletion', '/support'] as const
 
 /**
  * Third-party webhook endpoints. These carry no session cookie, so the proxy must let

@@ -10,7 +10,7 @@ export default function robots(): MetadataRoute.Robots {
   return {
     rules: {
       userAgent: '*',
-      allow: ['/privacy', '/terms', '/data-deletion'],
+      allow: ['/privacy', '/terms', '/data-deletion', '/support'],
       disallow: '/',
     },
   }

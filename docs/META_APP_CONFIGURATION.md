@@ -12,6 +12,7 @@ Use the **production** host shown below. The CRM uses one Meta OAuth flow to con
 | Website URL / Site URL | `https://crm-ai4-l.vercel.app/login` | Public sign-in page; the CRM workspace itself requires an account. |
 | Privacy Policy URL | `https://crm-ai4-l.vercel.app/privacy` | Public page created for this integration. |
 | Terms of Service URL | `https://crm-ai4-l.vercel.app/terms` | Public page created for this integration. |
+| User Support URL, if shown | `https://crm-ai4-l.vercel.app/support` | Public contact page with `info@ai4l.com.au`. |
 | User data deletion: **Data deletion instructions URL** | `https://crm-ai4-l.vercel.app/data-deletion` | Choose the instructions URL option, not a callback option. |
 | Facebook Login for Business: **Valid OAuth Redirect URIs** | `https://crm-ai4-l.vercel.app/api/social/oauth/meta/callback` | Exact server callback; register it once for both Facebook Pages and linked Instagram accounts. |
 | Redirect URI Validator | `https://crm-ai4-l.vercel.app/api/social/oauth/meta/callback` | If Meta offers a validator, check the same exact URL. |
@@ -36,4 +37,4 @@ The Meta authorization flow currently requests `pages_show_list`, `pages_read_en
 
 ## Publication checklist
 
-The public pages identify Ai4l as the operator in Australia and use `info@ai4l.com.au` for privacy and deletion requests, as supplied by the business owner. Confirm the privacy, terms, and deletion text with the business owner. Then deploy and open all three URLs in a private browser session to confirm they are readable without signing in. The current routes are source code until the deployment that contains them is live.
+The public pages identify Ai4l as the operator in Australia and use `info@ai4l.com.au` for privacy and deletion requests, as supplied by the business owner. Confirm the privacy, terms, and deletion text with the business owner. Then deploy and open all four public pages in a private browser session to confirm they are readable without signing in. The current routes are source code until the deployment that contains them is live.

@@ -7,6 +7,7 @@ const links = [
   { href: '/privacy', label: 'Privacy' },
   { href: '/terms', label: 'Terms' },
   { href: '/data-deletion', label: 'Data deletion' },
+  { href: '/support', label: 'Support' },
 ] as const
 
 export default function LegalLayout({ children }: { children: ReactNode }) {
