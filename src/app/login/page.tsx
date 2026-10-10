@@ -75,6 +75,7 @@ export default async function LoginPage({
           <Link href="/privacy">Privacy</Link>
           <Link href="/terms">Terms</Link>
           <Link href="/data-deletion">Data deletion</Link>
+          <Link href="/support">Support</Link>
         </nav>
       </div>
     </main>
