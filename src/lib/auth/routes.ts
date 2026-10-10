@@ -29,6 +29,9 @@ export const PUBLIC_PATHS = [
   '/api/preferences',
 ] as const
 
+/** Public legal notices are exact paths; no nested CRM route inherits this exemption. */
+export const PUBLIC_LEGAL_PATHS = ['/privacy', '/terms', '/data-deletion'] as const
+
 /**
  * Third-party webhook endpoints. These carry no session cookie, so the proxy must let
  * them through — they authenticate themselves by signature verification instead.
@@ -81,7 +84,8 @@ function normalise(pathname: string): string {
 export function isPublicPath(pathname: string): boolean {
   const path = normalise(pathname)
 
-  return PUBLIC_PATHS.some((publicPath) => path === publicPath || path.startsWith(`${publicPath}/`))
+  return PUBLIC_LEGAL_PATHS.some((publicPath) => path === publicPath)
+    || PUBLIC_PATHS.some((publicPath) => path === publicPath || path.startsWith(`${publicPath}/`))
 }
 
 /** True only for an exact webhook endpoint. */

@@ -1,0 +1,25 @@
+.shell { min-height: 100dvh; background: var(--bg-app); color: var(--text-primary); }
+.header, .footer { display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; max-width: 72rem; margin: 0 auto; padding: 1.5rem clamp(1.25rem, 4vw, 3rem); }
+.header { border-bottom: 1px solid var(--border); }
+.brand { font: 700 1.15rem/1 var(--font-heading); letter-spacing: -.025em; white-space: nowrap; }
+.brand span { color: #075778; }
+.nav, .footer nav { display: flex; flex-wrap: wrap; gap: .45rem 1.25rem; }
+.nav a, .footer a { color: #41505d; font-size: .85rem; font-weight: 600; text-underline-offset: .2em; }
+.nav a:hover, .footer a:hover { color: #075778; text-decoration: underline; }
+.header a:focus-visible, .footer a:focus-visible, .article a:focus-visible { outline: 2px solid #075778; outline-offset: 3px; border-radius: 2px; }
+.main { max-width: 55rem; margin: 0 auto; padding: clamp(2rem, 5vw, 4.5rem) clamp(1.25rem, 4vw, 3rem) 5rem; }
+.article { background: #fff; border: 1px solid var(--border); border-radius: var(--radius-md); padding: clamp(1.5rem, 4vw, 3.5rem); }
+.eyebrow { margin-bottom: .6rem; color: #075778; font-size: .75rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+.article h1 { max-width: 18ch; margin-bottom: .8rem; font-size: clamp(2rem, 3.5vw, 3rem); line-height: 1.1; letter-spacing: -.035em; }
+.intro { max-width: 65ch; color: #41505d; font-size: 1rem; line-height: 1.7; }
+.updated { margin-top: 1rem; color: #53616e; font-size: .8rem; }
+.article section { margin-top: 2.5rem; padding-top: 2rem; border-top: 1px solid var(--border); }
+.article h2 { margin-bottom: .85rem; font-size: 1.25rem; letter-spacing: -.015em; }
+.article p, .article li { color: #41505d; line-height: 1.7; }
+.article p + p { margin-top: .85rem; }
+.article ul, .article ol { margin: .8rem 0 0; padding-left: 1.5rem; }
+.article li + li { margin-top: .5rem; }
+.article a { color: #075778; font-weight: 700; text-decoration: underline; text-underline-offset: .2em; overflow-wrap: anywhere; }
+.callout { margin-top: 1.25rem; padding: 1.1rem 1.25rem; background: #eff8fa; border-left: 3px solid #0b7597; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+.footer { border-top: 1px solid var(--border); color: #53616e; font-size: .8rem; }
+@media (max-width: 620px) { .header, .footer { align-items: flex-start; flex-direction: column; gap: 1rem; } .nav, .footer nav { gap: .5rem 1rem; } }
