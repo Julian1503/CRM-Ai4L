@@ -114,3 +114,103 @@ the source revision's, provider fields missing for the contract, and a manual ch
 (the API cannot read Automation HTML): the template must not reference `{{BookingUrl}}`
 for `external_url`/`none`; a static Automation must be the registered version.
 `ready` is false while any problem remains.
+
+## Test sends (UX plan P0.2, migration 20261008010000)
+
+**Send a test** (Campaigns → open a campaign's copy) sends the campaign's **current**
+content through its EmailOctopus automation to one test recipient. It is not a delivery.
+
+| Rule | How |
+| --- | --- |
+| Allowlisted recipients only | `CAMPAIGN_TEST_RECIPIENTS` (comma-separated, server env). The UI picks from it; an address typed in the browser is refused. Empty/unset = test sends off (POST answers 404 `feature_disabled`). |
+| Current content | Legacy campaigns send their merge fields; Studio campaigns their snapshot fields and CTA mode. The request names the revision on screen; the database refuses a stale one (`CRM06 stale_revision`). Invalid Studio content is refused; the dynamic-fields flag is *not* applied, because testing to an allowlisted address is how that mode is validated. |
+| Only the test contact is written | Content fields are written on the test recipient's provider contact only. Reserved fields (`PrefsUrl`, `Newsletter`, `Courses`) and the list status are never sent, so no real contact's consent or fields change. If the allowlisted address is also a CRM contact, only its content fields are overwritten until the next campaign writes them. |
+| Never a booking | A booking email gets `BookingUrl = <app>/book/test-send-preview`, which matches no booking and opens the "link not valid" page. Without `NEXT_PUBLIC_APP_URL` the link is omitted and the result says so. |
+| Not a delivery | Nothing touches `campaign_runs`, `campaign_sends` or `bookings`; the campaign's status, revision and approval do not change. |
+| Recorded | `campaign_test_sends`: campaign, revision, snapshot + hash, CTA mode and automation (stamped by the database from the campaign), recipient, outcome, error, actor, time. Written `pending` before the provider call and settled once (`sent` / `failed` / `uncertain`); otherwise immutable, never deleted; members only (restrictive RLS). |
+| Rate limited | At most 5 per campaign per rolling hour (`CRM09 test_send_rate_limited` → 429). |
+
+**Status, not a gate.** The panel shows the last successful test (who, when, which
+revision) and warns when the content changed since. Preflight reports `testSend`
+(`currentRevisionTested`), and the send confirmation shows "This version was / has not
+been tested". It does not block approval or sending: the plan asks that the test be
+shown before a real send (global criterion 2), and making it mandatory would stop every
+send on an environment without an allowlist. Turning it into a gate is a one-line change
+in the send confirmation once every environment has `CAMPAIGN_TEST_RECIPIENTS`.
+
+**Provider limits.** EmailOctopus may refuse a test recipient who unsubscribed from the
+list or (without "Allow contacts to repeat") already went through the automation; the
+refusal is recorded and shown. A test of a dynamic-fields template writes the same fields
+real sends write, so testing while a real campaign is sending to the same address can
+swap content (EO-5).
+
+## Recurring newsletter occurrences (H12, 20261008000000)
+
+Before, the runner advanced `newsletter_schedules.next_run_at` and only then loaded the
+template, drafted the campaign and called the model; a failure after the advance lost that
+issue. Now every occurrence is a row in `newsletter_schedule_occurrences`.
+
+| Guarantee | Mechanism |
+| --- | --- |
+| An advance never loses its issue | `record_newsletter_occurrences` writes the due occurrence(s) **and** advances `next_run_at` in one transaction, conditional on `next_run_at` still holding the value the runner read. A second scheduler gets `claimed_elsewhere`. |
+| Two runners cannot draft one issue twice | Drafting is leased (`claim_newsletter_occurrences`, `FOR UPDATE SKIP LOCKED`, claim token). Only the lease holder completes or fails it. `campaigns_schedule_occurrence_idx` still allows one campaign per (schedule, date). |
+| Failures are retried, then visible | Any failure after the claim (template read, campaign insert, topic, copy write, review move) returns the occurrence to `pending` with backoff (60 s × 2^attempt, max 1 h) until `max_attempts` (3), then `failed`. An expired lease counts as an attempt. Unusable template / archived segment / missing schedule are `failed` at once. |
+| Retries are idempotent | A retry finds the campaign an earlier attempt created: still `draft` → its copy is written again, keeping the topic it already took; past draft → recorded as drafted, nothing redone. |
+| A person can act | The schedule list shows failed/skipped issues with the reason and **Retry** (`retry_newsletter_occurrence`, members only), which requeues it and drafts it now with the operator's session. |
+
+States: `pending → drafting → drafted`; `drafting → pending` (retryable) or `failed`;
+`skipped` (catch-up); `failed | skipped → pending` only by Retry. Nothing is deleted.
+
+**Catch-up decision (14.4).** Conservative default: after downtime or a paused period,
+only the **most recent** missed occurrence is drafted; older missed ones are recorded as
+`skipped` with the reason "Missed while the scheduler was not running…", so they are
+visible and a person can Retry any of them. A paused schedule is not due (resuming does
+not replay the pause), and occurrences already recorded wait while it is paused.
+
+**Execution window.** The cron runs once a day (`vercel.json`, 22:00 UTC). An occurrence
+is drafted at the first run after it is due, so up to ~24 h late; up to 3 occurrences are
+drafted per run (the rest wait for the next run or a Retry). Occurrences are computed in
+the schedule's time zone, so the local time holds across daylight saving.
+
+"Generate now" is unchanged: it drafts today's issue directly, never moves the schedule
+and records no occurrence.
+
+### Data review before/after deploying H12
+
+Schedules that advanced without producing a campaign under the old runner (the lost
+issues). Restore only after checking for existing drafts and the operator's intent — e.g.
+by asking the schedule owner, then using "Generate now" or inserting a `pending`
+occurrence for the missed date via SQL:
+
+```sql
+-- Expected occurrences since each schedule was created, with no campaign for that date.
+with expected as (
+  select s.id, s.name, s.frequency, s.timezone,
+         generate_series(
+           s.created_at,
+           s.next_run_at - interval '1 day',
+           case s.frequency when 'weekly' then interval '7 days'
+                            when 'fortnightly' then interval '14 days'
+                            else interval '1 month' end
+         ) as approx_due
+    from public.newsletter_schedules s
+   where s.removed_at is null
+)
+select e.id, e.name, (e.approx_due at time zone e.timezone)::date as approx_date
+  from expected e
+ where not exists (
+         select 1 from public.campaigns c
+          where c.schedule_id = e.id
+            and c.scheduled_for between (e.approx_due at time zone e.timezone)::date - 3
+                                    and (e.approx_due at time zone e.timezone)::date + 3)
+ order by e.name, approx_date;
+```
+
+The series is approximate (it starts at creation, not at the first configured run);
+treat it as a list to review, not a list to replay.
+
+**Verification:** `npm run db:verify -- occurrences` (atomic record + advance, catch-up,
+stale scheduler, leases, backoff, exhaustion, ownership, paused schedules, no delete
+path); `npm run test:integration` → `src/lib/marketing/schedules/occurrences.integration.test.ts`
+(failure after the advance is retried and drafted once; failure after the campaign insert
+resumes it; two concurrent schedulers record and draft once; catch-up).

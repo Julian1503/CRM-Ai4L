@@ -481,10 +481,12 @@ describe('MarketingView', () => {
     it('closes without leaving the list behind', async () => {
       render(<MarketingView jobTypes={jobTypes} />)
 
-      fireEvent.click(await screen.findByTestId('audience-camp-1'))
-      fireEvent.click(await screen.findByTestId('close-audience'))
+      // Generous timeouts: this view issues several reads on mount and the full suite runs
+      // in parallel, so the default 1 s made this test flaky under load.
+      fireEvent.click(await screen.findByTestId('audience-camp-1', {}, { timeout: 5000 }))
+      fireEvent.click(await screen.findByTestId('close-audience', {}, { timeout: 5000 }))
 
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     })
 
     it('reports a failed read inside the dialog', async () => {

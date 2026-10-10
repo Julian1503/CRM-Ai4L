@@ -11,6 +11,11 @@ const mockAdvance = jest.fn()
 jest.mock('@/lib/consent/outbox', () => ({
   processConsentOutbox: (...args: unknown[]) => mockOutbox(...args),
 }))
+const mockApplyCalendly = jest.fn()
+jest.mock('@/lib/booking/calendly', () => ({
+  ...jest.requireActual('@/lib/booking/calendly'),
+  applyCalendlyEvent: (...args: unknown[]) => mockApplyCalendly(...args),
+}))
 jest.mock('@/lib/marketing/dispatch', () => ({
   advanceCampaignSend: (...args: unknown[]) => mockAdvance(...args),
 }))
@@ -90,6 +95,32 @@ describe('runJobs', () => {
     await expect(runJobs({ db, credentials, baseUrl: 'https://crm', preferencesOrigin: null, budgetMs: 60_000 })).rejects.toThrow(
       'Could not recover content jobs: boom',
     )
+  })
+
+  it('replays a parked reschedule cancellation as a reschedule, not as a cancellation', async () => {
+    mockApplyCalendly.mockResolvedValue('applied')
+    const parked = createQueryBuilderMock({
+      data: [
+        {
+          event_type: 'invitee.canceled', invitee_uri: 'inv-old', event_uri: null, email: 'a@b.test',
+          scheduled_at: null, tracking_booking_id: null, old_invitee_uri: null, rescheduled: true,
+        },
+        {
+          event_type: 'invitee.canceled', invitee_uri: 'inv-2', event_uri: null, email: 'c@d.test',
+          scheduled_at: null, tracking_booking_id: null, old_invitee_uri: null, rescheduled: null,
+        },
+      ],
+      error: null,
+    })
+    const campaigns = createQueryBuilderMock({ data: [], error: null })
+    const db = createDbMock((table: string) => (table === 'campaigns' ? campaigns : parked)) as never
+
+    const report = await runJobs({ db, credentials: null, baseUrl: 'https://crm', preferencesOrigin: null, budgetMs: 60_000 })
+
+    expect(parked.argsFor('select')?.[0]).toContain('rescheduled')
+    expect(mockApplyCalendly.mock.calls[0][1]).toMatchObject({ inviteeUri: 'inv-old', rescheduled: true })
+    expect(mockApplyCalendly.mock.calls[1][1]).toMatchObject({ inviteeUri: 'inv-2', rescheduled: false })
+    expect(report.reconciliation).toMatchObject({ retried: 2, resolved: 2 })
   })
 
   it('does not attempt sends without provider credentials', async () => {

@@ -18,6 +18,7 @@ import CampaignCopyEditor from './CampaignCopyEditor'
 import CampaignStreamField from './CampaignStreamField'
 import SegmentsPanel from './SegmentsPanel'
 import SendConfirmDialog from './SendConfirmDialog'
+import TestSendPanel from './TestSendPanel'
 import styles from './marketing.module.css'
 import StreamPill from './StreamPill'
 
@@ -261,6 +262,8 @@ export default function MarketingView({ jobTypes, initialCampaignId }: Marketing
   const [sendAudienceSize, setSendAudienceSize] = useState<number | null>(null)
   const [sendAudienceLoading, setSendAudienceLoading] = useState(false)
   const [sendAudienceError, setSendAudienceError] = useState<string | null>(null)
+  // Informational: whether the content as it is now reached a test recipient (P0.2).
+  const [sendTested, setSendTested] = useState<boolean | null>(null)
 
 
   // Audience sizes, keyed by campaign *and* segment so a re-pointed campaign does not
@@ -643,6 +646,7 @@ export default function MarketingView({ jobTypes, initialCampaignId }: Marketing
     setSendConfirmation(campaign)
     setSendAudienceSize(null)
     setSendAudienceError(null)
+    setSendTested(null)
     setSendAudienceLoading(true)
 
     try {
@@ -653,6 +657,7 @@ export default function MarketingView({ jobTypes, initialCampaignId }: Marketing
       if (typeof body?.total !== 'number') throw new Error('Could not verify campaign audience.')
 
       setSendAudienceSize(body.total)
+      setSendTested(typeof body?.testSend?.currentRevisionTested === 'boolean' ? body.testSend.currentRevisionTested : null)
     } catch (requestError) {
       setSendAudienceError(
         requestError instanceof Error ? requestError.message : 'Could not verify campaign audience.'
@@ -1183,6 +1188,10 @@ You will approve it again before anything leaves, and EmailOctopus only delivers
               )}
 
               {reviewingId === campaign.id && (
+                <TestSendPanel campaignId={campaign.id} revision={campaign.revision} />
+              )}
+
+              {reviewingId === campaign.id && (
                 <CampaignCopyEditor
                   campaignId={campaign.id}
                   snapshotId={campaign.content_snapshot_id ?? null}
@@ -1254,6 +1263,7 @@ You will approve it again before anything leaves, and EmailOctopus only delivers
           campaignName={sendConfirmation.name}
           audienceLabel={sendConfirmation.segment?.name ?? 'Selected segment'}
           audienceSize={sendAudienceSize}
+          tested={sendTested}
           loading={sendAudienceLoading}
           error={sendAudienceError}
           onConfirm={confirmSend}

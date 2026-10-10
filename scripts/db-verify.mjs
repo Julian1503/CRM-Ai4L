@@ -37,9 +37,12 @@ const ALIASES = {
   membership: 'verify_20261002000000.sql',
   delivery: 'verify_20261003000000.sql',
   contacts2: 'verify_20261004000000.sql',
+  durable: 'verify_20261005000000.sql',
   tags: 'verify_20261006000000.sql',
   content: 'verify_20261007000000.sql',
   snapshots: 'verify_20261007010000.sql',
+  occurrences: 'verify_20261008000000.sql',
+  testsends: 'verify_20261008010000.sql',
 }
 
 function fail(message) {

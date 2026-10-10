@@ -14,8 +14,10 @@ export const maxDuration = 300
 /**
  * Daily newsletter run, called by Vercel Cron (see vercel.json).
  *
- * Drafts one campaign per due schedule and leaves it in review — see
- * `src/lib/marketing/schedules/runDue.ts`. Nothing is sent from here.
+ * Records each due schedule's occurrence(s) and advances it atomically, then drafts up
+ * to a few queued occurrences (new, or retried after a failure) and leaves each in review —
+ * see `src/lib/marketing/schedules/runDue.ts` and docs/CAMPAIGN_DELIVERY.md (H12).
+ * Nothing is sent from here.
  *
  * Authenticated by CRON_SECRET — see src/lib/auth/cron.ts.
  */

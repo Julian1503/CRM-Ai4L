@@ -7,21 +7,36 @@ import type { ScheduleBrief } from '@/lib/marketing/prompt'
 import { createCampaign } from '@/lib/marketing/createCampaign'
 import { findContract, type TemplateContract } from '@/lib/marketing/templateContracts'
 
-import { advanceSchedule, localDate } from './nextRun'
+import type { NewsletterScheduleOccurrenceRow } from '@/lib/db/scheduleOccurrenceTypes'
+
+import { localDate } from './nextRun'
+import {
+  claimOccurrences,
+  completeOccurrence,
+  failOccurrence,
+  recordDueOccurrences,
+  retryOccurrence,
+} from './occurrences'
 import { sendReviewNotification } from './reviewEmail'
 
 /**
  * Turns due newsletter schedules into campaigns waiting for approval.
  *
- * Called by the daily cron with the service-role client, and by "Generate now" with the
- * operator's. Per schedule:
+ * Called by the daily cron with the service-role client. Two phases (audit H12):
  *
- *   1. claim the occurrence by advancing `next_run_at` — conditional on it not having
- *      moved, so two overlapping runs cannot both take it;
- *   2. draft a campaign on the schedule's (newsletter) template — the unique index on
- *      (schedule_id, scheduled_for) makes a repeat a no-op rather than a duplicate;
- *   3. write the copy through the same path as "Write copy with AI";
- *   4. move it to review and tell the reviewers.
+ *   1. record: for each due schedule, record_newsletter_occurrences writes the due
+ *      occurrence(s) and advances `next_run_at` in one transaction — conditional on it
+ *      not having moved, so two overlapping runs cannot both record. Catch-up policy
+ *      (decision 14.4): only the most recent missed occurrence is drafted; older ones
+ *      are recorded as skipped, with a reason, and can be retried by a person;
+ *   2. draft: occurrences are claimed with a lease and drafted one by one — template,
+ *      campaign (the unique index on (schedule_id, scheduled_for) makes a repeat find
+ *      the existing draft instead of making a second), copy, topic, review. A failure
+ *      returns the occurrence to the queue with backoff, or marks it failed after its
+ *      attempts, where the schedule list shows it with a Retry button.
+ *
+ * "Generate now" (runScheduleNow) drafts today's issue directly without an occurrence:
+ * it never moves the schedule, so there is nothing to lose.
  *
  * It stops at review. Approval and sending stay with a person, and the database status
  * trigger would refuse anything else regardless.
@@ -29,6 +44,9 @@ import { sendReviewNotification } from './reviewEmail'
 
 /** Generation takes tens of seconds; more than a few would outlast the function. */
 export const MAX_SCHEDULES_PER_RUN = 3
+
+/** Recording is cheap; this only bounds one run's reads. */
+const MAX_SCHEDULES_RECORDED_PER_RUN = 50
 
 /** How many past subjects the model is shown so it does not repeat itself. */
 const RECENT_SUBJECT_COUNT = 5
@@ -44,18 +62,34 @@ export type RunDueDeps = {
 
 export type ScheduleRunReport = {
   scheduleId: string
+  occurrenceId?: string
+  scheduledFor?: string
   status: 'in_review' | 'needs_attention' | 'skipped' | 'failed'
   campaignId?: string
   reason?: string
+  /** After a failure: back in the queue ('pending') or waiting for a person ('failed'). */
+  occurrenceStatus?: 'pending' | 'failed' | 'lost'
   notification?: 'sent' | 'skipped' | 'failed'
 }
-
-type Occurrence = { scheduledFor: string; nextRunAt: Date | null }
 
 export async function runDueSchedules(
   deps: RunDueDeps,
   limit = MAX_SCHEDULES_PER_RUN
 ): Promise<ScheduleRunReport[]> {
+  const reports = await recordDue(deps)
+  const claimed = await claimOccurrences(deps.db, { limit })
+
+  // Sequential on purpose: each run holds a model call for tens of seconds, and running
+  // them side by side would only race the function's time limit.
+  for (const occurrence of claimed) {
+    reports.push(await runOccurrence(deps, occurrence))
+  }
+
+  return reports
+}
+
+/** Phase 1. Reports only problems; recorded occurrences are reported when drafted. */
+async function recordDue(deps: RunDueDeps): Promise<ScheduleRunReport[]> {
   const { data, error } = await deps.db
     .from('newsletter_schedules')
     .select('*')
@@ -63,19 +97,42 @@ export async function runDueSchedules(
     .is('archived_at', null)
     .lte('next_run_at', deps.now.toISOString())
     .order('next_run_at', { ascending: true })
-    .limit(limit)
+    .limit(MAX_SCHEDULES_RECORDED_PER_RUN)
 
   if (error) throw new Error(`Could not read due schedules: ${error.message}`)
 
   const reports: ScheduleRunReport[] = []
-
-  // Sequential on purpose: each run holds a model call for tens of seconds, and running
-  // them side by side would only race the function's time limit.
   for (const schedule of (data ?? []) as NewsletterScheduleRow[]) {
-    reports.push(await runOne(deps, schedule))
+    try {
+      await recordDueOccurrences(deps.db, schedule, deps.now)
+    } catch (recordError) {
+      const message = recordError instanceof Error ? recordError.message : String(recordError)
+      console.error(`Newsletter schedule ${schedule.id} could not record its occurrence:`, message)
+      reports.push({ scheduleId: schedule.id, status: 'failed', reason: message })
+    }
   }
-
   return reports
+}
+
+/**
+ * An operator's Retry: puts a failed or skipped occurrence back in the queue and drafts
+ * it now, with the operator's own session.
+ */
+export async function retryAndRunOccurrence(deps: RunDueDeps, occurrenceId: string): Promise<ScheduleRunReport> {
+  const queued = await retryOccurrence(deps.db, occurrenceId)
+  const [claimed] = await claimOccurrences(deps.db, { limit: 1, occurrenceId })
+
+  if (!claimed) {
+    // Paused or archived schedule, or another run took it: it stays queued.
+    return {
+      scheduleId: queued.schedule_id,
+      occurrenceId,
+      scheduledFor: queued.scheduled_for,
+      status: 'skipped',
+      reason: 'queued',
+    }
+  }
+  return runOccurrence(deps, claimed)
 }
 
 /**
@@ -87,59 +144,129 @@ export async function runScheduleNow(
   deps: RunDueDeps,
   schedule: NewsletterScheduleRow
 ): Promise<ScheduleRunReport> {
-  return runOne(deps, schedule, {
-    scheduledFor: localDate(deps.now, schedule.timezone),
-    nextRunAt: null,
-  })
-}
-
-async function runOne(
-  deps: RunDueDeps,
-  schedule: NewsletterScheduleRow,
-  forced?: Occurrence
-): Promise<ScheduleRunReport> {
-  const scheduleId = schedule.id
-
   try {
-    const occurrence =
-      forced ??
-      advanceSchedule(new Date(schedule.next_run_at), schedule.frequency, schedule.timezone, deps.now)
-
-    if (occurrence.nextRunAt && !(await claim(deps.db, schedule, occurrence.nextRunAt))) {
-      return { scheduleId, status: 'skipped', reason: 'claimed_elsewhere' }
-    }
-
-    const template = await loadUsableTemplate(deps.db, schedule.template_id)
-
-    if (!template) return { scheduleId, status: 'failed', reason: 'template_unusable' }
-
-    const campaign = await draftCampaign(deps.db, schedule, template, occurrence.scheduledFor)
-
-    if (campaign === 'already_drafted') return { scheduleId, status: 'skipped', reason: 'already_drafted' }
-    if (campaign === 'segment_archived') return { scheduleId, status: 'failed', reason: 'segment_archived' }
-
-    return await writeAndSubmit(deps, schedule, campaign, occurrence.scheduledFor)
+    const outcome = await draftIssue(deps, schedule, localDate(deps.now, schedule.timezone), false)
+    return outcome.kind === 'done'
+      ? outcome.report
+      : { scheduleId: schedule.id, status: 'failed', reason: outcome.reason }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-
-    console.error(`Newsletter schedule ${scheduleId} failed:`, message)
-
-    return { scheduleId, status: 'failed', reason: message }
+    console.error(`Newsletter schedule ${schedule.id} failed:`, message)
+    return { scheduleId: schedule.id, status: 'failed', reason: message }
   }
 }
 
-/** Advances `next_run_at`, but only if it still holds the value this run read. */
-async function claim(db: Db, schedule: NewsletterScheduleRow, nextRunAt: Date): Promise<boolean> {
+type ReportBase = Pick<ScheduleRunReport, 'scheduleId' | 'occurrenceId' | 'scheduledFor'>
+
+/**
+ * Phase 2, one claimed occurrence: draft it, then settle the lease either way. Exported
+ * for the integration tests, which run their own fixture's occurrence in isolation.
+ */
+export async function runOccurrence(
+  deps: RunDueDeps,
+  occurrence: NewsletterScheduleOccurrenceRow
+): Promise<ScheduleRunReport> {
+  const base: ReportBase = {
+    scheduleId: occurrence.schedule_id,
+    occurrenceId: occurrence.id,
+    scheduledFor: occurrence.scheduled_for,
+  }
+
+  try {
+    const schedule = await loadSchedule(deps.db, occurrence.schedule_id)
+    if (!schedule) return await settleFailure(deps, occurrence, base, 'schedule_missing', false)
+
+    const outcome = await draftIssue(deps, schedule, occurrence.scheduled_for, true)
+    if (outcome.kind === 'refused') return await settleFailure(deps, occurrence, base, outcome.reason, false)
+
+    const campaignId = outcome.report.campaignId
+    if (!campaignId) return await settleFailure(deps, occurrence, base, 'campaign_missing', true)
+    if (!(await completeOccurrence(deps.db, occurrence, campaignId))) {
+      return { ...outcome.report, ...base, occurrenceStatus: 'lost' }
+    }
+    return { ...outcome.report, ...base }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.error(`Newsletter occurrence ${occurrence.id} failed:`, message)
+    return settleFailure(deps, occurrence, base, message, true)
+  }
+}
+
+async function settleFailure(
+  deps: RunDueDeps,
+  occurrence: NewsletterScheduleOccurrenceRow,
+  base: ReportBase,
+  reason: string,
+  retryable: boolean
+): Promise<ScheduleRunReport> {
+  let occurrenceStatus: ScheduleRunReport['occurrenceStatus']
+  try {
+    occurrenceStatus = await failOccurrence(deps.db, occurrence, reason, retryable)
+  } catch (error) {
+    // The lease expires and the occurrence is retried; nothing is lost.
+    console.error(
+      `Could not record the failure of occurrence ${occurrence.id}:`,
+      error instanceof Error ? error.message : error
+    )
+  }
+  return { ...base, status: 'failed', reason, occurrenceStatus }
+}
+
+async function loadSchedule(db: Db, scheduleId: string): Promise<NewsletterScheduleRow | null> {
+  const { data, error } = await db.from('newsletter_schedules').select('*').eq('id', scheduleId).maybeSingle()
+  if (error) throw new Error(`Could not read the schedule: ${error.message}`)
+  return (data as NewsletterScheduleRow | null) ?? null
+}
+
+type DraftOutcome =
+  | { kind: 'done'; report: ScheduleRunReport }
+  | { kind: 'refused'; reason: 'template_unusable' | 'segment_archived' }
+
+/**
+ * Template, campaign, copy, review for one occurrence date. Safe to repeat: with
+ * `resumeExisting`, an occurrence whose campaign already exists resumes it — still a
+ * draft, its copy is written again; past draft, nothing is redone.
+ */
+async function draftIssue(
+  deps: RunDueDeps,
+  schedule: NewsletterScheduleRow,
+  scheduledFor: string,
+  resumeExisting: boolean
+): Promise<DraftOutcome> {
+  const template = await loadUsableTemplate(deps.db, schedule.template_id)
+  if (!template) return { kind: 'refused', reason: 'template_unusable' }
+
+  const drafted = await draftCampaign(deps.db, schedule, template, scheduledFor)
+  if (drafted === 'segment_archived') return { kind: 'refused', reason: 'segment_archived' }
+  if (drafted !== 'already_drafted') {
+    return { kind: 'done', report: await writeAndSubmit(deps, schedule, drafted, scheduledFor) }
+  }
+
+  const existing = await findOccurrenceCampaign(deps.db, schedule.id, scheduledFor)
+  if (resumeExisting && existing?.status === 'draft') {
+    return { kind: 'done', report: await writeAndSubmit(deps, schedule, existing, scheduledFor) }
+  }
+  return {
+    kind: 'done',
+    report: { scheduleId: schedule.id, status: 'skipped', reason: 'already_drafted', campaignId: existing?.id },
+  }
+}
+
+type ExistingCampaign = { id: string; name: string; status: string }
+
+async function findOccurrenceCampaign(
+  db: Db,
+  scheduleId: string,
+  scheduledFor: string
+): Promise<ExistingCampaign | null> {
   const { data, error } = await db
-    .from('newsletter_schedules')
-    .update({ next_run_at: nextRunAt.toISOString(), updated_at: new Date().toISOString() })
-    .eq('id', schedule.id)
-    .eq('next_run_at', schedule.next_run_at)
-    .select('id')
-
-  if (error) throw new Error(`Could not claim the schedule: ${error.message}`)
-
-  return (data ?? []).length > 0
+    .from('campaigns')
+    .select('id, name, status')
+    .eq('schedule_id', scheduleId)
+    .eq('scheduled_for', scheduledFor)
+    .maybeSingle()
+  if (error) throw new Error(`Could not read the occurrence's campaign: ${error.message}`)
+  return (data as ExistingCampaign | null) ?? null
 }
 
 type UsableTemplate = { id: string; provider_automation_id: string; contract: TemplateContract }
@@ -214,7 +341,7 @@ async function writeAndSubmit(
   campaign: DraftedCampaign,
   scheduledFor: string
 ): Promise<ScheduleRunReport> {
-  const topic = await nextTopic(deps.db, schedule.id)
+  const topic = (await topicOfCampaign(deps.db, campaign.id)) ?? (await nextTopic(deps.db, schedule.id))
   const brief: ScheduleBrief = {
     goal: schedule.goal,
     tone: schedule.tone,
@@ -271,6 +398,20 @@ async function writeCopy(deps: RunDueDeps, campaignId: string, brief: ScheduleBr
 }
 
 type QueuedTopic = { id: string; title: string; details: string | null }
+
+/** The topic an earlier attempt already took for this campaign, so a retry keeps it. */
+async function topicOfCampaign(db: Db, campaignId: string): Promise<QueuedTopic | null> {
+  const { data, error } = await db
+    .from('newsletter_topics')
+    .select('id, title, details')
+    .eq('campaign_id', campaignId)
+    .limit(1)
+    .maybeSingle()
+
+  if (error) throw new Error(`Could not read the campaign's topic: ${error.message}`)
+
+  return (data as QueuedTopic | null) ?? null
+}
 
 async function nextTopic(db: Db, scheduleId: string): Promise<QueuedTopic | null> {
   const { data, error } = await db

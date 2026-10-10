@@ -636,7 +636,7 @@ All items start pending. Mark an item complete only with merged implementation, 
 | --- | --- | --- | --- |
 | C1 | Public signup and missing approved membership | 5.1 | Implemented; locally verified (`db:verify -- membership`, E2E). Deploy: disable signup, bootstrap admin — docs/ACCESS_CONTROL.md |
 | H1 | Browser-readable integration credentials | 5.2 | Implemented; locally verified. Deploy: rotate EmailOctopus key after release |
-| H2 | Vulnerable production dependencies | 5.3 | Implemented: Next.js 16.3.6, SheetJS 0.20.3 (CDN, lockfile integrity); `npm audit --omit=dev` = 0 |
+| H2 | Vulnerable production dependencies | 5.3 | Done: Next.js 16.3.8 (+ eslint-config-next 16.3.8), SheetJS 0.20.3 (CDN, lockfile integrity); `npm audit --omit=dev` = 0 vulnerabilities (2026-10-08) |
 | H3 | Duplicate sends and ignored ledger failures | 6.3 | Implemented: atomic leased claims, owner-only outcomes, `uncertain` state, checked writes, cron-driven resume — docs/CAMPAIGN_DELIVERY.md |
 | H4 | Missing dispatch-time consent check | 6.4 | Implemented: eligibility re-checked atomically at dispatch; withdrawal/archive skips queued rows |
 | H5 | Consent/provider synchronization gap | 6.5 | Implemented: transactional consent outbox, current-state convergence, inline + cron workers; backfill queues withdrawn contacts |
@@ -644,13 +644,13 @@ All items start pending. Mark an item complete only with merged implementation, 
 | H7 | Audience truncation | 6.2 | Implemented: resumable keyset materialisation past the row cap; >10k refused at approval and send |
 | H8 | Non-atomic contact edits | 7.1 | Implemented: transactional validated `save_contact`, revision conflicts, drawer keeps draft — docs/IMPORTS.md. Deploy: manual service-link review |
 | H9 | Unmapped import status overwrites customers | 7.2 | Implemented: tri-state yes/no parsing, presence-aware `is_customer`/status, blank never clears, duplicates reported |
-| H10 | Payment return/webhook race | 8.2 | Pending |
-| H11 | Webhook claim lost after process failure | 8.1 | Pending |
-| H12 | Schedule advances before durable work | 8.4 | Pending |
+| H10 | Payment return/webhook race | 8.2 | Implemented; locally verified: single `apply_checkout_payment` for return page and webhook (checkout id, $0 AUD, never backwards, mismatch refused), one `notification_outbox` email per booking with backoff. Evidence: `db:verify -- durable` §3–4; `webhooks.integration.test.ts` (browser-first, webhook-first, simultaneous, different checkout) — docs/WEBHOOKS.md |
+| H11 | Webhook claim lost after process failure | 8.1 | Implemented; locally verified: ledger outcomes + 120 s leases, owner-only completion, business change and completion in one transaction, legacy rows flagged. Evidence: `db:verify -- durable` §1–2; integration: killed-after-claim redelivery, DB failure before completion, 6 concurrent duplicates → 1 processed — docs/WEBHOOKS.md (legacy reconciliation) |
+| H12 | Schedule advances before durable work | 8.4 | Implemented: durable occurrences recorded atomically with the advance, leased drafting with retry/backoff, catch-up = most recent only (older skipped with reason, 14.4 default), failed/skipped shown with Retry; `db:verify -- occurrences`, integration test — docs/CAMPAIGN_DELIVERY.md. Deploy: run the data-review query |
 | M1 | Stale search responses | 9.1 | Pending |
 | M2 | Failures presented as empty/stale data | 9.2 | Pending |
 | M3 | Organisation ordering and unstable pagination | 9.3 | Pending |
-| M4 | Calendly rescheduling/event ordering | 8.3 | Pending |
+| M4 | Calendly rescheduling/event ordering | 8.3 | Implemented; locally verified after fix 20261008020000 (unrelated appointment could take over a booked booking; parked reschedule cancels lost their flag). Evidence: `db:verify -- durable` §5; integration: create→cancel, cancel→create + retry, reschedule both orders, all-parked reschedule, unrelated appointment. Deploy: runJobs must replay `rescheduled` |
 | M5 | Insufficient contrast | 9.4 | Pending |
 | M6 | Spreadsheet parser in initial bundle | 10.1 | Pending |
 | M7 | Incomplete readiness checks | 5.4 | Implemented: feature-aware preflight + online access/contract checks; `npm run test:scripts` |
