@@ -232,6 +232,31 @@
   color: var(--danger);
 }
 
+.legalLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  margin-top: var(--space-xl);
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--border);
+}
+
+.legalLinks a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  color: #075778;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.legalLinks a:focus-visible {
+  outline: 2px solid #075778;
+  outline-offset: 2px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .input,
   .submit,
