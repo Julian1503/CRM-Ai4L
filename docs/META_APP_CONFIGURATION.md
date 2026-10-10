@@ -6,12 +6,15 @@ Use the **production** host shown below. The CRM uses one Meta OAuth flow to con
 
 | Meta dashboard field | Enter | Notes |
 | --- | --- | --- |
+| App Display Name | `Ai4l CRM` | Public name of this Meta integration. |
+| Contact Email | `info@ai4l.com.au` | Public contact supplied by Ai4l. |
 | App Domains | `crm-ai4-l.vercel.app` | Hostname only; no scheme or slash. |
-| Website URL / Site URL | `https://crm-ai4-l.vercel.app/` | The app redirects visitors without a session to its public sign-in page. |
+| Website URL / Site URL | `https://crm-ai4-l.vercel.app/login` | Public sign-in page; the CRM workspace itself requires an account. |
 | Privacy Policy URL | `https://crm-ai4-l.vercel.app/privacy` | Public page created for this integration. |
 | Terms of Service URL | `https://crm-ai4-l.vercel.app/terms` | Public page created for this integration. |
 | User data deletion: **Data deletion instructions URL** | `https://crm-ai4-l.vercel.app/data-deletion` | Choose the instructions URL option, not a callback option. |
 | Facebook Login for Business: **Valid OAuth Redirect URIs** | `https://crm-ai4-l.vercel.app/api/social/oauth/meta/callback` | Exact server callback; register it once for both Facebook Pages and linked Instagram accounts. |
+| Redirect URI Validator | `https://crm-ai4-l.vercel.app/api/social/oauth/meta/callback` | If Meta offers a validator, check the same exact URL. |
 | Deauthorize Callback URL | Leave blank | There is no deauthorization webhook endpoint yet. Do not use the OAuth callback or deletion instructions page here. |
 | Data Deletion Callback URL / Data Deletion Request URL | Leave blank | The app provides a public instructions URL. It has no endpoint for signed deletion requests. |
 | Webhooks Callback URL | Leave blank | The current integration does not subscribe to Meta webhooks. |
