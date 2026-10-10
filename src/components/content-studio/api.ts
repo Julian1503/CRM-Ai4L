@@ -160,7 +160,7 @@ const enc = encodeURIComponent
 
 export type ListItemsParams = {
   search?: string
-  status?: 'active' | 'archived'
+  status?: 'active' | 'archived' | 'review'
   page?: number
   pageSize?: number
 }

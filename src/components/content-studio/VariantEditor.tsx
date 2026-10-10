@@ -1,6 +1,6 @@
 'use client'
 
-import { useId, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import type { FormEvent } from 'react'
 
 import type { ContentAsset, ContentVariant, RevisionContent } from '@/lib/content-studio/types'
@@ -30,6 +30,8 @@ type VariantEditorProps = {
   /** Reload the item from the server; the draft here is kept. */
   onReload: () => void
   onCancel: () => void
+  onDraftChange?: (content: RevisionContent) => void
+  onDirtyChange?: (dirty: boolean) => void
 }
 
 type Draft = {
@@ -72,8 +74,9 @@ export function contentFromDraft(draft: Draft, isEmail: boolean): RevisionConten
  * on; if someone saved in the meantime the server answers 409 stale_revision and the
  * draft stays on screen, untouched, next to the newer text.
  */
-export default function VariantEditor({ variant, assets, onSaved, onReload, onCancel }: VariantEditorProps) {
+export default function VariantEditor({ variant, assets, onSaved, onReload, onCancel, onDraftChange, onDirtyChange }: VariantEditorProps) {
   const [draft, setDraft] = useState<Draft>(() => draftFrom(variant))
+  const [initialDraft] = useState<Draft>(() => draftFrom(variant))
   const [baseRevisionId] = useState(variant.currentRevisionId)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -83,6 +86,16 @@ export default function VariantEditor({ variant, assets, onSaved, onReload, onCa
   const id = useId()
   const isEmail = variant.channel === 'email'
   const newerLoaded = variant.currentRevisionId !== baseRevisionId
+
+  useEffect(() => {
+    onDraftChange?.(contentFromDraft(draft, isEmail))
+  }, [draft, isEmail, onDraftChange])
+
+  useEffect(() => {
+    onDirtyChange?.(JSON.stringify(draft) !== JSON.stringify(initialDraft))
+  }, [draft, initialDraft, onDirtyChange])
+
+  useEffect(() => () => { onDirtyChange?.(false) }, [onDirtyChange])
 
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft((previous) => ({ ...previous, [key]: value }))
   const setField = (key: string, value: string) => set('fields', { ...draft.fields, [key]: value })

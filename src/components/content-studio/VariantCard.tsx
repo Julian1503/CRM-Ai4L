@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 
-import type { ContentAsset, ContentRevision, ContentVariant } from '@/lib/content-studio/types'
+import type { ContentAsset, ContentRevision, ContentVariant, RevisionContent } from '@/lib/content-studio/types'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 
 import { ApiError, duplicateVariant, errorMessage, generate, reviewRevision, setVariantArchived } from './api'
@@ -10,7 +10,7 @@ import { composePostText } from './composePostText'
 import { useIdempotencyKey } from './hooks'
 import { REVIEW_LABELS, REVIEW_TONES, formatDateTime, isSocialChannel } from './labels'
 import PromptDialog from './PromptDialog'
-import { previewImages } from './revision'
+import { contentOf, previewImages } from './revision'
 import SocialPreview from './SocialPreview'
 import { ChannelTag, StatusPill } from './StatusPill'
 import VariantEditor, { EMAIL_FIELDS } from './VariantEditor'
@@ -31,6 +31,7 @@ export type VariantCardProps = {
   onPublish?: (variant: ContentVariant) => void
   /** Reserved for the email wave; the button stays disabled until this is wired. */
   onCreateEmail?: (variantId: string, revisionId: string) => void
+  onDirtyChange?: (dirty: boolean) => void
 }
 
 const ORIGIN_LABELS: Record<ContentRevision['origin'], string> = {
@@ -55,9 +56,10 @@ export function describeActionError(error: unknown, fallback: string): string {
  * One variant: its current revision, review state and the actions on it. Approval
  * belongs to a revision, so any edit produces a new revision that starts pending.
  */
-export default function VariantCard({ itemId, variant, assets, onChanged, onPublish, onCreateEmail }: VariantCardProps) {
+export default function VariantCard({ itemId, variant, assets, onChanged, onPublish, onCreateEmail, onDirtyChange }: VariantCardProps) {
   const [editing, setEditing] = useState(false)
-  const [previewing, setPreviewing] = useState(false)
+  const [previewing, setPreviewing] = useState(true)
+  const [previewDraft, setPreviewDraft] = useState<RevisionContent | null>(null)
   const [prompt, setPrompt] = useState<Prompt>(null)
   const [busy, setBusy] = useState<Busy>(null)
   const [error, setError] = useState<string | null>(null)
@@ -163,24 +165,31 @@ export default function VariantCard({ itemId, variant, assets, onChanged, onPubl
         </ul>
       )}
 
-      {editing ? (
-        <VariantEditor
+      <div className={variantStyles.variantBodyLayout}>
+        {editing ? <VariantEditor
           variant={variant}
           assets={assets}
+          onDraftChange={setPreviewDraft}
+          onDirtyChange={onDirtyChange}
           onReload={onChanged}
-          onCancel={() => setEditing(false)}
+          onCancel={() => { setEditing(false); setPreviewDraft(null) }}
           onSaved={() => {
             setEditing(false)
+            setPreviewDraft(null)
             onChanged()
           }}
-        />
-      ) : (
-        revision && <RevisionBody revision={revision} isEmail={variant.channel === 'email'} assets={assets} />
-      )}
-
-      {previewing && revision && isSocialChannel(variant.channel) && (
-        <SocialPreview platform={variant.channel} text={composePostText(revision)} images={previewImages(revision.assets, assets)} />
-      )}
+        /> : revision && <RevisionBody revision={revision} isEmail={variant.channel === 'email'} assets={assets} />}
+        {previewing && revision && <div className={variantStyles.previewPane}>
+          <div className={variantStyles.previewHeading}><strong>Preview</strong>{editing && previewDraft && <span>Unsaved preview</span>}</div>
+          {social ? <SocialPreview platform={variant.channel as 'facebook' | 'instagram' | 'linkedin'} text={composePostText({ ...revision, ...(editing && previewDraft ? previewDraft : contentOf(revision)) })} images={previewImages(editing && previewDraft ? previewDraft.assets : revision.assets, assets)} /> : <div className={variantStyles.emailPreview} aria-label="Approximate email preview">
+            <small>Approximate email preview</small>
+            <strong>{(editing && previewDraft ? previewDraft.fields : revision.fields).subject || 'Subject'}</strong>
+            <span>{(editing && previewDraft ? previewDraft.fields : revision.fields).preheader || 'Preheader'}</span>
+            <h3>{(editing && previewDraft ? previewDraft.fields : revision.fields).headline || variant.style}</h3>
+            <p>{editing && previewDraft ? previewDraft.body : revision.body}</p>
+          </div>}
+        </div>}
+      </div>
 
       {error && (
         <p className={styles.inlineError} role="alert">
@@ -215,22 +224,12 @@ export default function VariantCard({ itemId, variant, assets, onChanged, onPubl
               Edit
             </button>
           )}
-          {revision && social && (
+          {revision && (
             <button type="button" className={styles.secondaryBtn} aria-pressed={previewing} onClick={() => setPreviewing((value) => !value)}>
               {previewing ? 'Hide preview' : 'Preview'}
             </button>
           )}
-          <button type="button" className={styles.secondaryBtn} disabled={busy !== null} onClick={() => setPrompt('regenerate')}>
-            Regenerate
-          </button>
           {revision && (
-            <>
-              <button type="button" className={styles.secondaryBtn} disabled={busy !== null} onClick={duplicate}>
-                {busy === 'duplicate' ? 'Duplicating…' : 'Duplicate'}
-              </button>
-              <button type="button" className={styles.secondaryBtn} onClick={copy}>
-                Copy text
-              </button>
               <button
                 type="button"
                 className={styles.secondaryBtn}
@@ -240,11 +239,18 @@ export default function VariantCard({ itemId, variant, assets, onChanged, onPubl
               >
                 Create email
               </button>
-            </>
           )}
-          <button type="button" className={styles.linkBtn} disabled={busy !== null} onClick={() => setPrompt('archive')}>
-            Archive
-          </button>
+          <details className={variantStyles.moreActions}>
+            <summary>More actions</summary>
+            <div>
+              <button type="button" className={styles.secondaryBtn} disabled={busy !== null} onClick={() => setPrompt('regenerate')}>Regenerate</button>
+              {revision && <>
+                <button type="button" className={styles.secondaryBtn} disabled={busy !== null} onClick={duplicate}>{busy === 'duplicate' ? 'Duplicating…' : 'Duplicate'}</button>
+                <button type="button" className={styles.secondaryBtn} onClick={copy}>Copy text</button>
+              </>}
+              <button type="button" className={styles.linkBtn} disabled={busy !== null} onClick={() => setPrompt('archive')}>Archive</button>
+            </div>
+          </details>
         </div>
       )}
 

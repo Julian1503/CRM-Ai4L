@@ -10,7 +10,7 @@ export const runtime = 'nodejs'
 
 const MAX_SEARCH_LENGTH = 200
 
-/** GET /api/content-studio/items?search=&status=active|archived&page=&pageSize= */
+/** GET /api/content-studio/items?search=&status=active|archived|review&page=&pageSize= */
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const guard = await requireSessionOr401()
   if ('response' in guard) return guard.response
@@ -18,7 +18,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   return runContentRoute(guard.session, 'Could not load content items.', async ({ db }) => {
     const params = request.nextUrl.searchParams
     const search = params.get('search')?.trim().slice(0, MAX_SEARCH_LENGTH) || null
-    const status = params.get('status') === 'archived' ? 'archived' : 'active'
+    const status = params.get('status') === 'archived' ? 'archived' : params.get('status') === 'review' ? 'review' : 'active'
 
     return json(await listItems(db, { ...readPageParams(params, 20), search, status }))
   })

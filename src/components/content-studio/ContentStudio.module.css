@@ -3,6 +3,9 @@
    the module reads as part of the CRM rather than a bolted-on tool. */
 
 .studio {
+  --primary: #075778;
+  --primary-hover: #064765;
+  --text-secondary: #53616e;
   display: flex;
   flex-direction: column;
   gap: var(--space-lg);
@@ -28,6 +31,7 @@
 
 .tab {
   position: relative;
+  min-height: 2.75rem;
   padding: 0.625rem 0.125rem;
   font-family: var(--font-body);
   font-size: 0.875rem;
@@ -63,6 +67,7 @@
 }
 
 .connectionsBtn {
+  min-height: 2.75rem;
   margin-bottom: 0.375rem;
   padding: 0.375rem 0.75rem;
   font-family: var(--font-body);
@@ -99,8 +104,50 @@
 }
 
 .briefShell {
-  max-width: 60rem;
+  width: 100%;
 }
+
+.briefPanel { padding: clamp(1rem, 2.2vw, 1.75rem); background: #fff; border: 1px solid var(--border); border-radius: var(--radius-md); }
+.briefGrid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(18rem, 1fr); gap: clamp(1.25rem, 2.5vw, 2.5rem); }
+.briefMain { display: grid; align-content: start; gap: 1.15rem; }
+.briefMain > .field:first-child textarea { min-height: 8rem; font-size: 1rem; }
+.briefOptions { align-self: start; display: grid; gap: 1.5rem; padding: 1.25rem; background: #f2fafc; border-radius: var(--radius-md); }
+.supportingDetails { border-top: 1px solid var(--border); padding-top: 1rem; }
+.supportingDetails summary { cursor: pointer; color: var(--text-primary); font-weight: 700; }
+.supportingDetails summary span { display: block; margin-top: .15rem; color: #53616e; font-size: .75rem; font-weight: 400; }
+.supportingFields { display: grid; gap: 1rem; padding-top: 1rem; }
+.channelSelector { margin: 0; padding: 0; border: 0; min-width: 0; }
+.channelSelector legend, .variantsPicker legend { margin-bottom: .25rem; font-size: .9rem; font-weight: 700; }
+.channelSelector > p:not(.fieldError) { margin: 0 0 .875rem; color: #53616e; font-size: .75rem; line-height: 1.5; }
+.channelTiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .65rem; }
+.channelTile { position: relative; display: flex; align-items: start; flex-wrap: wrap; gap: .55rem; min-height: 5.5rem; padding: .75rem; background: #fff; border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; transition: border-color .16s ease, background .16s ease; }
+.channelTile:hover { border-color: #0b7597; }
+.channelTile:has(input:checked) { border-color: #0b7597; background: #e6f6fa; }
+.channelTile:focus-within { outline: 2px solid #075778; outline-offset: 2px; }
+.channelTile input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.channelMark { display: grid; place-items: center; width: 2rem; height: 2rem; flex: none; border-radius: .5rem; background: #e7eef7; color: #0a4e8a; font: 700 .85rem/1 var(--font-body); }
+.tileInstagram .channelMark { background: #f9e8f1; color: #9c2863; }
+.tileLinkedin .channelMark { background: #e2f1fc; color: #0a5c9b; }
+.tileEmail .channelMark { background: #e6f3f5; color: #075778; }
+.channelCopy { display: grid; min-width: 0; gap: .12rem; flex: 1 1 5rem; }
+.channelCopy strong { font-size: .8rem; }
+.channelCopy small { color: #53616e; font-size: .69rem; line-height: 1.4; }
+.tileCheck { display: grid; place-items: center; width: 1.1rem; height: 1.1rem; margin-left: auto; border: 1px solid #99aab7; border-radius: .32rem; background: #fff; color: transparent; font-size: .75rem; }
+.channelTile:has(input:checked) .tileCheck { border-color: #075778; background: #075778; color: #fff; }
+.channelTile:has(input:checked) .tileCheck::after { content: ''; width: .45rem; height: .25rem; border-left: 2px solid #fff; border-bottom: 2px solid #fff; transform: rotate(-45deg) translateY(-1px); }
+.variantsPicker { min-width: 0; padding: 0; margin: 0; border: 0; }
+.variantsPicker > div { display: flex; padding: .2rem; background: #fff; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.variantsPicker label { display: grid; place-items: center; flex: 1; min-height: 2.75rem; text-align: center; padding: .4rem; border-radius: .35rem; color: #53616e; font-weight: 700; cursor: pointer; }
+.variantsPicker .variantsActive { background: #075778; color: #fff; }
+.variantsPicker input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.variantsPicker label:focus-within { outline: 2px solid #075778; outline-offset: 2px; }
+.briefSummary { display: grid; gap: .2rem; border-top: 1px solid var(--border); padding-top: 1rem; }
+.briefSummary strong { font-size: .85rem; }
+.briefSummary span { font-size: .75rem; color: #53616e; }
+.brandContext { display: grid; gap: .15rem; padding: .8rem; background: #fff; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.brandContext strong { font-size: .8rem; }
+.brandContext span { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; color: #53616e; font-size: .72rem; }
+.brandContext small { color: #53616e; font-size: .7rem; }
 
 .panelHead {
   display: flex;
@@ -177,7 +224,8 @@
 
 .backBtn {
   align-self: flex-start;
-  padding: 0;
+  min-height: 2.75rem;
+  padding: 0.5rem 0.25rem;
   font-family: var(--font-body);
   font-size: 0.8125rem;
   font-weight: 600;
@@ -699,8 +747,31 @@ p.muted {
     gap: 0.125rem;
   }
 }
+.workspaceChannels { display: flex; flex-wrap: wrap; gap: .5rem; }
+.workspaceChannels button { display: inline-flex; align-items: center; gap: .5rem; min-height: 2.75rem; padding: .55rem .9rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #fff; color: #41505d; font-size: .825rem; font-weight: 650; }
+.workspaceChannels button:hover { border-color: #0b7597; }
+.workspaceChannels button[aria-pressed='true'] { border-color: #0b7597; background: var(--primary-muted); color: #075778; }
+.workspaceChannels span { color: #53616e; font-size: .7rem; }
+.workspace { display: grid; grid-template-columns: minmax(10rem, 12rem) minmax(0, 1fr); align-items: start; gap: 1rem; }
+.variantNav { display: grid; gap: .4rem; }
+.variantNav h3 { margin: 0 0 .25rem; font-size: .85rem; }
+.variantNav button { display: grid; gap: .2rem; padding: .75rem; text-align: left; background: #fff; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.variantNav button:hover { border-color: #0b7597; }
+.variantNav button[aria-current='true'] { border-color: #0b7597; background: var(--primary-muted); }
+.variantNav button strong { font-size: .8rem; overflow-wrap: anywhere; }
+.variantNav button span { color: #53616e; font-size: .7rem; }
+.workspaceChannels button:focus-visible, .variantNav button:focus-visible { outline: 2px solid #075778; outline-offset: 2px; }
+@media (max-width: 900px) { .workspace { grid-template-columns: 1fr; } .variantNav { display: flex; flex-wrap: wrap; } .variantNav h3 { flex-basis: 100%; } .variantNav button { min-width: 8rem; } }
+@media (max-width: 1050px) { .briefGrid { grid-template-columns: 1fr; } }
+@media (max-width: 420px) {
+  .channelTiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .channelTile { align-content: start; min-height: 7.25rem; padding: .65rem; gap: .4rem; }
+  .channelCopy { flex-basis: 100%; }
+  .channelCopy small { line-height: 1.3; }
+}
 
 @media (prefers-reduced-motion: reduce) {
+  .channelTile { transition: none; }
   .tab,
   .tab::after,
   .itemRow,
