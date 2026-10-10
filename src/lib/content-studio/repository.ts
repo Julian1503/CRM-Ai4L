@@ -30,7 +30,7 @@ const MAX_JOBS_PER_ITEM = 50
 const MAX_PUBLICATIONS_PER_ITEM = 100
 const MAX_SUMMARY_ROWS = 5000
 
-export type ListItemsParams = PageParams & { search: string | null; status: 'active' | 'archived' }
+export type ListItemsParams = PageParams & { search: string | null; status: 'active' | 'archived' | 'review' }
 
 export async function getDefaultBrand(db: Db): Promise<ContentBrandProfileRow> {
   const { data, error } = await db
@@ -98,6 +98,27 @@ async function readReviews(db: Db, revisionIds: string[]): Promise<Map<string, C
 
 export async function listItems(db: Db, params: ListItemsParams): Promise<ListItemsResponse> {
   const { from, to } = getPageRange(params)
+  if (params.status === 'review') {
+    const { data: pending, error: pendingError } = await db.rpc('content_pending_review_items', {
+      p_search_pattern: params.search ? `%${escapeLikePattern(params.search)}%` : null,
+      p_offset: from,
+      p_limit: params.pageSize,
+    })
+    throwIfDbError(pendingError)
+    const ids = (pending ?? []).map((row) => row.item_id).filter((id): id is string => Boolean(id))
+    if (ids.length === 0) return { items: [], total: Number(pending?.[0]?.total ?? 0), page: params.page, pageSize: params.pageSize }
+    const { data: rows, error: itemError } = await db.from('content_items').select('*').in('id', ids)
+    throwIfDbError(itemError)
+    const counts = await summaryCounts(db, ids)
+    const byId = new Map((rows ?? []).map((row) => [row.id, row]))
+    const empty: ItemCounts = { variantCount: 0, approvedCount: 0, pendingReviewCount: 0, activeJobCount: 0 }
+    return {
+      items: ids.flatMap((id) => { const row = byId.get(id); return row ? [toItemSummary(row, counts.get(id) ?? empty)] : [] }),
+      total: Number(pending?.[0]?.total ?? 0),
+      page: params.page,
+      pageSize: params.pageSize,
+    }
+  }
   const base = db.from('content_items').select('*', { count: 'exact' }).is('removed_at', null)
   const byStatus = params.status === 'archived' ? base.not('archived_at', 'is', null) : base.is('archived_at', null)
   const query = params.search ? byStatus.ilike('title', `%${escapeLikePattern(params.search)}%`) : byStatus

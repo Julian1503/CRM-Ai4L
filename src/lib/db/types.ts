@@ -690,6 +690,10 @@ export interface Database {
       active_contacts: { Row: ContactRow; Relationships: [] }
     }
     Functions: {
+      content_pending_review_items: {
+        Args: { p_search_pattern: string | null; p_offset: number; p_limit: number }
+        Returns: Array<{ item_id: string | null; total: number }>
+      }
       claim_campaign_sends: {
         Args: { p_campaign_id: string; p_run: number; p_limit: number; p_lease_seconds?: number }
         Returns: ClaimedCampaignSend[]

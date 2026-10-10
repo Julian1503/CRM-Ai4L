@@ -10,12 +10,10 @@
   margin: 0 0 var(--space-md);
   padding-bottom: 12px;
   font-family: var(--font-heading);
-  font-size: 0.8rem;
-  font-weight: 700;
-  color: var(--primary);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  border-bottom: 1px dashed var(--border);
+  font-size: 1.125rem;
+  font-weight: 650;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border);
 }
 
 .intro {
@@ -42,12 +40,10 @@
 }
 
 .label {
-  font-family: var(--font-heading);
-  font-size: 0.72rem;
+  font-family: var(--font-body);
+  font-size: 0.8rem;
   font-weight: 700;
-  text-transform: uppercase;
-  color: var(--text-secondary);
-  letter-spacing: 0.08em;
+  color: var(--text-primary);
 }
 
 .input {

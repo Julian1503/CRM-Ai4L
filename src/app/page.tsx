@@ -60,14 +60,10 @@ import ArchiveHub from '@/components/archive/ArchiveHub';
 import ContentStudioView from '@/components/content-studio/ContentStudioView';
 import { requestLifecycle } from '@/lib/lifecycle/client';
 import BookingsView from '@/components/bookings/BookingsView';
-import OperationsPanel from '@/components/operations/OperationsPanel';
 import Pagination from '@/components/ui/Pagination';
-import EmailOctopusSettings, { type EmailOctopusStatus } from '@/components/settings/EmailOctopusSettings';
-import JobTypesSettings from '@/components/settings/JobTypesSettings';
-import SocialConnectionsSettings from '@/components/settings/SocialConnectionsSettings';
-import BrandProfileSettings from '@/components/settings/BrandProfileSettings';
+import { type EmailOctopusStatus } from '@/components/settings/EmailOctopusSettings';
+import SettingsView from '@/components/settings/SettingsView';
 import JobTypesDialog from '@/components/settings/JobTypesDialog';
-import OrganisationSettings from '@/components/settings/OrganisationSettings';
 import type { ContactStatus } from '@/lib/db/types';
 
 type ServiceOption = { id: string; name: string };
@@ -206,6 +202,8 @@ function getErrorMessage(error: unknown) {
 
 export default function App() {
   const [currentView, setCurrentView] = useState<ActiveView>('contacts');
+  const [settingsDirty, setSettingsDirty] = useState(false);
+  const [studioDirty, setStudioDirty] = useState(false);
   // A campaign drafted from the Content Studio opens directly in Campaigns.
   const [campaignToOpen, setCampaignToOpen] = useState<string | undefined>(undefined);
   const [awaitingApproval, setAwaitingApproval] = useState(0);
@@ -220,6 +218,12 @@ export default function App() {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setCurrentView(requested as ActiveView);
     }
+    const sync = () => {
+      const view = new URLSearchParams(window.location.search).get('view');
+      if (view && (ACTIVE_VIEWS as readonly string[]).includes(view)) setCurrentView(view as ActiveView);
+    };
+    window.addEventListener('popstate', sync);
+    return () => window.removeEventListener('popstate', sync);
   }, []);
 
   // Campaigns waiting for approval, for the sidebar badge. Re-read on every tab change
@@ -1001,6 +1005,17 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
       <Sidebar
         currentView={currentView}
         onViewChange={(view) => {
+          if (currentView === 'settings' && view !== 'settings' && settingsDirty && !window.confirm('Discard unsaved brand changes and leave Settings?')) return;
+          if (currentView === 'content' && view !== 'content' && studioDirty && !window.confirm('Discard unsaved variant changes and leave Content Studio?')) return;
+          if (view !== 'settings') setSettingsDirty(false);
+          if (view !== 'content') setStudioDirty(false);
+          const url = new URL(window.location.href);
+          url.searchParams.set('view', view);
+          if (view !== 'settings') url.searchParams.delete('section');
+          if (view !== 'content' && view !== 'settings') {
+            url.searchParams.delete('item'); url.searchParams.delete('channel'); url.searchParams.delete('variant'); url.searchParams.delete('studioSection');
+          }
+          window.history.pushState(null, '', url);
           // A campaign handed over by the Content Studio opens once; navigating by hand
           // afterwards must not reopen it.
           setCampaignToOpen(undefined);
@@ -1181,10 +1196,6 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
           <>
             <header className={styles.headerSection}>
               <div className={styles.titleGroup}>
-                <div className={styles.eyebrow}>
-                  <span className={styles.eyebrowDot} />
-                  Content
-                </div>
                 <h1 className={styles.pageTitle}>Content Studio</h1>
                 <span className={styles.pageSubtitle}>
                   Write once for social and email. Every channel is reviewed and approved on its own.
@@ -1193,7 +1204,14 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
             </header>
 
             <ContentStudioView
-              onOpenSettings={() => setCurrentView('settings')}
+              onDirtyChange={setStudioDirty}
+              onOpenSettings={() => {
+                const url = new URL(window.location.href);
+                url.searchParams.set('view', 'settings');
+                url.searchParams.set('section', 'connections');
+                window.history.pushState(null, '', url);
+                setCurrentView('settings');
+              }}
               onOpenCampaign={(campaignId) => {
                 setCampaignToOpen(campaignId);
                 setCurrentView('campaigns');
@@ -1721,87 +1739,24 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
         )}
 
         {currentView === 'settings' && (
-          <>
-            <header className={styles.headerSection}>
-              <div className={styles.titleGroup}>
-                <div className={styles.eyebrow}>
-                  <span className={styles.eyebrowDot} />
-                  System Setup
-                </div>
-                <h1 className={styles.pageTitle}>System settings</h1>
-                <span className={styles.pageSubtitle}>Configure backend Supabase endpoint URLs and email marketing credentials.</span>
-              </div>
-            </header>
-
-            <div className={styles.splitLayout}>
-              <div className={styles.sectionIntro} style={{ padding: '12px' }}>
-                <h3 className={styles.sectionIntroTitle}>Configuration Console</h3>
-                <p className={styles.sectionIntroDesc}>
-                  Review the active Supabase endpoint and store EmailOctopus credentials for live marketing automations.
-                </p>
-                <p className={styles.sectionIntroDesc} style={{ fontSize: '0.8rem', opacity: 0.8 }}>
-                  Supabase and Geoapify keys are read from environment variables. EmailOctopus keys are saved to the Supabase credentials table.
-                </p>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-                <OperationsPanel />
-
-                {/* Database Config Card */}
-                <div className="outerShell">
-                  <div className="innerCore" style={{ padding: '24px' }}>
-                    <div className={styles.sectionTitle} style={{ margin: 0, borderBottom: '1px dashed var(--border)', paddingBottom: '12px', marginBottom: '20px' }}>Database Config</div>
-                    
-                    <div className={styles.settingGroup}>
-                      <label className={styles.settingLabel} htmlFor="supabase-endpoint">Supabase Endpoint URL</label>
-                      <input 
-                        type="text" 
-                        className={styles.searchInput} 
-                        style={{ maxWidth: '100%', marginTop: '6px' }}
-                        placeholder="https://your-project-id.supabase.co" 
-                        id="supabase-endpoint"
-                        defaultValue={process.env.NEXT_PUBLIC_SUPABASE_URL || ''}
-                        readOnly
-                      />
-                      <span className={styles.settingDescription}>Read from NEXT_PUBLIC_SUPABASE_URL.</span>
-                    </div>
-
-                    <div className={styles.settingGroup} style={{ marginBottom: 0 }}>
-                      <label className={styles.settingLabel} htmlFor="supabase-anon-key">Supabase Anon Key</label>
-                      <input 
-                        type="password" 
-                        className={styles.searchInput} 
-                        style={{ maxWidth: '100%', marginTop: '6px' }}
-                        placeholder="your-supabase-anon-key" 
-                        id="supabase-anon-key"
-                        defaultValue={process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? 'Configured in environment' : 'Not configured'}
-                        readOnly
-                      />
-                      <span className={styles.settingDescription}>Read from NEXT_PUBLIC_SUPABASE_ANON_KEY.</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Email Marketing Card */}
-                <EmailOctopusSettings status={emailOctopusStatus} onSaved={setEmailOctopusStatus} />
-
-                {/* Connect/disconnect is admin-only on the server; the component shows the reason if refused. */}
-                <SocialConnectionsSettings allowMock={process.env.NODE_ENV !== 'production'} />
-
-                {/* Grounds every Content Studio generation; admin-only edits, enforced in the database. */}
-                <BrandProfileSettings />
-
-                <JobTypesSettings onChanged={() => void reloadJobTypes()} />
-
-                <OrganisationSettings
-                  onChanged={() => {
-                    setFilterOptionsVersion((version) => version + 1);
-                    void loadContacts();
-                  }}
-                />
-              </div>
-            </div>
-          </>
+          <SettingsView
+            emailOctopusStatus={emailOctopusStatus}
+            onEmailOctopusSaved={setEmailOctopusStatus}
+            onJobTypesChanged={() => void reloadJobTypes()}
+            onOrganisationsChanged={() => {
+              setFilterOptionsVersion((version) => version + 1);
+              void loadContacts();
+            }}
+            onDirtyChange={setSettingsDirty}
+            onOpenStudio={() => {
+              setSettingsDirty(false);
+              const url = new URL(window.location.href);
+              url.searchParams.set('view', 'content');
+              url.searchParams.delete('section');
+              window.history.pushState(null, '', url);
+              setCurrentView('content');
+            }}
+          />
         )}
       </main>
 

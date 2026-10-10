@@ -13,7 +13,6 @@ import { ChannelTag, StatusPill } from './StatusPill'
 import styles from './ContentStudio.module.css'
 
 const PAGE_SIZE = 25
-const REVIEW_PAGE_SIZE = 100
 
 type ItemLibraryProps = {
   onOpen: (itemId: string) => void
@@ -33,16 +32,16 @@ export default function ItemLibrary({ onOpen, reviewOnly = false }: ItemLibraryP
     () =>
       listItems({
         search: query || undefined,
-        status: archived && !reviewOnly ? 'archived' : 'active',
+        status: reviewOnly ? 'review' : archived ? 'archived' : 'active',
         page,
-        pageSize: reviewOnly ? REVIEW_PAGE_SIZE : PAGE_SIZE,
+        pageSize: PAGE_SIZE,
       }),
     [query, archived, page, reviewOnly]
   )
   // The current page stays on screen while the next one loads.
   const { data, error, loading, reload } = useResource(load, { keepPrevious: true })
 
-  const items = (data?.items ?? []).filter((item) => !reviewOnly || item.pendingReviewCount > 0)
+  const items = data?.items ?? []
 
   const submit = (event: FormEvent) => {
     event.preventDefault()
@@ -107,7 +106,9 @@ export default function ItemLibrary({ onOpen, reviewOnly = false }: ItemLibraryP
 
         {data && items.length === 0 && (
           <p className={styles.empty}>
-            {query
+            {data.total > 0
+              ? 'No content on this page. Choose an earlier page below.'
+              : query
               ? `Nothing matches “${query}”.`
               : reviewOnly
                 ? 'Nothing is waiting for review.'
@@ -125,7 +126,7 @@ export default function ItemLibrary({ onOpen, reviewOnly = false }: ItemLibraryP
           </ul>
         )}
 
-        {data && !reviewOnly && (
+        {data && (
           <Pagination
             page={page}
             pageSize={PAGE_SIZE}

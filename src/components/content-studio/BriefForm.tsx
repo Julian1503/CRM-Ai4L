@@ -1,20 +1,28 @@
 'use client'
 
-import { useId, useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 
-import type { ContentBrief, ContentChannel, ContentItem, GenerateRequest } from '@/lib/content-studio/types'
-import { CONTENT_CHANNELS } from '@/lib/content-studio/types'
+import type { BrandProfile, ContentBrief, ContentChannel, ContentItem, GenerateRequest } from '@/lib/content-studio/types'
 
 import { createItem, errorMessage, generate } from './api'
 import { useIdempotencyKey } from './hooks'
-import { CHANNEL_LABELS, parseHttpsUrl } from './labels'
+import { parseHttpsUrl } from './labels'
+import ChannelSelector from './ChannelSelector'
+import { useResource } from './hooks'
 import styles from './ContentStudio.module.css'
 
 const MAX_TITLE = 200
 const MAX_FACTS = 20
 type StylesPerChannel = NonNullable<GenerateRequest['stylesPerChannel']>
 const STYLE_OPTIONS: StylesPerChannel[] = [1, 2, 3]
+
+async function readBrand(): Promise<BrandProfile> {
+  const response = await fetch('/api/content-studio/brand', { cache: 'no-store' })
+  if (!response.ok) throw new Error('Brand profile unavailable')
+  const body = await response.json()
+  return body.brand as BrandProfile
+}
 
 export type BriefDraft = {
   title: string
@@ -89,17 +97,11 @@ export default function BriefForm({ onCreated }: BriefFormProps) {
   const [error, setError] = useState<string | null>(null)
   const { keyFor, settle } = useIdempotencyKey()
   const formId = useId()
+  const supportingRef = useRef<HTMLDetailsElement>(null)
+  const brand = useResource(readBrand)
 
   const update = <K extends keyof BriefDraft>(key: K, value: BriefDraft[K]) =>
     setDraft((previous) => ({ ...previous, [key]: value }))
-
-  const toggleChannel = (channel: ContentChannel) =>
-    update(
-      'channels',
-      draft.channels.includes(channel)
-        ? draft.channels.filter((value) => value !== channel)
-        : CONTENT_CHANNELS.filter((value) => value === channel || draft.channels.includes(value))
-    )
 
   const startGeneration = async (item: ContentItem) => {
     const channels = item.channels.length > 0 ? item.channels : draft.channels
@@ -115,7 +117,12 @@ export default function BriefForm({ onCreated }: BriefFormProps) {
     event.preventDefault()
     const found = validateBrief(draft)
     setErrors(found)
-    if (Object.keys(found).length > 0) return
+    if (Object.keys(found).length > 0) {
+      if (found.referenceUrl && supportingRef.current) supportingRef.current.open = true
+      const first = found.title ? `${formId}-name` : found.topic ? `${formId}-topic` : found.referenceUrl ? `${formId}-reference` : null
+      if (first) document.getElementById(first)?.focus()
+      return
+    }
 
     setBusy(true)
     setError(null)
@@ -138,8 +145,8 @@ export default function BriefForm({ onCreated }: BriefFormProps) {
   }
 
   return (
-    <form className={`outerShell ${styles.briefShell}`} onSubmit={submit} noValidate aria-labelledby={`${formId}-title`}>
-      <div className={`innerCore ${styles.panel}`}>
+    <form className={styles.briefShell} onSubmit={submit} noValidate aria-labelledby={`${formId}-title`}>
+      <div className={styles.briefPanel}>
         <h2 id={`${formId}-title`} className={styles.panelTitle}>
           New content brief
         </h2>
@@ -157,57 +164,41 @@ export default function BriefForm({ onCreated }: BriefFormProps) {
             is on screen equal to what was saved. */}
         <fieldset className={styles.fieldset} disabled={created !== null}>
           <legend className={styles.visuallyHidden}>Brief</legend>
-          <div className={styles.formGrid}>
-            <TextField id={`${formId}-name`} label="Title" value={draft.title} error={errors.title} required onChange={(value) => update('title', value)} />
-            <TextField id={`${formId}-audience`} label="Audience" value={draft.audience} onChange={(value) => update('audience', value)} placeholder="e.g. Small business owners in NSW" />
+          <div className={styles.briefGrid}>
+          <div className={styles.briefMain}>
             <TextField id={`${formId}-topic`} label="Topic" value={draft.topic} error={errors.topic} required multiline onChange={(value) => update('topic', value)} wide />
+            <TextField id={`${formId}-name`} label="Title" value={draft.title} error={errors.title} required onChange={(value) => update('title', value)} />
+            <div className={styles.formGrid}>
+              <TextField id={`${formId}-audience`} label="Audience" value={draft.audience} onChange={(value) => update('audience', value)} placeholder="e.g. Small business owners in NSW" />
             <TextField id={`${formId}-objective`} label="Objective" value={draft.objective} onChange={(value) => update('objective', value)} placeholder="e.g. Book a discovery call" />
-            <TextField
-              id={`${formId}-reference`}
-              label="Reference URL"
-              value={draft.referenceUrl}
-              error={errors.referenceUrl}
-              onChange={(value) => update('referenceUrl', value)}
-              placeholder="https://"
-              type="url"
-            />
-            <TextField id={`${formId}-notes`} label="Notes" value={draft.notes} multiline onChange={(value) => update('notes', value)} wide />
-          </div>
-
-          <FactList facts={draft.sourceFacts} onChange={(facts) => update('sourceFacts', facts)} />
-
-          <fieldset className={styles.fieldset} aria-describedby={errors.channels ? `${formId}-channels-error` : undefined}>
-            <legend className={styles.label}>Channels</legend>
-            <div className={styles.checkRow}>
-              {CONTENT_CHANNELS.map((channel) => (
-                <label key={channel} className={styles.check}>
-                  <input type="checkbox" checked={draft.channels.includes(channel)} onChange={() => toggleChannel(channel)} />
-                  {CHANNEL_LABELS[channel]}
-                </label>
-              ))}
             </div>
-            {errors.channels && (
-              <p id={`${formId}-channels-error`} className={styles.fieldError}>
-                {errors.channels}
-              </p>
-            )}
-          </fieldset>
-
-          <label className={styles.inlineField} htmlFor={`${formId}-styles`}>
-            <span className={styles.label}>Styles per channel</span>
-            <select
-              id={`${formId}-styles`}
-              className={styles.select}
-              value={draft.stylesPerChannel}
-              onChange={(event) => update('stylesPerChannel', Number(event.target.value) as StylesPerChannel)}
-            >
-              {STYLE_OPTIONS.map((count) => (
-                <option key={count} value={count}>
-                  {count} {count === 1 ? 'variant' : 'variants'}
-                </option>
-              ))}
-            </select>
-          </label>
+            <details ref={supportingRef} className={styles.supportingDetails}>
+              <summary>Supporting context <span>References, notes and source facts</span></summary>
+              <div className={styles.supportingFields}>
+                <TextField id={`${formId}-reference`} label="Reference URL" value={draft.referenceUrl} error={errors.referenceUrl} onChange={(value) => update('referenceUrl', value)} placeholder="https://" type="url" />
+                <TextField id={`${formId}-notes`} label="Notes" value={draft.notes} multiline onChange={(value) => update('notes', value)} wide />
+                <FactList facts={draft.sourceFacts} onChange={(facts) => update('sourceFacts', facts)} />
+              </div>
+            </details>
+          </div>
+          <aside className={styles.briefOptions} aria-label="Content destinations and options">
+            <ChannelSelector value={draft.channels} onChange={(channels) => update('channels', channels)} error={errors.channels} />
+            <fieldset className={styles.variantsPicker}>
+              <legend>Variants per channel</legend>
+              <div>
+                {STYLE_OPTIONS.map((count) => <label key={count} className={draft.stylesPerChannel === count ? styles.variantsActive : undefined}>
+                  <input type="radio" name={`${formId}-styles`} checked={draft.stylesPerChannel === count} onChange={() => update('stylesPerChannel', count)} />{count}
+                </label>)}
+              </div>
+            </fieldset>
+            <div className={styles.briefSummary}><strong>{draft.channels.length} {draft.channels.length === 1 ? 'channel' : 'channels'} · {draft.channels.length * draft.stylesPerChannel} variants</strong><span>Generated drafts are reviewed before publishing.</span></div>
+            {brand.data && <div className={styles.brandContext}>
+              <strong>{brand.data.name}</strong>
+              <span>{brand.data.region}{brand.data.tone ? ` · ${brand.data.tone}` : ''}</span>
+              <small>Brand context used for new generations</small>
+            </div>}
+          </aside>
+          </div>
         </fieldset>
 
         {error && (

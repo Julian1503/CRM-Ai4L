@@ -12,16 +12,30 @@
 }
 
 .variantCard {
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
   min-width: 0;
-  padding: var(--space-md);
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-sm);
+  padding: 0;
+  background: transparent;
+  border: 0;
+  flex: 1;
 }
+.variantBodyLayout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(18rem, .9fr); gap: 1.25rem; align-items: start; }
+.previewPane { min-width: 0; padding: 1rem; background: #f2fafc; border-radius: var(--radius-sm); }
+.previewHeading { display: flex; justify-content: space-between; flex-wrap: wrap; gap: .5rem; margin-bottom: .75rem; font-size: .8rem; }
+.previewHeading span { color: #53616e; }
+.emailPreview { display: grid; gap: .35rem; padding: 1rem; background: #fff; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.emailPreview small, .emailPreview span { color: #53616e; font-size: .72rem; }
+.emailPreview strong { font-size: .875rem; }
+.emailPreview h3 { margin: 1rem 0 .25rem; font-size: 1.1rem; }
+.emailPreview p { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .8rem; }
+.moreActions { position: relative; }
+.moreActions summary { min-height: 2.3rem; display: flex; align-items: center; padding: .5rem .875rem; color: #41505d; border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; font-size: .8rem; font-weight: 650; }
+.moreActions > div { display: flex; flex-wrap: wrap; gap: .5rem; padding: .75rem 0; }
+.moreActions summary:focus-visible { outline: 2px solid #075778; outline-offset: 2px; }
+@container (max-width: 760px) { .variantBodyLayout { grid-template-columns: 1fr; } }
 
 .variantHead {
   display: flex;

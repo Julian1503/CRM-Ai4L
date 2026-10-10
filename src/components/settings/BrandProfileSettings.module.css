@@ -1,0 +1,23 @@
+.form { display: grid; gap: 1.25rem; }
+.heading { margin: 0 0 .4rem; font: 600 1.45rem/1.2 var(--font-heading); }
+.compact { background: #fff; border: 1px solid var(--border); border-radius: var(--radius-md); }
+.tabs { display: flex; gap: 1.25rem; overflow-x: auto; border-bottom: 1px solid var(--border); }
+.tabs button { flex: none; min-height: 2.75rem; padding: .6rem .2rem; border-bottom: 2px solid transparent; color: #53616e; font-size: .825rem; font-weight: 650; }
+.tabs button:hover { color: var(--text-primary); }
+.tabs .tabActive { color: #075778; border-bottom-color: #0b7597; }
+.tabs button:focus-visible, .channelNav button:focus-visible { outline: 2px solid #075778; outline-offset: 2px; }
+.panel { min-height: 14rem; }
+.fields { display: grid; gap: 1rem; border: 0; margin: 0; padding: 0; min-width: 0; }
+.channelNav { display: flex; flex-wrap: wrap; gap: .5rem; }
+.channelNav button { padding: .55rem .9rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #fff; color: #41505d; font-size: .825rem; font-weight: 650; }
+.channelNav button[aria-pressed='true'] { border-color: #0b7597; background: var(--primary-muted); color: #075778; }
+.factsList { display: grid; gap: .4rem; margin: .5rem 0 0; padding: 0; list-style: none; }
+.factsList button { display: flex; align-items: baseline; gap: .75rem; width: 100%; padding: .7rem .85rem; text-align: left; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #fff; }
+.factsList button:hover, .factsList button[aria-pressed='true'] { border-color: #0b7597; background: var(--primary-muted); }
+.factsList strong { flex: none; font-size: .75rem; }
+.factsList span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #53616e; font-size: .8rem; }
+.factEditor { display: grid; gap: .75rem; margin: .4rem 0; }
+.factsList button:focus-visible { outline: 2px solid #075778; outline-offset: 2px; }
+.saveBar { position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .75rem; padding: .85rem 0; background: #fff; border-top: 1px solid var(--border); font-size: .8rem; font-weight: 600; color: #53616e; }
+.saveBar > div { display: flex; gap: .5rem; }
+@media (prefers-reduced-motion: reduce) { .tabs button, .channelNav button { transition: none; } }

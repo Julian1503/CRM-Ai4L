@@ -15,13 +15,15 @@ import PublishDialog from './PublishDialog'
 import { ChannelTag, StatusPill } from './StatusPill'
 import VariantCard from './VariantCard'
 import styles from './ContentStudio.module.css'
-import variantStyles from './Variant.module.css'
 
 type ItemDetailProps = {
   itemId: string
   onBack: () => void
   onOpenSettings?: () => void
   onCreateEmail?: (variantId: string, revisionId: string) => void
+  reviewFocus?: boolean
+  onDirtyChange?: (dirty: boolean) => void
+  confirmLeave?: () => boolean
 }
 
 const ASSET_PAGE_SIZE = 100
@@ -35,7 +37,7 @@ export function groupByChannel(variants: ContentVariant[]): { channel: ContentCh
 }
 
 /** One item: its brief, generation jobs, variants by channel, images and publications. */
-export default function ItemDetail({ itemId, onBack, onOpenSettings, onCreateEmail }: ItemDetailProps) {
+export default function ItemDetail({ itemId, onBack, onOpenSettings, onCreateEmail, reviewFocus = false, onDirtyChange, confirmLeave }: ItemDetailProps) {
   const loadItem = useCallback(() => getItem(itemId), [itemId])
   const loadAssets = useCallback(async (): Promise<ContentAsset[]> => (await listAssets({ itemId, pageSize: ASSET_PAGE_SIZE })).assets, [itemId])
   const item = useResource(loadItem)
@@ -44,6 +46,13 @@ export default function ItemDetail({ itemId, onBack, onOpenSettings, onCreateEma
   const [archiveError, setArchiveError] = useState<string | null>(null)
   const [archiving, setArchiving] = useState(false)
   const [publicationsVersion, setPublicationsVersion] = useState(0)
+  const [requestedChannel, setRequestedChannel] = useState<ContentChannel | null>(() => {
+    if (typeof window === 'undefined') return null
+    const channel = new URLSearchParams(window.location.search).get('channel')
+    return CONTENT_CHANNELS.find((value) => value === channel) ?? null
+  })
+  const [requestedVariantId, setRequestedVariantId] = useState<string | null>(() => typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('variant'))
+  const [detailPanel, setDetailPanel] = useState<'media' | 'history'>('media')
 
   const reloadAll = useCallback(() => {
     item.reload()
@@ -76,6 +85,21 @@ export default function ItemDetail({ itemId, onBack, onOpenSettings, onCreateEma
 
   const data: ContentItem = item.data
   const assetList = assets.data ?? []
+  const groups = groupByChannel(data.variants)
+  const activeGroup = groups.find((group) => group.channel === requestedChannel) ?? (reviewFocus ? groups.find((group) => group.variants.some((variant) => variant.current?.review === 'pending')) : undefined) ?? groups[0]
+  const activeVariant = activeGroup?.variants.find((variant) => variant.id === requestedVariantId) ?? (reviewFocus ? activeGroup?.variants.find((variant) => variant.current?.review === 'pending') : undefined) ?? activeGroup?.variants[0]
+
+  const chooseVariant = (channel: ContentChannel, variantId: string | null) => {
+    if (channel === activeGroup?.channel && (variantId === activeVariant?.id || (variantId === null && requestedVariantId === null))) return
+    if (confirmLeave && !confirmLeave()) return
+    setRequestedChannel(channel)
+    setRequestedVariantId(variantId)
+    const url = new URL(window.location.href)
+    url.searchParams.set('channel', channel)
+    if (variantId) url.searchParams.set('variant', variantId)
+    else url.searchParams.delete('variant')
+    window.history.replaceState(null, '', url)
+  }
 
   const toggleArchive = async () => {
     setArchiving(true)
@@ -138,39 +162,36 @@ export default function ItemDetail({ itemId, onBack, onOpenSettings, onCreateEma
         <GenerationProgress itemId={data.id} itemChannels={data.channels} jobs={data.jobs} onChanged={reloadAll} />
 
         <section className={styles.detailSection} aria-label="Variants">
-          {groupByChannel(data.variants).length === 0 && (
+          {groups.length === 0 && (
             <p className={styles.empty}>No variants yet. They appear here as soon as generation finishes.</p>
           )}
-          {groupByChannel(data.variants).map((group) => (
-            <div key={group.channel} className={variantStyles.channelGroup}>
-              <h3 className={styles.sectionTitle}>{CHANNEL_LABELS[group.channel]}</h3>
-              <div className={variantStyles.variantGrid}>
-                {group.variants.map((variant) => (
-                  <VariantCard
-                    key={variant.id}
-                    itemId={data.id}
-                    variant={variant}
-                    assets={assetList}
-                    onChanged={item.reload}
-                    onPublish={setPublishing}
-                    onCreateEmail={onCreateEmail}
-                  />
-                ))}
-              </div>
+          {activeGroup && activeVariant && <>
+            <div className={styles.workspaceChannels} role="group" aria-label="Content channel">
+              {groups.map((group) => <button key={group.channel} type="button" aria-pressed={activeGroup.channel === group.channel} onClick={() => chooseVariant(group.channel, null)}>
+                {CHANNEL_LABELS[group.channel]} <span>{group.variants.length}</span>
+              </button>)}
             </div>
-          ))}
+            <div className={styles.workspace}>
+              <nav className={styles.variantNav} aria-label={`${CHANNEL_LABELS[activeGroup.channel]} variants`}>
+                <h3>Variants</h3>
+                {activeGroup.variants.map((variant) => <button key={variant.id} type="button" aria-current={activeVariant.id === variant.id ? 'true' : undefined} onClick={() => chooseVariant(activeGroup.channel, variant.id)}>
+                  <strong>{variant.style}</strong>
+                  <span>{variant.current ? `${variant.current.review === 'pending' ? 'Pending review' : variant.current.review} · Revision ${variant.current.revisionNumber}` : 'Generating'}</span>
+                </button>)}
+              </nav>
+              <VariantCard key={activeVariant.id} itemId={data.id} variant={activeVariant} assets={assetList} onChanged={item.reload} onPublish={setPublishing} onCreateEmail={onCreateEmail} onDirtyChange={onDirtyChange} />
+            </div>
+          </>}
         </section>
 
-        <AssetLibrary
-          itemId={data.id}
-          assets={assetList}
-          loading={assets.loading}
-          error={assets.error}
-          onReload={assets.reload}
-          knownJobIds={data.jobs.map((job) => job.id)}
-        />
-
-        <PublicationHistory key={publicationsVersion} itemId={data.id} embedded />
+        <section className={styles.detailSection} aria-label="Media and publication history">
+          <div className={styles.workspaceChannels} role="group" aria-label="Item details">
+            <button type="button" aria-pressed={detailPanel === 'media'} onClick={() => setDetailPanel('media')}>Media</button>
+            <button type="button" aria-pressed={detailPanel === 'history'} onClick={() => setDetailPanel('history')}>Publication history</button>
+          </div>
+          {detailPanel === 'media' && <AssetLibrary itemId={data.id} assets={assetList} loading={assets.loading} error={assets.error} onReload={assets.reload} knownJobIds={data.jobs.map((job) => job.id)} />}
+          {detailPanel === 'history' && <PublicationHistory key={publicationsVersion} itemId={data.id} embedded />}
+        </section>
       </div>
 
       {publishing && (

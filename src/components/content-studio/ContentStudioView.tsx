@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 
 import BriefForm from './BriefForm'
@@ -32,16 +32,32 @@ type ContentStudioViewProps = {
   onCreateEmail?: (variantId: string, revisionId: string) => void
   /** Opens a campaign in Campaigns after the email dialog created its draft. */
   onOpenCampaign?: (campaignId: string) => void
+  onDirtyChange?: (dirty: boolean) => void
 }
 
 /**
  * Content Studio: write a brief, generate per-channel variants, edit and review them,
  * add images and publish. Social accounts are managed in Settings → Connections.
  */
-export default function ContentStudioView({ onOpenSettings, onCreateEmail, onOpenCampaign }: ContentStudioViewProps = {}) {
+export default function ContentStudioView({ onOpenSettings, onCreateEmail, onOpenCampaign, onDirtyChange }: ContentStudioViewProps = {}) {
   const [section, setSection] = useState<StudioSection>('create')
   const [emailVariantId, setEmailVariantId] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [studioDirty, setStudioDirty] = useState(false)
+
+  const confirmLeave = () => !studioDirty || window.confirm('Discard unsaved variant changes?')
+  const recordDirty = useCallback((dirty: boolean) => { setStudioDirty(dirty); onDirtyChange?.(dirty) }, [onDirtyChange])
+  const selectSection = (next: StudioSection): boolean => {
+    if (next === section) return true
+    if (!confirmLeave()) return false
+    recordDirty(false)
+    setSection(next)
+    setSelectedId(null)
+    const url = new URL(window.location.href)
+    for (const parameter of ['item', 'channel', 'variant', 'studioSection']) url.searchParams.delete(parameter)
+    window.history.replaceState(null, '', url)
+    return true
+  }
 
   useEffect(() => {
     const fromUrl = readItemParam(window.location.search)
@@ -49,21 +65,42 @@ export default function ContentStudioView({ onOpenSettings, onCreateEmail, onOpe
     // A deep link to one item; read once, on mount only.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSelectedId(fromUrl)
-    setSection('library')
+    setSection(new URLSearchParams(window.location.search).get('studioSection') === 'review' ? 'review' : 'library')
   }, [])
 
   const open = (itemId: string) => {
     setSelectedId(itemId)
     if (section !== 'review') setSection('library')
+    const url = new URL(window.location.href)
+    url.searchParams.set('item', itemId)
+    url.searchParams.set('view', 'content')
+    if (section === 'review') url.searchParams.set('studioSection', 'review')
+    else url.searchParams.delete('studioSection')
+    window.history.replaceState(null, '', url)
+  }
+
+  const closeItem = () => {
+    setSelectedId(null)
+    const url = new URL(window.location.href)
+    url.searchParams.delete('item')
+    url.searchParams.delete('channel')
+    url.searchParams.delete('variant')
+    url.searchParams.delete('studioSection')
+    window.history.replaceState(null, '', url)
   }
 
   const onTabKey = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    if (event.key === 'Home' || event.key === 'End') {
+      event.preventDefault()
+      const target = event.key === 'Home' ? SECTIONS[0] : SECTIONS[SECTIONS.length - 1]
+      if (selectSection(target.id)) document.getElementById(`studio-tab-${target.id}`)?.focus()
+      return
+    }
     const delta = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0
     if (!delta) return
     event.preventDefault()
     const next = SECTIONS[(index + delta + SECTIONS.length) % SECTIONS.length]
-    setSection(next.id)
-    document.getElementById(`studio-tab-${next.id}`)?.focus()
+    if (selectSection(next.id)) document.getElementById(`studio-tab-${next.id}`)?.focus()
   }
 
   const showDetail = selectedId !== null && (section === 'library' || section === 'review')
@@ -82,7 +119,7 @@ export default function ContentStudioView({ onOpenSettings, onCreateEmail, onOpe
               aria-controls="studio-panel"
               tabIndex={section === item.id ? 0 : -1}
               className={`${styles.tab} ${section === item.id ? styles.tabActive : ''}`}
-              onClick={() => setSection(item.id)}
+              onClick={() => selectSection(item.id)}
               onKeyDown={(event) => onTabKey(event, index)}
             >
               {item.label}
@@ -92,7 +129,7 @@ export default function ContentStudioView({ onOpenSettings, onCreateEmail, onOpe
         <button
           type="button"
           className={styles.connectionsBtn}
-          onClick={onOpenSettings}
+          onClick={() => { if (confirmLeave()) { recordDirty(false); onOpenSettings?.() } }}
           disabled={!onOpenSettings}
           title={onOpenSettings ? 'Manage connected social accounts in Settings' : undefined}
         >
@@ -101,28 +138,30 @@ export default function ContentStudioView({ onOpenSettings, onCreateEmail, onOpe
       </div>
 
       <div id="studio-panel" role="tabpanel" aria-labelledby={`studio-tab-${section}`} className={styles.studioPanel}>
-        {section === 'create' && (
+        <div hidden={section !== 'create'}>
           <BriefForm
             onCreated={(item) => {
-              setSelectedId(item.id)
-              setSection('library')
+              open(item.id)
             }}
           />
-        )}
+        </div>
         {showDetail && selectedId && (
           <ItemDetail
             key={selectedId}
             itemId={selectedId}
-            onBack={() => setSelectedId(null)}
-            onOpenSettings={onOpenSettings}
+            reviewFocus={section === 'review'}
+            onBack={() => { if (confirmLeave()) { recordDirty(false); closeItem() } }}
+            onOpenSettings={() => { if (confirmLeave()) { recordDirty(false); onOpenSettings?.() } }}
+            onDirtyChange={recordDirty}
+            confirmLeave={confirmLeave}
             onCreateEmail={(variantId, revisionId) => {
               setEmailVariantId(variantId)
               onCreateEmail?.(variantId, revisionId)
             }}
           />
         )}
-        {section === 'library' && !showDetail && <ItemLibrary onOpen={open} />}
-        {section === 'review' && !showDetail && <ItemLibrary onOpen={open} reviewOnly />}
+        {section === 'library' && <div hidden={showDetail}><ItemLibrary onOpen={open} /></div>}
+        {section === 'review' && <div hidden={showDetail}><ItemLibrary onOpen={open} reviewOnly /></div>}
         {section === 'publications' && <PublicationHistory />}
       </div>
 
