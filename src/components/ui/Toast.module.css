@@ -1,0 +1,80 @@
+/* Above drawers (1000) and dialogs (1100): a notice can follow an action taken in either. */
+.region {
+  position: fixed;
+  right: var(--space-md);
+  bottom: var(--space-md);
+  z-index: 1200;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  width: min(24rem, calc(100vw - 2 * var(--space-md)));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-radius: var(--radius-md);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.16);
+  color: var(--text-primary);
+  pointer-events: auto;
+}
+
+.success {
+  border-left-color: var(--success);
+}
+
+.error {
+  border-left-color: var(--danger);
+  background: var(--danger-bg);
+}
+
+.info {
+  border-left-color: var(--info);
+}
+
+.message {
+  flex: 1;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.dismiss {
+  min-width: 2rem;
+  min-height: 2rem;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: var(--radius-md);
+}
+
+.dismiss:hover {
+  color: var(--text-primary);
+}
+
+.dismiss:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+/* Mobile: clear the bottom navigation bar. */
+@media (max-width: 768px) {
+  .region {
+    left: var(--space-md);
+    right: var(--space-md);
+    bottom: calc(var(--space-md) + 72px);
+    width: auto;
+  }
+}

@@ -43,6 +43,7 @@ const ALIASES = {
   snapshots: 'verify_20261007010000.sql',
   occurrences: 'verify_20261008000000.sql',
   testsends: 'verify_20261008010000.sql',
+  segtags: 'verify_20261010000000.sql',
 }
 
 function fail(message) {

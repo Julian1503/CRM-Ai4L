@@ -44,7 +44,7 @@ describe('DashboardStats', () => {
   })
 
   describe('derived percentages', () => {
-    it('reports conversion, lead and subscriber share', () => {
+    it('reports the customer share of all contacts, leads and subscriber share', () => {
       renderStats({
         totalContacts: 200,
         customers: 50,
@@ -53,9 +53,9 @@ describe('DashboardStats', () => {
         programSubscribers: 150,
       })
 
-      expect(screen.getByText('25% conversion rate')).toBeInTheDocument()
-      expect(screen.getByText('75% active leads')).toBeInTheDocument()
-      expect(screen.getByText('50% subscriber density')).toBeInTheDocument()
+      expect(screen.getByText('25% of all contacts')).toBeInTheDocument()
+      expect(screen.getByText('0 leads not yet qualified')).toBeInTheDocument()
+      expect(screen.getByText('50% of contacts subscribed')).toBeInTheDocument()
     })
 
     it('shows 0% rather than NaN on an empty database', () => {
@@ -69,15 +69,15 @@ describe('DashboardStats', () => {
         programSubscribers: 0,
       })
 
-      expect(screen.getByText('0% conversion rate')).toBeInTheDocument()
-      expect(screen.getByText('0% active leads')).toBeInTheDocument()
-      expect(screen.getByText('0% subscriber density')).toBeInTheDocument()
+      expect(screen.getByText('0% of all contacts')).toBeInTheDocument()
+      expect(screen.getByText('0 leads not yet qualified')).toBeInTheDocument()
+      expect(screen.getByText('0% of contacts subscribed')).toBeInTheDocument()
     })
 
     it('rounds rather than truncating', () => {
       renderStats({ totalContacts: 3, customers: 2, prospects: 1, newsletterSubscribers: 1 })
 
-      expect(screen.getByText('67% conversion rate')).toBeInTheDocument()
+      expect(screen.getByText('67% of all contacts')).toBeInTheDocument()
     })
   })
 
@@ -100,9 +100,35 @@ describe('DashboardStats', () => {
 
       renderStats({ totalContacts: 7, customers: 1, prospects: 6, newsletterSubscribers: 3 })
 
-      expect(screen.getByText('14% conversion rate')).toBeInTheDocument()
-      expect(screen.getByText('86% active leads')).toBeInTheDocument()
-      expect(screen.getByText('43% subscriber density')).toBeInTheDocument()
+      expect(screen.getByText('14% of all contacts')).toBeInTheDocument()
+      expect(screen.getByText('0 leads not yet qualified')).toBeInTheDocument()
+      expect(screen.getByText('43% of contacts subscribed')).toBeInTheDocument()
+    })
+  })
+
+  describe('real statuses (UX P3.1)', () => {
+    it('shows leads separately from prospects', () => {
+      renderStats({ totalContacts: 10, customers: 2, prospects: 3, leads: 5 })
+
+      expect(screen.getByText('3')).toBeInTheDocument()
+      expect(screen.getByText('5 leads not yet qualified')).toBeInTheDocument()
+      expect(screen.queryByText(/conversion rate/)).not.toBeInTheDocument()
+    })
+
+    it('says "lead" for exactly one', () => {
+      renderStats({ leads: 1 })
+      expect(screen.getByText('1 lead not yet qualified')).toBeInTheDocument()
+    })
+  })
+
+  describe('unavailable counts (audit M2)', () => {
+    it('shows dashes instead of zeros it never measured', () => {
+      useMatchMedia(false)
+      renderStats({ unavailable: true, totalContacts: 0, customers: 0 })
+
+      expect(screen.getByText('Counts unavailable')).toBeInTheDocument()
+      expect(screen.queryByText('0')).not.toBeInTheDocument()
+      expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(5)
     })
   })
 })

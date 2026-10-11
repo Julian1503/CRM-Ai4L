@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import { getSession } from '@/lib/auth/dal'
@@ -70,6 +71,12 @@ export default async function LoginPage({
             restart the server. Sign-in is disabled until then.
           </div>
         )}
+        <nav className={styles.legalLinks} aria-label="Legal information">
+          <Link href="/privacy">Privacy</Link>
+          <Link href="/terms">Terms</Link>
+          <Link href="/data-deletion">Data deletion</Link>
+          <Link href="/support">Support</Link>
+        </nav>
       </div>
     </main>
   )

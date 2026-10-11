@@ -17,6 +17,9 @@ import AutomationConnectionField, {
 import CampaignCopyEditor from './CampaignCopyEditor'
 import CampaignStreamField from './CampaignStreamField'
 import SegmentsPanel from './SegmentsPanel'
+import ConfirmDialog from '@/components/ui/ConfirmDialog'
+import { useToast } from '@/components/ui/Toast'
+
 import SendConfirmDialog from './SendConfirmDialog'
 import TestSendPanel from './TestSendPanel'
 import styles from './marketing.module.css'
@@ -92,6 +95,20 @@ const REPORTED_STATUSES = new Set<Campaign['status']>(['sending', 'failed'])
  * it means something is wrong rather than large.
  */
 const MAX_SEND_CHUNKS = 200
+
+/** What the operator is asked before a risky action, and what the answer runs. */
+type PendingConfirm =
+  | { kind: 'reopen'; campaign: Campaign }
+  | { kind: 'reconcile'; campaign: Campaign; resolution: 'sent' | 'retry' }
+
+/** The toast after an action that worked. */
+const ACTION_DONE: Record<'draft' | 'review' | 'approve' | 'send' | 'reopen', (name: string) => string> = {
+  draft: (name) => `"${name}" is back in draft.`,
+  review: (name) => `"${name}" was sent for review.`,
+  approve: (name) => `"${name}" is approved and ready to send.`,
+  send: (name) => `"${name}" was sent. EmailOctopus accepted every recipient.`,
+  reopen: (name) => `"${name}" is back in draft for a second send.`,
+}
 
 /**
  * What to tell the operator when a send finishes with failures.
@@ -264,6 +281,9 @@ export default function MarketingView({ jobTypes, initialCampaignId }: Marketing
   const [sendAudienceError, setSendAudienceError] = useState<string | null>(null)
   // Informational: whether the content as it is now reached a test recipient (P0.2).
   const [sendTested, setSendTested] = useState<boolean | null>(null)
+  // The question waiting for an answer before a risky action (replaces window.confirm).
+  const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(null)
+  const { notify } = useToast()
 
 
   // Audience sizes, keyed by campaign *and* segment so a re-pointed campaign does not
@@ -673,12 +693,6 @@ export default function MarketingView({ jobTypes, initialCampaignId }: Marketing
    * failure this exists to prevent (audit H3).
    */
   const reconcile = async (campaign: Campaign, resolution: 'sent' | 'retry') => {
-    const question =
-      resolution === 'sent'
-        ? 'Record these recipients as sent? Only do this if EmailOctopus shows the automation queued them.'
-        : 'Queue these recipients again? Only do this if EmailOctopus shows they were NOT queued, otherwise they get the email twice.'
-    if (!window.confirm(question)) return
-
     setError(null)
     setBusy(campaign.id)
     try {
@@ -689,6 +703,10 @@ export default function MarketingView({ jobTypes, initialCampaignId }: Marketing
       })
       if (!response.ok) throw new Error(await readError(response))
       await loadSendReports([campaign])
+      notify({
+        tone: 'success',
+        message: resolution === 'sent' ? 'Recorded as received.' : 'Queued again. Resume the send to deliver them.',
+      })
     } catch (reconcileError) {
       setError(reconcileError instanceof Error ? reconcileError.message : 'Could not settle the recipients.')
     } finally {
@@ -729,19 +747,8 @@ export default function MarketingView({ jobTypes, initialCampaignId }: Marketing
       }
 
       if (action === 'reopen') {
-        // Confirmed rather than done on the click: this ends with real mail going to
-        // people who already received this campaign once, and the provider-side setting
-        // it depends on is not visible from here.
-        const confirmed = window.confirm(
-          `Send "${campaign.name}" again?
-
-It goes back to draft and starts a second send. Everyone the segment matches now will receive it, including the contacts who got it the first time. The previous send is kept as history.
-
-You will approve it again before anything leaves, and EmailOctopus only delivers a repeat if the automation has "Allow contacts to repeat" enabled.`
-        )
-
-        if (!confirmed) return
-
+        // Reached only from the confirmation dialog (see PendingConfirm): this ends with
+        // real mail going to people who already received this campaign once.
         const response = await fetch(`/api/campaigns/${campaign.id}/reopen`, { method: 'POST' })
         if (!response.ok) throw new Error(await readError(response))
 
@@ -787,8 +794,10 @@ You will approve it again before anything leaves, and EmailOctopus only delivers
 
       await load()
 
-      // After the reload, so the banner is not wiped by the refresh it describes.
+      // After the reload, so the banner is not wiped by the refresh it describes. A send
+      // with failures stays an inline alert (it needs action); success is a toast.
       if (outcome) setError(outcome)
+      else notify({ tone: 'success', message: ACTION_DONE[action](campaign.name) })
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : 'Action failed.')
       // The ledger holds the detail behind a mid-send failure; the row should show it
@@ -1000,7 +1009,7 @@ You will approve it again before anything leaves, and EmailOctopus only delivers
                   <button
                     type="button"
                     className={styles.secondaryBtn}
-                    onClick={() => void reconcile(campaign, 'sent')}
+                    onClick={() => setPendingConfirm({ kind: 'reconcile', campaign, resolution: 'sent' })}
                     disabled={busy !== null}
                     data-testid={`reconcile-sent-${campaign.id}`}
                   >
@@ -1009,7 +1018,7 @@ You will approve it again before anything leaves, and EmailOctopus only delivers
                   <button
                     type="button"
                     className={styles.secondaryBtn}
-                    onClick={() => void reconcile(campaign, 'retry')}
+                    onClick={() => setPendingConfirm({ kind: 'reconcile', campaign, resolution: 'retry' })}
                     disabled={busy !== null}
                     data-testid={`reconcile-retry-${campaign.id}`}
                   >
@@ -1097,7 +1106,7 @@ You will approve it again before anything leaves, and EmailOctopus only delivers
                   <button
                     type="button"
                     className={styles.secondaryBtn}
-                    onClick={() => act(campaign, 'reopen')}
+                    onClick={() => setPendingConfirm({ kind: 'reopen', campaign })}
                     disabled={busy !== null}
                     data-testid={`reopen-${campaign.id}`}
                   >
@@ -1272,6 +1281,69 @@ You will approve it again before anything leaves, and EmailOctopus only delivers
           }}
         />
       )}
+
+      {pendingConfirm && (
+        <PendingConfirmDialog
+          pending={pendingConfirm}
+          onClose={() => setPendingConfirm(null)}
+          onConfirm={() => {
+            const pending = pendingConfirm
+            setPendingConfirm(null)
+            if (pending.kind === 'reopen') void act(pending.campaign, 'reopen')
+            else void reconcile(pending.campaign, pending.resolution)
+          }}
+        />
+      )}
     </div>
+  )
+}
+
+/** The accessible question before re-sending or settling unknown outcomes. */
+function PendingConfirmDialog({
+  pending,
+  onConfirm,
+  onClose,
+}: {
+  pending: PendingConfirm
+  onConfirm: () => void
+  onClose: () => void
+}) {
+  if (pending.kind === 'reopen') {
+    return (
+      <ConfirmDialog
+        title="Send this campaign again?"
+        subject={pending.campaign.name}
+        confirmLabel="Send again"
+        onConfirm={onConfirm}
+        onClose={onClose}
+      >
+        <p>
+          It goes back to draft and starts a second send. Everyone the segment matches now will receive it, including
+          the contacts who got it the first time. The previous send is kept as history.
+        </p>
+        <p>
+          You will approve it again before anything leaves, and EmailOctopus only delivers a repeat if the automation
+          has &quot;Allow contacts to repeat&quot; enabled.
+        </p>
+      </ConfirmDialog>
+    )
+  }
+
+  const sent = pending.resolution === 'sent'
+  return (
+    <ConfirmDialog
+      title={sent ? 'Record these recipients as sent?' : 'Queue these recipients again?'}
+      subject={pending.campaign.name}
+      confirmLabel={sent ? 'Record as sent' : 'Queue again'}
+      tone={sent ? 'neutral' : 'danger'}
+      onConfirm={onConfirm}
+      onClose={onClose}
+    >
+      <p>
+        {sent
+          ? 'Only do this if EmailOctopus shows the automation queued them.'
+          : 'Only do this if EmailOctopus shows they were NOT queued, otherwise they get the email twice.'}
+      </p>
+    </ConfirmDialog>
   )
 }

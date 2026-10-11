@@ -292,6 +292,25 @@
   flex-shrink: 0;
 }
 
+/* The action inside a banner (retry, dismiss): pushed to the end of the line. */
+.bannerButton {
+  margin-left: auto;
+  flex-shrink: 0;
+  padding: 4px 12px;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.bannerButton:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
 /* Settings Double-Bezel Containers */
 .settingsShell {
   background: rgba(255, 255, 255, 0.015);

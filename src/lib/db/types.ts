@@ -200,7 +200,7 @@ export type SegmentContactRow = Pick<
   service_ids: string[]
   /** Added to this segment by hand. Still subject to consent. */
   is_included: boolean
-}
+} & SegmentContactTagColumns
 
 export type NewsletterFrequency = 'weekly' | 'fortnightly' | 'monthly'
 
@@ -604,6 +604,7 @@ export type ContactConsentEventRow = {
 import type { CampaignTestSendTables } from './campaignTestSendTypes'
 import type { ContentStudioFunctions, ContentStudioTables } from './contentStudioTypes'
 import type { ScheduleOccurrenceFunctions, ScheduleOccurrenceTables } from './scheduleOccurrenceTypes'
+import type { SegmentContactTagColumns } from './segmentTagTypes'
 
 export type * from './contentStudioTypes'
 export type * from './campaignTestSendTypes'

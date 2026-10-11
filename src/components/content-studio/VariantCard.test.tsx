@@ -31,7 +31,8 @@ describe('VariantCard', () => {
     expect(screen.getByText('Over 280 characters')).toBeInTheDocument()
     expect(screen.getByText(/late generation result/)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'https://example.com/book' })).toHaveAttribute('rel', 'noopener noreferrer')
-    expect(screen.getByRole('img', { name: 'Room' })).toBeInTheDocument()
+    // Once in the revision body and once in the preview, which is open by default.
+    expect(screen.getAllByRole('img', { name: 'Room' })).toHaveLength(2)
   })
 
   it('approves the current revision', async () => {
@@ -155,13 +156,31 @@ describe('VariantCard', () => {
     expect(await screen.findByText('Could not copy to the clipboard.')).toBeInTheDocument()
   })
 
-  it('toggles a social preview', () => {
+  it('shows the social preview by default and lets it be hidden', () => {
     routeFetch({})
     renderCard()
-    fireEvent.click(screen.getByRole('button', { name: 'Preview' }))
     expect(screen.getByRole('figure', { name: 'Facebook preview' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Hide preview' }))
     expect(screen.queryByRole('figure')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }))
+    expect(screen.getByRole('figure', { name: 'Facebook preview' })).toBeInTheDocument()
+  })
+
+  it('previews the unsaved draft while editing, and reports it dirty', () => {
+    routeFetch({})
+    const onDirtyChange = jest.fn()
+    renderCard(makeVariant(), { onDirtyChange })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    fireEvent.change(screen.getByLabelText('Body'), { target: { value: 'Draft text not yet saved' } })
+
+    expect(screen.getByText('Unsaved preview')).toBeInTheDocument()
+    expect(screen.getByRole('figure', { name: 'Facebook preview' })).toHaveTextContent('Draft text not yet saved')
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByText('Unsaved preview')).not.toBeInTheDocument()
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false)
   })
 
   it('opens the editor and closes it after a save', async () => {
@@ -192,8 +211,10 @@ describe('VariantCard', () => {
       onCreateEmail,
     })
 
-    expect(screen.getByText('Hello there')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Preview' })).not.toBeInTheDocument()
+    // In the field list and as the subject of the approximate email preview.
+    expect(screen.getAllByText('Hello there')).toHaveLength(2)
+    expect(screen.getByLabelText('Approximate email preview')).toHaveTextContent('Hello there')
+    expect(screen.queryByRole('figure')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Create email' }))
     expect(onCreateEmail).toHaveBeenCalledWith('var-1', 'rev-1')
   })

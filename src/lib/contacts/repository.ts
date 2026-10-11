@@ -5,6 +5,7 @@ import type { ContactRow, Database, TagSummary } from '@/lib/db/types'
 import {
   SEARCH_ORGANISATION_CAP,
   SORT_COLUMNS,
+  STABLE_TIE_BREAKER,
   buildSearchOrExpression,
   escapeLikePattern,
   getPageRange,
@@ -163,7 +164,11 @@ export function applyContactFilters<T extends Filterable>(
     }
   }
 
-  result = result.order(SORT_COLUMNS[filters.sort], { ascending: filters.dir === 'asc' })
+  for (const column of SORT_COLUMNS[filters.sort]) {
+    result = result.order(column, { ascending: filters.dir === 'asc' })
+  }
+  // A total order, so consecutive pages never overlap or leave a gap (audit M3).
+  result = result.order(STABLE_TIE_BREAKER, { ascending: true })
 
   // Always bounded. An unbounded query is one bad filter away from loading the table.
   const { from, to } = getPageRange(filters)
@@ -283,26 +288,41 @@ export async function fetchContacts(
  */
 export const EXPORT_ID_CHUNK_SIZE = 200
 
-/** Value a row sorts by for a given key, flattening the joins the DB sorts by id. */
-function sortValue(row: JoinedRow, sort: ContactSortKey): string {
+const STATUS_ORDER: Record<string, number> = { lead: 0, prospect: 1, customer: 2, archived: 3 }
+
+type JoinedRow = ContactRow & { organisation?: { name: string } | null }
+
+/**
+ * The values a row sorts by for a key, mirroring SORT_COLUMNS: the database orders the
+ * status enum by declaration (lead, prospect, customer, archived), booleans false first,
+ * and a missing organisation last when ascending (NULLS LAST) — so this does the same.
+ */
+function sortValues(row: JoinedRow, sort: ContactSortKey): (string | number | null)[] {
   switch (sort) {
     case 'organisation':
-      // The database orders by organisation_id, which is meaningless to a reader. A
-      // selection is re-ordered here anyway, so it sorts by the name that is exported.
-      return row.organisation?.name ?? ''
+      return [row.organisation?.name ?? null]
     case 'status':
-      return String(row.status ?? '')
+      return [STATUS_ORDER[String(row.status)] ?? null]
     case 'newsletter':
-      return row.subscribed_to_newsletter ? '1' : '0'
+      return [row.subscribed_to_newsletter ? 1 : 0]
+    case 'programs':
+      return [row.subscribed_to_programs ? 1 : 0]
     case 'created':
-      return String(row.created_at ?? '')
+      return [row.created_at ?? null]
     case 'name':
     default:
-      return `${row.last_name ?? ''} ${row.first_name ?? ''}`
+      return [row.last_name ?? null, row.first_name ?? null]
   }
 }
 
-type JoinedRow = ContactRow & { organisation?: { name: string } | null }
+function compareValue(a: string | number | null, b: string | number | null): number {
+  if (a === b) return 0
+  // NULLS LAST ascending, like Postgres; the descending flip then puts them first, also like Postgres.
+  if (a === null) return 1
+  if (b === null) return -1
+  if (typeof a === 'number' && typeof b === 'number') return a - b
+  return String(a).localeCompare(String(b), undefined, { sensitivity: 'base' })
+}
 
 /** Orders rows the way the active sort would, for a set assembled from several queries. */
 export function sortSelectedRows<T extends ContactRow>(
@@ -312,14 +332,19 @@ export function sortSelectedRows<T extends ContactRow>(
 ): T[] {
   const direction = dir === 'desc' ? -1 : 1
 
+  const compare = (a: T, b: T): number => {
+    const left = sortValues(a as JoinedRow, sort)
+    const right = sortValues(b as JoinedRow, sort)
+    for (let index = 0; index < left.length; index += 1) {
+      const result = compareValue(left[index], right[index])
+      if (result !== 0) return direction * result
+    }
+    // The same tie-breaker as the database: id ascending, whatever the direction.
+    return String(a.id).localeCompare(String(b.id))
+  }
+
   // Copied rather than sorted in place: the caller's array is not ours to reorder.
-  return [...rows].sort(
-    (a, b) =>
-      direction *
-      sortValue(a as JoinedRow, sort).localeCompare(sortValue(b as JoinedRow, sort), undefined, {
-        sensitivity: 'base',
-      })
-  )
+  return [...rows].sort(compare)
 }
 
 /**

@@ -99,6 +99,20 @@
   background: #dc2626;
 }
 
+/* A question whose answer loses nothing: brand accent instead of danger red. */
+.neutral {
+  border-top-color: var(--primary);
+}
+
+.neutral .confirm {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+.neutral .confirm:hover:not(:disabled) {
+  background: var(--primary-hover);
+}
+
 .cancel:disabled,
 .confirm:disabled {
   opacity: 0.55;

@@ -38,15 +38,28 @@ const CONTACT_STATUSES: ContactStatus[] = ['lead', 'prospect', 'customer', 'arch
 
 export { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE }
 
-/** Columns each sort key maps to. Keeps arbitrary column names out of `.order()`. */
-export const SORT_COLUMNS: Record<ContactSortKey, string> = {
-  name: 'last_name',
-  organisation: 'organisation_id',
-  status: 'status',
-  newsletter: 'subscribed_to_newsletter',
-  programs: 'subscribed_to_programs',
-  created: 'created_at',
+/**
+ * Columns each sort key orders by, in order. Keeps arbitrary column names out of
+ * `.order()`.
+ *
+ * Organisation orders by the organisation's *name* through the to-one embed
+ * (`organisation:organisations(name)` in contactSelect) — ordering by organisation_id
+ * grouped rows by an opaque uuid (audit M3). Every sort ends with the contact id
+ * (STABLE_TIE_BREAKER, added by applyContactFilters): rows that tie on the visible key
+ * would otherwise come back in an arbitrary order that can change between requests, so
+ * paging could show a row twice and skip another.
+ */
+export const SORT_COLUMNS: Record<ContactSortKey, readonly string[]> = {
+  name: ['last_name', 'first_name'],
+  organisation: ['organisation(name)'],
+  status: ['status'],
+  newsletter: ['subscribed_to_newsletter'],
+  programs: ['subscribed_to_programs'],
+  created: ['created_at'],
 }
+
+/** The unique column every sort ends with, ascending, so the order is total. */
+export const STABLE_TIE_BREAKER = 'id'
 
 /**
  * Columns on `contacts` the free-text search covers.

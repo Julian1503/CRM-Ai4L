@@ -41,14 +41,18 @@ describe('BriefForm', () => {
     render(<BriefForm onCreated={jest.fn()} />)
 
     fireEvent.change(screen.getByLabelText('Reference URL'), { target: { value: 'ftp://nope' } })
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Facebook' }))
-    fireEvent.click(screen.getByRole('checkbox', { name: 'LinkedIn' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: /^Facebook/ }))
+    fireEvent.click(screen.getByRole('checkbox', { name: /^LinkedIn/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Create and generate' }))
 
     expect(screen.getByText('Give the piece a title.')).toBeInTheDocument()
     expect(screen.getByText('Use a full https:// address.')).toBeInTheDocument()
     expect(screen.getByText('Pick at least one channel.')).toBeInTheDocument()
-    expect(mock).not.toHaveBeenCalled()
+    // Reads (accounts, brand) may run; nothing may be created or generated.
+    expect(mock.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0)
+    // The first invalid field takes focus, and the folded context opens to show its error.
+    expect(screen.getByLabelText(/^Title/)).toHaveFocus()
+    expect(screen.getByLabelText('Reference URL').closest('details')).toHaveAttribute('open')
   })
 
   it('creates the item, then queues generation with the chosen channels and styles', async () => {
@@ -63,9 +67,10 @@ describe('BriefForm', () => {
     fillRequired()
     fireEvent.change(screen.getByLabelText('Audience'), { target: { value: 'Owners' } })
     fireEvent.change(screen.getByLabelText('Reference URL'), { target: { value: 'https://ai4l.test/spring' } })
-    fireEvent.click(screen.getByRole('checkbox', { name: 'LinkedIn' }))
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Email' }))
-    fireEvent.change(screen.getByLabelText('Styles per channel'), { target: { value: '2' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: /^LinkedIn/ }))
+    fireEvent.click(screen.getByRole('checkbox', { name: /^Email/ }))
+    fireEvent.click(screen.getByRole('radio', { name: '2' }))
+    expect(screen.getByText('2 channels · 4 variants')).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Source facts'), { target: { value: 'Runs every Tuesday' } })
     fireEvent.keyDown(screen.getByLabelText('Source facts'), { key: 'Enter' })
     fireEvent.click(screen.getByRole('button', { name: 'Create and generate' }))
@@ -165,7 +170,7 @@ describe('BriefForm', () => {
     expect(await screen.findByText(/is saved, so the brief is locked here/)).toBeInTheDocument()
     expect(screen.getByLabelText(/^Title/)).toBeDisabled()
     expect(screen.getByLabelText(/^Topic/)).toBeDisabled()
-    expect(screen.getByRole('checkbox', { name: 'Email' })).toBeDisabled()
+    expect(screen.getByRole('checkbox', { name: /^Email/ })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Retry generation' })).toBeEnabled()
   })
 })

@@ -18,6 +18,13 @@ type ConfirmDialogProps = {
   error?: string | null
   onConfirm: () => void
   onClose: () => void
+  /**
+   * `danger` (default) for an answer that loses something; `neutral` for one that does
+   * not (restoring a record), so routine questions do not look like deletions.
+   */
+  tone?: 'danger' | 'neutral'
+  /** Label of the button that backs out. */
+  cancelLabel?: string
 }
 
 const FOCUSABLE = 'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
@@ -41,6 +48,8 @@ export default function ConfirmDialog({
   error = null,
   onConfirm,
   onClose,
+  tone = 'danger',
+  cancelLabel = 'Cancel',
 }: ConfirmDialogProps) {
   const headingId = useId()
   const cancelRef = useRef<HTMLButtonElement>(null)
@@ -96,7 +105,7 @@ export default function ConfirmDialog({
       >
         <div
           ref={dialogRef}
-          className={styles.dialog}
+          className={`${styles.dialog} ${tone === 'neutral' ? styles.neutral : ''}`}
           role="alertdialog"
           aria-modal="true"
           aria-labelledby={headingId}
@@ -113,7 +122,7 @@ export default function ConfirmDialog({
 
           <div className={styles.actions}>
             <button ref={cancelRef} type="button" className={styles.cancel} onClick={onClose} disabled={busy}>
-              Cancel
+              {cancelLabel}
             </button>
             <button
               type="button"

@@ -23,7 +23,8 @@ type ItemDetailProps = {
   onCreateEmail?: (variantId: string, revisionId: string) => void
   reviewFocus?: boolean
   onDirtyChange?: (dirty: boolean) => void
-  confirmLeave?: () => boolean
+  /** Runs the navigation now, or after the operator agrees to drop unsaved edits. */
+  guardLeave?: (proceed: () => void) => void
 }
 
 const ASSET_PAGE_SIZE = 100
@@ -37,7 +38,7 @@ export function groupByChannel(variants: ContentVariant[]): { channel: ContentCh
 }
 
 /** One item: its brief, generation jobs, variants by channel, images and publications. */
-export default function ItemDetail({ itemId, onBack, onOpenSettings, onCreateEmail, reviewFocus = false, onDirtyChange, confirmLeave }: ItemDetailProps) {
+export default function ItemDetail({ itemId, onBack, onOpenSettings, onCreateEmail, reviewFocus = false, onDirtyChange, guardLeave }: ItemDetailProps) {
   const loadItem = useCallback(() => getItem(itemId), [itemId])
   const loadAssets = useCallback(async (): Promise<ContentAsset[]> => (await listAssets({ itemId, pageSize: ASSET_PAGE_SIZE })).assets, [itemId])
   const item = useResource(loadItem)
@@ -91,14 +92,17 @@ export default function ItemDetail({ itemId, onBack, onOpenSettings, onCreateEma
 
   const chooseVariant = (channel: ContentChannel, variantId: string | null) => {
     if (channel === activeGroup?.channel && (variantId === activeVariant?.id || (variantId === null && requestedVariantId === null))) return
-    if (confirmLeave && !confirmLeave()) return
-    setRequestedChannel(channel)
-    setRequestedVariantId(variantId)
-    const url = new URL(window.location.href)
-    url.searchParams.set('channel', channel)
-    if (variantId) url.searchParams.set('variant', variantId)
-    else url.searchParams.delete('variant')
-    window.history.replaceState(null, '', url)
+    const proceed = () => {
+      setRequestedChannel(channel)
+      setRequestedVariantId(variantId)
+      const url = new URL(window.location.href)
+      url.searchParams.set('channel', channel)
+      if (variantId) url.searchParams.set('variant', variantId)
+      else url.searchParams.delete('variant')
+      window.history.replaceState(null, '', url)
+    }
+    if (guardLeave) guardLeave(proceed)
+    else proceed()
   }
 
   const toggleArchive = async () => {

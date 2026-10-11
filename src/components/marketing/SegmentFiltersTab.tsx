@@ -10,9 +10,19 @@ import type { SegmentSummary } from './SegmentsPanel'
 
 type Option = { id: string; name: string }
 
+/**
+ * The stored definition as the form edits it. Tag lists may be stored as arrays (an
+ * older or hand-written row); they are kept, comma-joined, so saving the form can never
+ * silently drop a tag criterion and widen the group.
+ */
 function toDraft(definition: Record<string, unknown>): CriteriaDraft {
   return Object.fromEntries(
-    Object.entries(definition).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+    Object.entries(definition)
+      .map(([key, value]): [string, unknown] => [
+        key,
+        Array.isArray(value) ? value.filter((item) => typeof item === 'string').join(',') : value,
+      ])
+      .filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1] !== '')
   )
 }
 

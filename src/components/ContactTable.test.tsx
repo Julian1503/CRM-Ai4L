@@ -257,3 +257,32 @@ describe('ContactTable tags', () => {
     expect(screen.queryByRole('list', { name: 'Tags' })).not.toBeInTheDocument();
   });
 });
+
+describe('ContactTable load failures (audit M2)', () => {
+  const base = { onSelectContact: jest.fn(), onSort: jest.fn(), sortKey: '', sortDir: 'asc' as const };
+
+  it('shows the failure and a retry instead of the empty state', () => {
+    const onRetry = jest.fn();
+    render(<ContactTable {...base} contacts={[]} loadError="Could not load contacts: timeout" onRetry={onRetry} />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Could not load contacts: timeout');
+    expect(screen.queryByText('No contacts registered')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the last good rows and says so', () => {
+    render(<ContactTable {...base} contacts={mockContacts} loadError="Could not load contacts." />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Showing the last contacts that loaded.');
+    expect(screen.getByText('Acme Corp')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+  });
+
+  it('shows the empty state only when there is no failure', () => {
+    render(<ContactTable {...base} contacts={[]} />);
+
+    expect(screen.getByText('No contacts registered')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+});

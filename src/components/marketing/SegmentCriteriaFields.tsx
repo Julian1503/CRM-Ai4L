@@ -1,8 +1,10 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
+import TagPicker, { type TagOption } from '@/components/contacts/TagPicker'
 import { AU_STATES } from '@/lib/contacts/states'
+import { MAX_SEGMENT_TAGS } from '@/lib/marketing/segmentCriteria'
 import type { FacetCounts, SegmentFacets } from '@/lib/marketing/facets'
 
 import styles from './marketing.module.css'
@@ -43,6 +45,14 @@ function withValue(draft: CriteriaDraft, key: string, value: string): CriteriaDr
   return next
 }
 
+/** Tag ids as the draft stores them: one comma-separated string. */
+function splitIds(value: string | undefined): string[] {
+  return (value ?? '').split(',').map((id) => id.trim()).filter(Boolean)
+}
+
+/** Shown for a saved tag id the catalogue no longer has, so it can be removed. */
+const REMOVED_TAG = 'Removed tag'
+
 /** Criteria beyond the three dropdowns, used to decide whether to open that section. */
 const MORE_KEYS = ['organisationId', 'serviceId', 'source', 'createdFrom', 'createdTo', 'position', 'department']
 
@@ -62,6 +72,12 @@ export default function SegmentCriteriaFields({
   const [organisations, setOrganisations] = useState<Option[]>([])
   const [orgSearch, setOrgSearch] = useState('')
   const [showMore, setShowMore] = useState(() => MORE_KEYS.some((key) => Boolean(value[key])))
+  // Names for the tag chips, by id: learnt from the picker, or looked up for a saved segment.
+  const [tagNames, setTagNames] = useState<Record<string, string>>({})
+  const [lookedUp, setLookedUp] = useState<ReadonlySet<string>>(() => new Set())
+
+  const anyTagIds = useMemo(() => splitIds(value.tagIds), [value.tagIds])
+  const excludedTagIds = useMemo(() => splitIds(value.excludeTagIds), [value.excludeTagIds])
 
   const set = (key: string) => (next: string) => onChange(withValue(value, key, next))
   const testId = (name: string) => `${testIdPrefix}-${name}`
@@ -91,8 +107,70 @@ export default function SegmentCriteriaFields({
     return () => clearTimeout(timer)
   }, [showMore, orgSearch, value.organisationId])
 
+  // A saved segment arrives with ids only; label them once.
+  useEffect(() => {
+    const unknown = [...anyTagIds, ...excludedTagIds].filter((id) => !(id in tagNames) && !lookedUp.has(id))
+    if (unknown.length === 0) return
+
+    let cancelled = false
+    void (async () => {
+      try {
+        const response = await fetch(`/api/segments/options?tagIds=${encodeURIComponent(unknown.join(','))}`)
+        const body = response.ok ? await response.json() : {}
+        if (cancelled) return
+        const found = Object.fromEntries(((body.tags ?? []) as TagOption[]).map((tag) => [tag.id, tag.name]))
+        setTagNames((current) => ({ ...current, ...found }))
+      } catch {
+        // The chips fall back to "Removed tag"; the criteria still work by id.
+      } finally {
+        if (!cancelled) setLookedUp((current) => new Set([...current, ...unknown]))
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [anyTagIds, excludedTagIds, tagNames, lookedUp])
+
+  const asOptions = (ids: string[]): TagOption[] =>
+    ids.map((id) => ({ id, name: tagNames[id] ?? (lookedUp.has(id) ? REMOVED_TAG : '…') }))
+
+  const setTags = (key: 'tagIds' | 'excludeTagIds') => (tags: TagOption[]) => {
+    setTagNames((current) => ({ ...current, ...Object.fromEntries(tags.map((tag) => [tag.id, tag.name])) }))
+    onChange(withValue(value, key, tags.map((tag) => tag.id).join(',')))
+  }
+
   return (
     <>
+      <div className={styles.formRow}>
+        <div className={styles.field} data-testid={testId('tags')}>
+          <TagPicker
+            label="Has any of these tags"
+            value={asOptions(anyTagIds)}
+            onChange={setTags('tagIds')}
+            allowCreate={false}
+            maxTags={MAX_SEGMENT_TAGS}
+            disabled={disabled}
+            placeholder="Search tags…"
+            hint="Contacts with at least one of the chosen tags. Leave empty for any."
+            testId={testId('tag-any')}
+          />
+        </div>
+        <div className={styles.field} data-testid={testId('exclude-tags')}>
+          <TagPicker
+            label="Leave out contacts tagged"
+            value={asOptions(excludedTagIds)}
+            onChange={setTags('excludeTagIds')}
+            allowCreate={false}
+            maxTags={MAX_SEGMENT_TAGS}
+            disabled={disabled}
+            placeholder="Search tags…"
+            hint="Contacts with any of these tags are not in the group, unless added by hand."
+            testId={testId('tag-exclude')}
+          />
+        </div>
+      </div>
+
       <div className={styles.formRow}>
         <label className={styles.field}>
           <span className={styles.label}>State</span>

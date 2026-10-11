@@ -1,5 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 
+import { ToastProvider } from '@/components/ui/Toast'
+
 import ArchiveView from './ArchiveView'
 
 const mockFetch = jest.fn()
@@ -145,8 +147,6 @@ describe('ArchiveView', () => {
   })
 
   it('warns before restoring somebody who opted out of every email', async () => {
-    const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(false)
-
     routeFetch({
       'GET /api/contacts?includeArchived=true': jsonResponse({ contacts: optedOut, total: 1 }),
       'POST /api/contacts/c2': jsonResponse({ ok: true }),
@@ -157,30 +157,91 @@ describe('ArchiveView', () => {
 
     fireEvent.click(screen.getByTestId('restore-c2'))
 
-    expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('not their consent'))
+    const dialog = screen.getByTestId('confirm-dialog')
+    expect(dialog).toHaveTextContent('not their consent')
     // Declining the warning must not restore anybody.
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByTestId('confirm-dialog')).toBeNull()
     expect(mockFetch).not.toHaveBeenCalledWith('/api/contacts/c2', { method: 'POST' })
 
-    confirmSpy.mockRestore()
+    fireEvent.click(screen.getByTestId('restore-c2'))
+    fireEvent.click(screen.getByTestId('confirm-dialog-confirm'))
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledWith('/api/contacts/c2', { method: 'POST' }))
   })
 
-  it('restores a manually archived contact without a consent warning', async () => {
-    const confirmSpy = jest.spyOn(window, 'confirm')
-
+  it('restores a manually archived contact without a consent warning, and says so', async () => {
     routeFetch({
       ...listHandler,
       'POST /api/contacts/c1': jsonResponse({ ok: true }),
     })
 
-    render(<ArchiveView />)
+    render(
+      <ToastProvider>
+        <ArchiveView />
+      </ToastProvider>
+    )
     fireEvent.click(await screen.findByTestId('restore-c1'))
 
+    expect(screen.queryByTestId('confirm-dialog')).toBeNull()
     await waitFor(() =>
       expect(mockFetch).toHaveBeenCalledWith('/api/contacts/c1', { method: 'POST' })
     )
-    expect(confirmSpy).not.toHaveBeenCalled()
+    expect(await screen.findByTestId('toast-success')).toHaveTextContent('Ada Lovelace was restored.')
+  })
 
-    confirmSpy.mockRestore()
+  it('asks once before restoring a selection, naming any opted-out contacts', async () => {
+    routeFetch({
+      'GET /api/contacts?includeArchived=true': jsonResponse({ contacts: [...archived, ...optedOut], total: 2 }),
+      'POST /api/contacts/c1': jsonResponse({ ok: true }),
+      'POST /api/contacts/c2': jsonResponse({ ok: true }),
+    })
+
+    render(
+      <ToastProvider>
+        <ArchiveView />
+      </ToastProvider>
+    )
+    fireEvent.click(await screen.findByLabelText('Select Ada Lovelace'))
+    fireEvent.click(screen.getByLabelText('Select Grace Hopper'))
+    fireEvent.click(screen.getByTestId('restore-selected'))
+
+    const dialog = screen.getByTestId('confirm-dialog')
+    expect(dialog).toHaveTextContent('Restore 2 archived contacts?')
+    expect(dialog).toHaveTextContent('1 of them opted out')
+    fireEvent.click(screen.getByTestId('confirm-dialog-confirm'))
+
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledWith('/api/contacts/c2', { method: 'POST' }))
+    expect(mockFetch).toHaveBeenCalledWith('/api/contacts/c1', { method: 'POST' })
+    expect(await screen.findByTestId('toast-success')).toHaveTextContent('2 contacts were restored.')
+  })
+
+  it('names the contact a bulk restore stopped at', async () => {
+    routeFetch({
+      'GET /api/contacts?includeArchived=true': jsonResponse({ contacts: [...archived, ...optedOut], total: 2 }),
+      'POST /api/contacts/c1': jsonResponse({}, false, 500),
+    })
+
+    render(<ArchiveView />)
+    fireEvent.click(await screen.findByLabelText('Select Ada Lovelace'))
+    fireEvent.click(screen.getByLabelText('Select Grace Hopper'))
+    fireEvent.click(screen.getByTestId('restore-selected'))
+    expect(screen.getByTestId('confirm-dialog')).toHaveTextContent('They return to the contact list')
+    fireEvent.click(screen.getByTestId('confirm-dialog-confirm'))
+
+    expect(await screen.findByTestId('archive-error')).toHaveTextContent('Could not restore ada@example.com.')
+    expect(mockFetch).not.toHaveBeenCalledWith('/api/contacts/c2', { method: 'POST' })
+  })
+
+  it('confirms a single restore with a neutral dialog', async () => {
+    routeFetch({
+      'GET /api/contacts?includeArchived=true': jsonResponse({ contacts: archived, total: 1 }),
+    })
+    render(<ArchiveView />)
+    fireEvent.click(await screen.findByLabelText('Select Ada Lovelace'))
+    fireEvent.click(screen.getByTestId('restore-selected'))
+
+    expect(screen.getByTestId('confirm-dialog')).toHaveTextContent('Restore this contact?')
+    expect(screen.getByRole('button', { name: 'Restore contact' })).toBeInTheDocument()
   })
 
   it('lists archived contacts with the date they were archived', async () => {

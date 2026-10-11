@@ -98,16 +98,30 @@ describe('applyContactFilters', () => {
     expect(String(orCalls[0].args[0])).toContain('first_name.ilike.')
   })
 
-  it('orders by the mapped column, never the raw sort key', () => {
+  it('orders organisation by its name through the embed, then by id (audit M3)', () => {
     const builder = apply({ sort: 'organisation', dir: 'desc' })
 
-    expect(builder.argsFor('order')).toEqual(['organisation_id', { ascending: false }])
+    expect(builder.allFor('order').map((call) => call.args)).toEqual([
+      ['organisation(name)', { ascending: false }],
+      ['id', { ascending: true }],
+    ])
   })
 
-  it('falls back to a safe column for an unknown sort key', () => {
+  it('falls back to a safe column for an unknown sort key, with first name and id as tie-breakers', () => {
     const builder = apply({ sort: 'password' })
 
-    expect(builder.argsFor('order')).toEqual(['last_name', { ascending: true }])
+    expect(builder.allFor('order').map((call) => call.args)).toEqual([
+      ['last_name', { ascending: true }],
+      ['first_name', { ascending: true }],
+      ['id', { ascending: true }],
+    ])
+  })
+
+  it.each(['status', 'newsletter', 'programs', 'created'])('ends the %s sort with the id, so pages never overlap', (sort) => {
+    const orders = apply({ sort, dir: 'desc' }).allFor('order').map((call) => call.args)
+
+    expect(orders).toHaveLength(2)
+    expect(orders[1]).toEqual(['id', { ascending: true }])
   })
 
   it('always applies a bounded range, so no query is unbounded', () => {
@@ -261,6 +275,50 @@ describe('sortSelectedRows', () => {
     expect(
       sortSelectedRows(rows as never, 'organisation', 'asc').map((row) => row.id)
     ).toEqual(['c1', 'c2'])
+  })
+
+  it('breaks ties by id ascending in both directions, like the database', () => {
+    const tied = [
+      { id: 'b', last_name: 'Same', first_name: 'Name' },
+      { id: 'a', last_name: 'Same', first_name: 'Name' },
+    ]
+    expect(sortSelectedRows(tied as never, 'name', 'asc').map((row) => row.id)).toEqual(['a', 'b'])
+    expect(sortSelectedRows(tied as never, 'name', 'desc').map((row) => row.id)).toEqual(['a', 'b'])
+  })
+
+  it('uses the first name when last names match', () => {
+    const sameLast = [
+      { id: '1', last_name: 'Same', first_name: 'Zed' },
+      { id: '2', last_name: 'Same', first_name: 'Amy' },
+    ]
+    expect(sortSelectedRows(sameLast as never, 'name', 'asc').map((row) => row.id)).toEqual(['2', '1'])
+  })
+
+  it('puts a missing organisation last ascending and first descending (NULLS LAST)', () => {
+    const withNone = [...rows, { id: 'c3', last_name: 'C', first_name: 'C', organisation: null }]
+    expect(sortSelectedRows(withNone as never, 'organisation', 'asc').map((row) => row.id)).toEqual(['c1', 'c2', 'c3'])
+    expect(sortSelectedRows(withNone as never, 'organisation', 'desc').map((row) => row.id)).toEqual(['c3', 'c2', 'c1'])
+  })
+
+  it('orders status by the enum, not alphabetically', () => {
+    const statuses = [
+      { id: '1', status: 'customer' },
+      { id: '2', status: 'lead' },
+      { id: '3', status: 'prospect' },
+      { id: '4', status: 'mystery' },
+    ]
+    expect(sortSelectedRows(statuses as never, 'status', 'asc').map((row) => row.id)).toEqual(['2', '3', '1', '4'])
+  })
+
+  it('orders consents false first and creation time, programs included', () => {
+    const consents = [
+      { id: '1', subscribed_to_newsletter: true, subscribed_to_programs: false, created_at: '2026-02-01' },
+      { id: '2', subscribed_to_newsletter: false, subscribed_to_programs: true, created_at: '2026-01-01' },
+    ]
+    expect(sortSelectedRows(consents as never, 'newsletter', 'asc').map((row) => row.id)).toEqual(['2', '1'])
+    expect(sortSelectedRows(consents as never, 'programs', 'asc').map((row) => row.id)).toEqual(['1', '2'])
+    expect(sortSelectedRows(consents as never, 'created', 'asc').map((row) => row.id)).toEqual(['2', '1'])
+    expect(sortSelectedRows([{ id: '1' }, { id: '2', created_at: 'x' }] as never, 'created', 'asc').map((row) => row.id)).toEqual(['2', '1'])
   })
 
   it('leaves the caller array untouched', () => {
