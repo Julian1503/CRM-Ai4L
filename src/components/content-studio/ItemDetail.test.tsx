@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
 import ItemDetail, { groupByChannel } from './ItemDetail'
 import { bodyOf, errorResponse, jsonResponse, makeAccount, makeAsset, makeItem, makeJob, makePublication, makeRevision, makeVariant, routeFetch } from './testUtils'
@@ -36,7 +36,9 @@ describe('groupByChannel', () => {
 })
 
 describe('ItemDetail', () => {
-  it('shows the brief, jobs, variants by channel, images and publications', async () => {
+  afterEach(() => window.history.replaceState(null, '', '/'))
+
+  it('shows the brief, jobs, one channel and variant at a time, media and history', async () => {
     const mock = routeFetch(baseHandlers())
     const onBack = jest.fn()
     render(<ItemDetail itemId="item-1" onBack={onBack} />)
@@ -46,15 +48,95 @@ describe('ItemDetail', () => {
     expect(screen.getByText('Owners')).toBeInTheDocument()
     expect(screen.getByText('A · B')).toBeInTheDocument()
     expect(screen.getByText('Provider error')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Facebook' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Email' })).toBeInTheDocument()
+
+    // Channels are a selector; the first live one is active. Archived variants never show.
+    const channels = screen.getByRole('group', { name: 'Content channel' })
+    expect(within(channels).getByRole('button', { name: /Facebook/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(channels).getByRole('button', { name: /Email/ })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByTestId('variant-var-1')).toBeInTheDocument()
+    expect(screen.queryByTestId('variant-var-2')).not.toBeInTheDocument()
     expect(screen.queryByTestId('variant-var-3')).not.toBeInTheDocument()
+
+    // Media is the default detail panel; history is one click away.
     expect(await screen.findByTestId('asset-asset-1')).toBeInTheDocument()
-    expect(await screen.findByTestId('publication-pub-1')).toBeInTheDocument()
     expect(mock.mock.calls.some(([url]) => url === '/api/content-studio/assets?itemId=item-1&pageSize=100')).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Publication history' }))
+    expect(await screen.findByTestId('publication-pub-1')).toBeInTheDocument()
+    expect(screen.queryByTestId('asset-asset-1')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Media' }))
+    expect(await screen.findByTestId('asset-asset-1')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '← All content' }))
     expect(onBack).toHaveBeenCalled()
+  })
+
+  it('switches channel and variant, recording them in the URL', async () => {
+    routeFetch(baseHandlers())
+    render(<ItemDetail itemId="item-1" onBack={jest.fn()} />)
+    await screen.findByTestId('variant-var-1')
+
+    fireEvent.click(within(screen.getByRole('group', { name: 'Content channel' })).getByRole('button', { name: /Email/ }))
+
+    expect(screen.getByTestId('variant-var-2')).toBeInTheDocument()
+    expect(new URL(window.location.href).searchParams.get('channel')).toBe('email')
+    expect(new URL(window.location.href).searchParams.get('variant')).toBeNull()
+
+  })
+
+  it('switches between variants of one channel', async () => {
+    const item = makeItem({
+      variants: [
+        makeVariant({ id: 'var-1', style: 'direct', createdAt: '2026-01-01' }),
+        makeVariant({ id: 'var-4', style: 'question', createdAt: '2026-01-02', current: makeRevision({ id: 'rev-4', variantId: 'var-4' }) }),
+      ],
+    })
+    routeFetch(baseHandlers(item))
+    render(<ItemDetail itemId="item-1" onBack={jest.fn()} />)
+    await screen.findByTestId('variant-var-1')
+
+    const nav = screen.getByRole('navigation', { name: 'Facebook variants' })
+    fireEvent.click(within(nav).getByRole('button', { name: /question/ }))
+
+    expect(screen.getByTestId('variant-var-4')).toBeInTheDocument()
+    expect(new URL(window.location.href).searchParams.get('variant')).toBe('var-4')
+    expect(within(nav).getByRole('button', { name: /question/ })).toHaveAttribute('aria-current', 'true')
+  })
+
+  it('opens the channel and variant named in the URL', async () => {
+    window.history.replaceState(null, '', '/?item=item-1&channel=email&variant=var-2')
+    routeFetch(baseHandlers())
+    render(<ItemDetail itemId="item-1" onBack={jest.fn()} />)
+    expect(await screen.findByTestId('variant-var-2')).toBeInTheDocument()
+  })
+
+  it('opens on the first pending variant when reached from the review queue', async () => {
+    routeFetch(baseHandlers())
+    render(<ItemDetail itemId="item-1" onBack={jest.fn()} reviewFocus />)
+    // var-1 (Facebook) is approved; var-2 (Email) is the one waiting.
+    expect(await screen.findByTestId('variant-var-2')).toBeInTheDocument()
+  })
+
+  it('lets the guard decide before switching variants', async () => {
+    routeFetch(baseHandlers())
+    let pending: (() => void) | null = null
+    const guardLeave = jest.fn((proceed: () => void) => {
+      pending = proceed
+    })
+    render(<ItemDetail itemId="item-1" onBack={jest.fn()} guardLeave={guardLeave} />)
+    await screen.findByTestId('variant-var-1')
+
+    const channels = () => within(screen.getByRole('group', { name: 'Content channel' }))
+    fireEvent.click(channels().getByRole('button', { name: /Email/ }))
+    // Held: the operator has not answered yet.
+    expect(guardLeave).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId('variant-var-1')).toBeInTheDocument()
+
+    act(() => pending?.())
+    expect(screen.getByTestId('variant-var-2')).toBeInTheDocument()
+
+    // Re-selecting the active channel is not a leave.
+    fireEvent.click(channels().getByRole('button', { name: /Email/ }))
+    expect(guardLeave).toHaveBeenCalledTimes(1)
   })
 
   it('archives and restores the item', async () => {

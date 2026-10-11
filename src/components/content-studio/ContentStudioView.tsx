@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 
+import ConfirmDialog from '@/components/ui/ConfirmDialog'
+
 import BriefForm from './BriefForm'
 import CreateEmailDialog from './CreateEmailDialog'
 import ItemDetail from './ItemDetail'
@@ -45,18 +47,40 @@ export default function ContentStudioView({ onOpenSettings, onCreateEmail, onOpe
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [studioDirty, setStudioDirty] = useState(false)
 
-  const confirmLeave = () => !studioDirty || window.confirm('Discard unsaved variant changes?')
+  /** A way out of an edited variant, waiting for the operator to confirm the discard. */
+  const [pendingLeave, setPendingLeave] = useState<(() => void) | null>(null)
   const recordDirty = useCallback((dirty: boolean) => { setStudioDirty(dirty); onDirtyChange?.(dirty) }, [onDirtyChange])
-  const selectSection = (next: StudioSection): boolean => {
-    if (next === section) return true
-    if (!confirmLeave()) return false
-    recordDirty(false)
-    setSection(next)
-    setSelectedId(null)
-    const url = new URL(window.location.href)
-    for (const parameter of ['item', 'channel', 'variant', 'studioSection']) url.searchParams.delete(parameter)
-    window.history.replaceState(null, '', url)
-    return true
+
+  /**
+   * Runs `proceed` now when nothing is unsaved; otherwise asks first, in a dialog, and
+   * runs it only if the operator chooses to discard.
+   */
+  const guardLeave = (proceed: (afterDialog?: boolean) => void) => {
+    if (!studioDirty) {
+      recordDirty(false)
+      proceed(false)
+      return
+    }
+    setPendingLeave(() => () => {
+      recordDirty(false)
+      proceed(true)
+    })
+  }
+
+  const selectSection = (next: StudioSection, focusTab = false) => {
+    if (next === section) return
+    guardLeave((afterDialog) => {
+      setSection(next)
+      setSelectedId(null)
+      const url = new URL(window.location.href)
+      for (const parameter of ['item', 'channel', 'variant', 'studioSection']) url.searchParams.delete(parameter)
+      window.history.replaceState(null, '', url)
+      if (!focusTab) return
+      const focus = () => document.getElementById(`studio-tab-${next}`)?.focus()
+      // A closing dialog hands focus back to its opener; move it after that.
+      if (afterDialog) window.setTimeout(focus, 0)
+      else focus()
+    })
   }
 
   useEffect(() => {
@@ -93,14 +117,14 @@ export default function ContentStudioView({ onOpenSettings, onCreateEmail, onOpe
     if (event.key === 'Home' || event.key === 'End') {
       event.preventDefault()
       const target = event.key === 'Home' ? SECTIONS[0] : SECTIONS[SECTIONS.length - 1]
-      if (selectSection(target.id)) document.getElementById(`studio-tab-${target.id}`)?.focus()
+      selectSection(target.id, true)
       return
     }
     const delta = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0
     if (!delta) return
     event.preventDefault()
     const next = SECTIONS[(index + delta + SECTIONS.length) % SECTIONS.length]
-    if (selectSection(next.id)) document.getElementById(`studio-tab-${next.id}`)?.focus()
+    selectSection(next.id, true)
   }
 
   const showDetail = selectedId !== null && (section === 'library' || section === 'review')
@@ -129,7 +153,7 @@ export default function ContentStudioView({ onOpenSettings, onCreateEmail, onOpe
         <button
           type="button"
           className={styles.connectionsBtn}
-          onClick={() => { if (confirmLeave()) { recordDirty(false); onOpenSettings?.() } }}
+          onClick={() => guardLeave(() => onOpenSettings?.())}
           disabled={!onOpenSettings}
           title={onOpenSettings ? 'Manage connected social accounts in Settings' : undefined}
         >
@@ -150,10 +174,10 @@ export default function ContentStudioView({ onOpenSettings, onCreateEmail, onOpe
             key={selectedId}
             itemId={selectedId}
             reviewFocus={section === 'review'}
-            onBack={() => { if (confirmLeave()) { recordDirty(false); closeItem() } }}
-            onOpenSettings={() => { if (confirmLeave()) { recordDirty(false); onOpenSettings?.() } }}
+            onBack={() => guardLeave(closeItem)}
+            onOpenSettings={() => guardLeave(() => onOpenSettings?.())}
             onDirtyChange={recordDirty}
-            confirmLeave={confirmLeave}
+            guardLeave={guardLeave}
             onCreateEmail={(variantId, revisionId) => {
               setEmailVariantId(variantId)
               onCreateEmail?.(variantId, revisionId)
@@ -164,6 +188,22 @@ export default function ContentStudioView({ onOpenSettings, onCreateEmail, onOpe
         {section === 'review' && <div hidden={showDetail}><ItemLibrary onOpen={open} reviewOnly /></div>}
         {section === 'publications' && <PublicationHistory />}
       </div>
+
+      {pendingLeave && (
+        <ConfirmDialog
+          title="Discard your changes?"
+          confirmLabel="Discard changes"
+          cancelLabel="Keep editing"
+          onConfirm={() => {
+            const leave = pendingLeave
+            setPendingLeave(null)
+            leave()
+          }}
+          onClose={() => setPendingLeave(null)}
+        >
+          <p>The variant you are editing has unsaved changes.</p>
+        </ConfirmDialog>
+      )}
 
       {emailVariantId && (
         <CreateEmailDialog

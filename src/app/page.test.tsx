@@ -139,6 +139,14 @@ const parsedSpreadsheet = {
  * The page fetches its contact page on mount, so responses have to be addressed rather
  * than queued — a bare mockResolvedValueOnce would be swallowed by that first request.
  */
+/** Settings → Connections → Email marketing, where the EmailOctopus credentials live now. */
+function openEmailMarketingSettings() {
+  fireEvent.click(screen.getByTestId('nav-item-settings'));
+  expect(screen.getByRole('heading', { name: 'Settings', level: 1 })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('link', { name: 'Connections' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Email marketing' }));
+}
+
 function routeFetch(overrides: Record<string, unknown> = {}) {
   mockFetch.mockImplementation(async (url: string) => {
     for (const [pattern, response] of Object.entries(overrides)) {
@@ -160,6 +168,10 @@ describe('Home Page & Excel Importer UI Integration Tests', () => {
     jest.clearAllMocks();
     __resetSupabaseMock();
     routeFetch();
+    // Settings now keeps its section in the URL (?view=settings&section=…), and the page
+    // opens the view the URL names: a URL left by one test would open the next one in
+    // Settings.
+    window.history.replaceState(null, '', '/');
   });
 
   it('badges the campaigns tab with how many are waiting for approval', async () => {
@@ -332,8 +344,7 @@ describe('Home Page & Excel Importer UI Integration Tests', () => {
 
     render(<Home />);
 
-    fireEvent.click(screen.getByTestId('nav-item-settings'));
-    expect(screen.getByRole('heading', { name: /system settings/i })).toBeInTheDocument();
+    openEmailMarketingSettings();
     await screen.findByText('No key is saved.');
 
     fireEvent.change(screen.getByLabelText('EmailOctopus API Key'), { target: { value: 'key-123' } });
@@ -388,7 +399,7 @@ describe('Home Page & Excel Importer UI Integration Tests', () => {
     });
 
     render(<Home />);
-    fireEvent.click(screen.getByTestId('nav-item-settings'));
+    openEmailMarketingSettings();
 
     expect(await screen.findByTestId('credentials-read-only')).toBeInTheDocument();
     expect(screen.getByLabelText('EmailOctopus API Key')).toBeDisabled();
@@ -562,6 +573,10 @@ describe('contact list robustness (audit M1, M2) and notices', () => {
     jest.clearAllMocks();
     __resetSupabaseMock();
     routeFetch();
+    // Settings now keeps its section in the URL (?view=settings&section=…), and the page
+    // opens the view the URL names: a URL left by one test would open the next one in
+    // Settings.
+    window.history.replaceState(null, '', '/');
   });
 
   it('waits for typing to pause before searching (debounce)', async () => {
