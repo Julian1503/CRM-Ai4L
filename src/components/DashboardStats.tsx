@@ -7,21 +7,41 @@ import { useGSAP } from '@gsap/react';
 
 import { prefersReducedMotion } from '@/lib/motion';
 
+/**
+ * The dashboard counters. Every figure is a database count over active contacts
+ * (src/lib/contacts/stats.ts has the definitions): leads, prospects and customers are
+ * each their own status, and the customer card shows customers / total — a share of the
+ * whole database, not a conversion rate (there is no funnel history to compute one from).
+ */
 interface DashboardStatsProps {
   totalContacts: number;
   customers: number;
+  /** status = prospect. Leads are counted separately; they are not prospects. */
   prospects: number;
+  /** status = lead: not yet qualified. */
+  leads?: number;
   newsletterSubscribers: number;
   /** Contacts consenting to course and training email. Overlaps the newsletter figure. */
   programSubscribers: number;
+  /**
+   * The counts could not be read. Values show as a dash rather than a zero the database
+   * never reported (audit M2).
+   */
+  unavailable?: boolean;
+}
+
+function percentOf(part: number, total: number): number {
+  return total > 0 ? Math.round((part / total) * 100) : 0;
 }
 
 export default function DashboardStats({
   totalContacts,
   customers,
   prospects,
+  leads = 0,
   newsletterSubscribers,
   programSubscribers,
+  unavailable = false,
 }: DashboardStatsProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const totalRef = useRef<HTMLSpanElement>(null);
@@ -42,7 +62,7 @@ export default function DashboardStats({
     // Reduced motion skips both the stagger and the count-up. The counts stay correct:
     // the spans render {totalContacts} etc. from JSX, and the tween below only
     // overwrites that text while animating towards the same number.
-    if (prefersReducedMotion()) {
+    if (unavailable || prefersReducedMotion()) {
       prevValues.current = {
         total: totalContacts,
         customers,
@@ -100,9 +120,11 @@ export default function DashboardStats({
       programs: programSubscribers,
     };
   }, {
-    dependencies: [totalContacts, customers, prospects, newsletterSubscribers, programSubscribers],
+    dependencies: [totalContacts, customers, prospects, newsletterSubscribers, programSubscribers, unavailable],
     scope: containerRef,
   });
+
+  const show = (value: number): string | number => (unavailable ? '—' : value);
 
   // SVGs for the dashboard cards
   const icons = {
@@ -150,9 +172,9 @@ export default function DashboardStats({
             <span className={styles.label}>Total Contacts</span>
             <div className={`${styles.iconWrapper} ${styles.contactsIcon}`}>{icons.contacts}</div>
           </div>
-          <span ref={totalRef} className={styles.value}>{totalContacts}</span>
+          <span ref={totalRef} className={styles.value}>{show(totalContacts)}</span>
           <div className={styles.trend}>
-            <span className={styles.trendNeutral}>Database capacity active</span>
+            <span className={styles.trendNeutral}>{unavailable ? 'Counts unavailable' : 'Active contacts, excluding archived'}</span>
           </div>
         </div>
       </div>
@@ -163,10 +185,10 @@ export default function DashboardStats({
             <span className={styles.label}>Customers</span>
             <div className={`${styles.iconWrapper} ${styles.customerIcon}`}>{icons.customer}</div>
           </div>
-          <span ref={customersRef} className={styles.value}>{customers}</span>
+          <span ref={customersRef} className={styles.value}>{show(customers)}</span>
           <div className={styles.trend}>
             <span className={styles.trendPositive}>
-              {totalContacts > 0 ? Math.round((customers / totalContacts) * 100) : 0}% conversion rate
+              {unavailable ? '—' : `${percentOf(customers, totalContacts)}% of all contacts`}
             </span>
           </div>
         </div>
@@ -178,10 +200,10 @@ export default function DashboardStats({
             <span className={styles.label}>Prospects</span>
             <div className={`${styles.iconWrapper} ${styles.prospectIcon}`}>{icons.prospect}</div>
           </div>
-          <span ref={prospectsRef} className={styles.value}>{prospects}</span>
+          <span ref={prospectsRef} className={styles.value}>{show(prospects)}</span>
           <div className={styles.trend}>
             <span className={styles.trendNeutral}>
-              {totalContacts > 0 ? Math.round((prospects / totalContacts) * 100) : 0}% active leads
+              {unavailable ? '—' : `${leads.toLocaleString()} ${leads === 1 ? 'lead' : 'leads'} not yet qualified`}
             </span>
           </div>
         </div>
@@ -193,10 +215,10 @@ export default function DashboardStats({
             <span className={styles.label}>Newsletter</span>
             <div className={`${styles.iconWrapper} ${styles.newsletterIcon}`}>{icons.newsletter}</div>
           </div>
-          <span ref={newsletterRef} className={styles.value}>{newsletterSubscribers}</span>
+          <span ref={newsletterRef} className={styles.value}>{show(newsletterSubscribers)}</span>
           <div className={styles.trend}>
             <span className={styles.trendPositive}>
-              {totalContacts > 0 ? Math.round((newsletterSubscribers / totalContacts) * 100) : 0}% subscriber density
+              {unavailable ? '—' : `${percentOf(newsletterSubscribers, totalContacts)}% of contacts subscribed`}
             </span>
           </div>
         </div>
@@ -208,10 +230,10 @@ export default function DashboardStats({
             <span className={styles.label}>Courses &amp; training</span>
             <div className={`${styles.iconWrapper} ${styles.programsIcon}`}>{icons.programs}</div>
           </div>
-          <span ref={programsRef} className={styles.value}>{programSubscribers}</span>
+          <span ref={programsRef} className={styles.value}>{show(programSubscribers)}</span>
           <div className={styles.trend}>
             <span className={styles.trendPositive}>
-              {totalContacts > 0 ? Math.round((programSubscribers / totalContacts) * 100) : 0}% consent to courses
+              {unavailable ? '—' : `${percentOf(programSubscribers, totalContacts)}% consent to courses`}
             </span>
           </div>
         </div>

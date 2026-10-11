@@ -61,6 +61,10 @@ import ContentStudioView from '@/components/content-studio/ContentStudioView';
 import { requestLifecycle } from '@/lib/lifecycle/client';
 import BookingsView from '@/components/bookings/BookingsView';
 import Pagination from '@/components/ui/Pagination';
+import { useToast } from '@/components/ui/Toast';
+import { createLatestRequest, isAbortError } from '@/lib/contacts/latestRequest';
+import { fetchContactStats, type ContactStats } from '@/lib/contacts/stats';
+import { useDebouncedValue } from '@/lib/contacts/useDebouncedValue';
 import { type EmailOctopusStatus } from '@/components/settings/EmailOctopusSettings';
 import SettingsView from '@/components/settings/SettingsView';
 import JobTypesDialog from '@/components/settings/JobTypesDialog';
@@ -208,6 +212,7 @@ export default function App() {
   const [campaignToOpen, setCampaignToOpen] = useState<string | undefined>(undefined);
   const [awaitingApproval, setAwaitingApproval] = useState(0);
   const mainContentRef = useRef<HTMLElement>(null);
+  const { notify } = useToast();
 
   // `?view=campaigns` opens that workspace directly — it is where the newsletter review
   // email links. Read once on mount; the tabs are not otherwise kept in the URL.
@@ -300,16 +305,21 @@ export default function App() {
     () => new Set<string>()
   );
   const [isContactsLoading, setIsContactsLoading] = useState(true);
+  // The last load failed; the rows above are the last ones that loaded (audit M2).
+  const [contactsError, setContactsError] = useState<string | null>(null);
+  // Only the newest contact request may answer (audit M1).
+  const contactRequests = useRef(createLatestRequest());
+  // The search box updates on every keystroke; the query waits for typing to pause.
+  const debouncedSearch = useDebouncedValue(searchQuery);
+  // What the last import did, kept on screen until dismissed: it can name rows that
+  // need someone to go and look (archived collisions).
+  const [importSummary, setImportSummary] = useState<string | null>(null);
 
   // Counted in the database rather than over the loaded rows: with the list paginated,
   // counting what is in memory would report the size of the current page.
-  const [stats, setStats] = useState({
-    total: 0,
-    customers: 0,
-    prospects: 0,
-    subscribers: 0,
-    programSubscribers: 0,
-  });
+  // Null until the first successful count: unknown is shown as unknown, never as zero.
+  const [stats, setStats] = useState<ContactStats | null>(null);
+  const [statsError, setStatsError] = useState<string | null>(null);
 
   const [isDatabaseConnected, setIsDatabaseConnected] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
@@ -354,7 +364,7 @@ export default function App() {
   // a second, drifting query path.
   const contactQuery = React.useMemo(() => {
     const params = new URLSearchParams();
-    if (searchQuery.trim()) params.set('q', searchQuery.trim());
+    if (debouncedSearch.trim()) params.set('q', debouncedSearch.trim());
     if (jobTypeFilter) params.set('jobTypeId', jobTypeFilter);
     if (stateFilter) params.set('state', stateFilter);
     if (tagFilter.length > 0) params.set('tagIds', tagFilter.map((tag) => tag.id).join(','));
@@ -369,7 +379,7 @@ export default function App() {
     params.set('dir', sortDir);
     return params.toString();
   }, [
-    searchQuery,
+    debouncedSearch,
     jobTypeFilter,
     stateFilter,
     tagFilter,
@@ -448,43 +458,23 @@ export default function App() {
   }, []);
 
   /**
-   * Dashboard counters, counted in the database.
+   * Dashboard counters, counted in the database (definitions: src/lib/contacts/stats.ts).
    *
-   * `head: true` asks for the count without the rows, so this stays cheap however large
-   * the table grows.
+   * A failed count keeps the last good figures and says so (audit M2); before any count
+   * has succeeded the cards show a dash, not zero.
    */
   const loadStats = React.useCallback(async () => {
     if (!hasSupabaseConfig) {
-      setStats({ total: 0, customers: 0, prospects: 0, subscribers: 0, programSubscribers: 0 });
+      setStats(null);
       return;
     }
 
     try {
-      const db = getSupabaseClient();
-
-      const [totalResult, customerResult, subscriberResult, programResult] = await Promise.all([
-        db.from('active_contacts').select('id', { count: 'exact', head: true }),
-        db.from('active_contacts').select('id', { count: 'exact', head: true }).eq('is_customer', true),
-        db.from('active_contacts').select('id', { count: 'exact', head: true }).eq('subscribed_to_newsletter', true),
-        // Counted rather than derived from the newsletter figure: the two consents
-        // overlap but neither contains the other.
-        db.from('active_contacts').select('id', { count: 'exact', head: true }).eq('subscribed_to_programs', true),
-      ]);
-
-      const total = totalResult.count ?? 0;
-      const customers = customerResult.count ?? 0;
-
-      setStats({
-        total,
-        customers,
-        // Derived rather than counted separately: a prospect is defined as "not a
-        // customer", so a third query could disagree with the first two.
-        prospects: Math.max(0, total - customers),
-        subscribers: subscriberResult.count ?? 0,
-        programSubscribers: programResult.count ?? 0,
-      });
+      setStats(await fetchContactStats(getSupabaseClient()));
+      setStatsError(null);
     } catch (error) {
       console.error('Failed to load contact counts', error);
+      setStatsError(getErrorMessage(error));
     }
   }, []);
 
@@ -528,12 +518,16 @@ export default function App() {
    */
   const loadContacts = React.useCallback(async () => {
     if (!hasSupabaseConfig) {
+      contactRequests.current.cancel();
       setContacts([]);
       setContactsTotal(0);
       setIsContactsLoading(false);
       return;
     }
 
+    // Supersedes any request still in flight: a slow, older search can never overwrite
+    // the answer to a newer one (audit M1).
+    const request = contactRequests.current.begin();
     setIsContactsLoading(true);
 
     try {
@@ -541,7 +535,7 @@ export default function App() {
       params.set('page', String(contactsPage));
       params.set('pageSize', String(contactsPageSize));
 
-      const response = await fetch(`/api/contacts?${params.toString()}`);
+      const response = await fetch(`/api/contacts?${params.toString()}`, { signal: request.signal });
 
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
@@ -551,16 +545,19 @@ export default function App() {
       const body = await response.json();
       const rows = (body.contacts ?? []) as DbContact[];
       const servicesByContact = await fetchServicesForContacts(rows.map((row) => row.id));
+      if (!request.isCurrent()) return;
 
       setContacts(rows.map((row) => formatContactFromDatabase(row, servicesByContact.get(row.id) ?? [])));
       setContactsTotal(body.total ?? 0);
+      setContactsError(null);
     } catch (error) {
+      if (!request.isCurrent() || isAbortError(error)) return;
+      // The last good page stays on screen; the failure is reported next to it rather
+      // than replacing it with an empty list that reads as "no contacts" (audit M2).
       console.error('Failed to load contacts', error);
-      setContacts([]);
-      setContactsTotal(0);
-      setConnectionError(`Could not load contacts: ${getErrorMessage(error)}`);
+      setContactsError(`Could not load contacts: ${getErrorMessage(error)}`);
     } finally {
-      setIsContactsLoading(false);
+      if (request.isCurrent()) setIsContactsLoading(false);
     }
   }, [contactQuery, contactsPage, contactsPageSize]);
 
@@ -635,7 +632,7 @@ export default function App() {
       setAmbiguousHeaders(ambiguous);
       setIsMapped(true);
     } catch (err) {
-      alert(`Error parsing spreadsheet: ${getErrorMessage(err)}`);
+      notify({ tone: 'error', message: `Could not read the spreadsheet: ${getErrorMessage(err)}` });
       setImportFile(null);
     } finally {
       setIsImporting(false);
@@ -686,13 +683,14 @@ export default function App() {
         .filter(Boolean)
         .join(', ');
 
-      alert(
+      const importMessage =
         result.archived_collisions > 0
-          ? `Import complete: ${summary}.
-
-${result.archived_collisions} row(s) match a contact in the archive and were not imported — importing them would create a duplicate and restore email consent they had withdrawn. Restore them from Archive if they should come back.`
-          : `Import complete: ${summary}.`
-      );
+          ? `Import complete: ${summary}. ${result.archived_collisions} row(s) match a contact in the archive and were not imported — importing them would create a duplicate and restore email consent they had withdrawn. Restore them from Archive if they should come back.`
+          : `Import complete: ${summary}.`;
+      // A toast for the moment, and the same summary kept on the contacts screen until
+      // dismissed, because it may name rows someone has to follow up.
+      notify({ tone: result.archived_collisions > 0 ? 'info' : 'success', message: `Import complete: ${summary}.` });
+      setImportSummary(importMessage);
 
       setImportFile(null);
       setRawHeaders([]);
@@ -703,7 +701,7 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
       setCommonTags([]);
       setCurrentView('contacts');
     },
-    [mappedImportRows, refreshData]
+    [mappedImportRows, refreshData, notify]
   );
 
   // Fetch Database Entities
@@ -721,6 +719,12 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
     loadContacts();
   }, [loadContacts]);
 
+  // Nothing may answer into an unmounted screen.
+  useEffect(() => {
+    const requests = contactRequests.current;
+    return () => requests.cancel();
+  }, []);
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadStats();
@@ -735,11 +739,12 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
   // would report the size of the current page rather than of the CRM.
   const {
     total: totalContactsCount,
+    leads: leadsCount,
     customers: customersCount,
     prospects: prospectsCount,
-    subscribers: newsletterSubscribersCount,
-    programSubscribers: programSubscribersCount,
-  } = stats;
+    newsletter: newsletterSubscribersCount,
+    programs: programSubscribersCount,
+  } = stats ?? { total: 0, leads: 0, customers: 0, prospects: 0, newsletter: 0, programs: 0 };
 
   // Sorting Handler
   const handleSort = (key: string) => {
@@ -862,8 +867,9 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
 
       await refreshData();
     } catch (err) {
+      // Reported once, by the drawer's confirm dialog, which shows this error and keeps
+      // the dialog open (it also announces success). Rethrown so it can.
       console.error('Failed to archive contact', err);
-      alert(`Failed to archive contact: ${getErrorMessage(err)}`);
       throw err;
     }
   };
@@ -926,13 +932,17 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
         `Sync completed: ${syncedCount} subscribers synced${errorsCount ? `, ${errorsCount} failed` : ''}`,
         errorsCount ? 'failed' : 'success'
       );
-      alert(errorsCount ? 'Sync completed with some failures.' : 'Sync completed successfully!');
+      notify(
+        errorsCount
+          ? { tone: 'error', message: `Sync finished with ${errorsCount} failure(s). See the sync log for details.` }
+          : { tone: 'success', message: `Sync complete: ${syncedCount} subscriber(s) synced.` }
+      );
     } catch (err) {
       console.error('Sync error:', err);
       await recordSyncLog(`Sync failed: ${getErrorMessage(err)}`, 'failed').catch((logError) => {
         console.error('Failed to record sync failure:', logError);
       });
-      alert(`Sync failed: ${getErrorMessage(err)}`);
+      notify({ tone: 'error', message: `Sync failed: ${getErrorMessage(err)}` });
     } finally {
       setIsSyncing(false);
     }
@@ -988,7 +998,7 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
       await checkEmailOctopus();
     } catch (error) {
       console.error('EmailOctopus field setup failed:', error);
-      alert(`Field setup failed: ${getErrorMessage(error)}`);
+      notify({ tone: 'error', message: `Field setup failed: ${getErrorMessage(error)}` });
     } finally {
       setIsPreparingEmailOctopus(false);
     }
@@ -1085,13 +1095,36 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
               </button>
             </header>
 
+            {importSummary && (
+              <div className={styles.alertBanner} role="status" data-testid="import-summary">
+                <span>{importSummary}</span>
+                <button type="button" className={styles.bannerButton} onClick={() => setImportSummary(null)}>
+                  Dismiss
+                </button>
+              </div>
+            )}
+
+            {statsError && (
+              <div className={styles.alertBanner} role="alert" data-testid="stats-error">
+                <span>
+                  <strong>Counts unavailable:</strong> {statsError}
+                  {stats ? ' Showing the last counts that loaded.' : ''}
+                </span>
+                <button type="button" className={styles.bannerButton} onClick={() => void loadStats()}>
+                  Try again
+                </button>
+              </div>
+            )}
+
             {/* Dashboard stats cards */}
             <DashboardStats
               totalContacts={totalContactsCount}
+              leads={leadsCount}
               customers={customersCount}
               prospects={prospectsCount}
               newsletterSubscribers={newsletterSubscribersCount}
               programSubscribers={programSubscribersCount}
+              unavailable={stats === null && hasSupabaseConfig}
             />
 
             <FilterBar
@@ -1132,6 +1165,8 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
               selectedIds={selectedContactIds}
               onToggleRow={handleToggleContact}
               onTogglePage={handleTogglePage}
+              loadError={contactsError}
+              onRetry={() => void loadContacts()}
             />
 
             <Pagination
@@ -1424,6 +1459,7 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
                               <td style={{ padding: '12px' }}>
                                 <select 
                                   data-testid={`mapping-select-${field.key}`}
+                                  aria-label={`Spreadsheet column for ${field.label}`}
                                   className={styles.searchInput} 
                                   style={{ padding: '6px 12px', fontSize: '0.82rem', maxWidth: '240px' }} 
                                   value={columnMapping[field.key] || ''}
@@ -1672,7 +1708,7 @@ ${result.archived_collisions} row(s) match a contact in the archive and were not
                     style={{ marginTop: '16px', width: '100%', justifyContent: 'center' }}
                     onClick={() => {
                       if (!isEmailOctopusReachable) {
-                        alert('Validate the EmailOctopus API key and List ID before syncing.');
+                        notify({ tone: 'info', message: 'Validate the EmailOctopus API key and List ID before syncing.' });
                         return;
                       }
                       handleManualSync();
