@@ -19,6 +19,12 @@ export type RemoteSearchState<T> = {
   total: number
   hasMore: boolean
   isLoading: boolean
+  /**
+   * True when `items` answer the text typed right now: not loading, and not still inside
+   * the debounce window of a newer query. Acting on items while this is false (e.g. Enter
+   * picking the highlighted option) would act on results for an older query.
+   */
+  isSettled: boolean
   error: string | null
   /** Re-runs the current request, e.g. after a create or rename. */
   reload: () => void
@@ -75,6 +81,8 @@ export function useRemoteSearch<T>({
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [reloadToken, setReloadToken] = useState(0)
+  // The search text the current items answer; null until the first answer arrives.
+  const [answered, setAnswered] = useState<string | null>(null)
 
   const selectRef = useRef(select)
   useEffect(() => {
@@ -107,6 +115,7 @@ export function useRemoteSearch<T>({
         const nextItems = selectRef.current(body)
 
         setItems(nextItems)
+        setAnswered(term)
         setTotal(typeof body.total === 'number' ? body.total : nextItems.length)
         setHasMore(body.hasMore === true)
       } catch (caught) {
@@ -128,5 +137,7 @@ export function useRemoteSearch<T>({
 
   const reload = useCallback(() => setReloadToken((token) => token + 1), [])
 
-  return { items, total, hasMore, isLoading, error, reload }
+  const isSettled = !isLoading && answered === query.trim()
+
+  return { items, total, hasMore, isLoading, isSettled, error, reload }
 }

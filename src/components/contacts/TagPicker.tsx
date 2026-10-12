@@ -105,7 +105,9 @@ export default function TagPicker({
   const hasExactMatch =
     selectedKeys.has(typedKey) || search.items.some((tag) => tagKey(tag.name) === typedKey)
 
-  if (allowCreate && typed && !hasExactMatch && !search.isLoading) {
+  // Only once the results answer what is typed: during the debounce or a load they are
+  // for an older query, so a tag that exists could wrongly be offered for creation.
+  if (allowCreate && typed && !hasExactMatch && search.isSettled) {
     suggestions.push({ kind: 'create', name: typed })
   }
 
@@ -187,7 +189,9 @@ export default function TagPicker({
       case 'Enter':
         // Never submits the surrounding form: Enter here means "pick this tag".
         event.preventDefault()
-        if (isOpen) choose(suggestions[safeActive])
+        // While the list still shows results for an older query, Enter would pick a tag the
+        // user never asked for; wait until the results match the text.
+        if (isOpen && search.isSettled) choose(suggestions[safeActive])
         break
       case 'Escape':
         if (isOpen) {
