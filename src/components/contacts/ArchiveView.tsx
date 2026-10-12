@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react'
 
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
+import { useToast } from '@/components/ui/Toast'
 import Pagination from '@/components/ui/Pagination'
 import type { ArchiveReason } from '@/lib/db/types'
 import { requestLifecycle } from '@/lib/lifecycle/client'
@@ -30,6 +31,10 @@ type ArchivedContact = {
 const ARCHIVE_REASON_LABELS: Record<ArchiveReason, string> = {
   manual: 'Archived here',
   opted_out: 'Opted out of all email',
+}
+
+function fullName(contact: ArchivedContact): string {
+  return `${contact.first_name} ${contact.last_name}`.trim() || contact.email
 }
 
 function formatDate(value: string | null): string {
@@ -61,6 +66,9 @@ export default function ArchiveView() {
   const [removing, setRemoving] = useState<ArchivedContact | null>(null)
   const [isRemoving, setIsRemoving] = useState(false)
   const [removeError, setRemoveError] = useState<string | null>(null)
+  /** Contacts waiting for the operator to confirm a restore (one, or the selection). */
+  const [confirmingRestore, setConfirmingRestore] = useState<ArchivedContact[] | null>(null)
+  const { notify } = useToast()
 
   const load = useCallback(async () => {
     setIsLoading(true)
@@ -95,37 +103,35 @@ export default function ArchiveView() {
     load()
   }, [load])
 
-  const restore = async (contact: ArchivedContact) => {
-    // Restoring brings the record back; it does not restore consent, and the contact
-    // stays unemailable until they opt in again. Said once, before the click, rather
-    // than left for the operator to discover from an empty campaign audience.
-    if (
-      contact.archive_reason === 'opted_out' &&
-      !window.confirm(
-        `${contact.first_name} ${contact.last_name} opted out of every kind of email. ` +
-          'Restoring brings the record back but not their consent — they will not receive ' +
-          'campaigns until they opt in again. Restore anyway?'
-      )
-    ) {
-      return
-    }
-
-    setRestoringId(contact.id)
+  /** Restores each contact in turn; stops at the first refusal and says which one. */
+  const performRestore = async (targets: ArchivedContact[]) => {
+    setRestoringId(targets.length === 1 ? targets[0].id : 'bulk')
     setError(null)
 
     try {
-      const response = await fetch(`/api/contacts/${contact.id}`, { method: 'POST' })
-
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}))
-        // A 409 means the email was reused while this contact was archived — an
-        // actionable conflict, not a failure to report as "something went wrong".
-        throw new Error(body.error || 'Could not restore this contact.')
+      for (const contact of targets) {
+        const response = await fetch(`/api/contacts/${contact.id}`, { method: 'POST' })
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}))
+          // A 409 means the email was reused while this contact was archived — an
+          // actionable conflict, not a failure to report as "something went wrong".
+          throw new Error(
+            body.error || (targets.length === 1 ? 'Could not restore this contact.' : `Could not restore ${contact.email}.`)
+          )
+        }
       }
+
+      notify({
+        tone: 'success',
+        message:
+          targets.length === 1
+            ? `${fullName(targets[0])} was restored.`
+            : `${targets.length} contacts were restored.`,
+      })
 
       // Restoring the only row on the last page would otherwise leave the user staring
       // at an empty page with no obvious way back.
-      if (contacts.length === 1 && page > 1) {
+      if (targets.length >= contacts.length && page > 1) {
         setPage(page - 1)
       } else {
         await load()
@@ -137,8 +143,19 @@ export default function ArchiveView() {
     }
   }
 
+  // Restoring brings the record back; it does not restore consent, and the contact
+  // stays unemailable until they opt in again. Said once, before the click, rather
+  // than left for the operator to discover from an empty campaign audience.
+  const restore = (contact: ArchivedContact) => {
+    if (contact.archive_reason === 'opted_out') {
+      setConfirmingRestore([contact])
+      return
+    }
+    void performRestore([contact])
+  }
+
   // Removing takes the contact out of this list too, for good. Asked in a dialog rather
-  // than window.confirm because it is final, and the dialog can say what is kept.
+  // in the danger-toned dialog because it is final, and the dialog can say what is kept.
   const remove = async () => {
     if (!removing) return
 
@@ -147,6 +164,7 @@ export default function ArchiveView() {
 
     try {
       await requestLifecycle(`/api/contacts/${removing.id}`, 'remove')
+      notify({ tone: 'success', message: `${fullName(removing)} was removed from the CRM.` })
       setRemoving(null)
 
       if (contacts.length === 1 && page > 1) {
@@ -161,38 +179,9 @@ export default function ArchiveView() {
     }
   }
 
-  const restoreSelected = async () => {
+  const restoreSelected = () => {
     const targets = contacts.filter((contact) => selected.has(contact.id))
-    if (targets.length === 0) return
-    const optedOut = targets.filter((contact) => contact.archive_reason === 'opted_out').length
-    const warning = optedOut > 0
-      ? ` ${optedOut} of them opted out of every kind of email; restoring does not give that consent back.`
-      : ''
-
-    if (
-      !window.confirm(
-        `Restore ${targets.length} archived contact${targets.length === 1 ? '' : 's'}?${warning}`
-      )
-    ) {
-      return
-    }
-
-    setRestoringId('bulk')
-    setError(null)
-    try {
-      for (const contact of targets) {
-        const response = await fetch(`/api/contacts/${contact.id}`, { method: 'POST' })
-        if (!response.ok) {
-          const body = await response.json().catch(() => ({}))
-          throw new Error(body.error || `Could not restore ${contact.email}.`)
-        }
-      }
-      await load()
-    } catch (restoreError) {
-      setError(restoreError instanceof Error ? restoreError.message : 'Could not restore selected contacts.')
-    } finally {
-      setRestoringId(null)
-    }
+    if (targets.length > 0) setConfirmingRestore(targets)
   }
 
   return (
@@ -330,6 +319,18 @@ export default function ArchiveView() {
         testId="archive-pagination"
       />
 
+      {confirmingRestore && (
+        <RestoreDialog
+          targets={confirmingRestore}
+          onConfirm={() => {
+            const targets = confirmingRestore
+            setConfirmingRestore(null)
+            void performRestore(targets)
+          }}
+          onClose={() => setConfirmingRestore(null)}
+        />
+      )}
+
       {removing && (
         <ConfirmDialog
           title="Remove this contact?"
@@ -350,5 +351,48 @@ export default function ArchiveView() {
         </ConfirmDialog>
       )}
     </div>
+  )
+}
+
+/**
+ * The question before a restore. Neutral, not red: restoring loses nothing. What it
+ * must make plain is that consent is not restored with the record.
+ */
+function RestoreDialog({
+  targets,
+  onConfirm,
+  onClose,
+}: {
+  targets: ArchivedContact[]
+  onConfirm: () => void
+  onClose: () => void
+}) {
+  const optedOut = targets.filter((contact) => contact.archive_reason === 'opted_out').length
+  const single = targets.length === 1 ? targets[0] : null
+
+  return (
+    <ConfirmDialog
+      title={single ? 'Restore this contact?' : `Restore ${targets.length} archived contacts?`}
+      subject={single ? `${fullName(single)} · ${single.email}` : undefined}
+      confirmLabel={single ? 'Restore contact' : `Restore ${targets.length} contacts`}
+      tone="neutral"
+      onConfirm={onConfirm}
+      onClose={onClose}
+    >
+      {single && optedOut === 1 ? (
+        <p>
+          {fullName(single)} opted out of every kind of email. Restoring brings the record back but
+          not their consent — they will not receive campaigns until they opt in again.
+        </p>
+      ) : (
+        <p>They return to the contact list with the details they had when archived.</p>
+      )}
+      {!single && optedOut > 0 && (
+        <p>
+          {optedOut} of them opted out of every kind of email; restoring does not give that consent
+          back.
+        </p>
+      )}
+    </ConfirmDialog>
   )
 }

@@ -109,6 +109,7 @@ describe('GET /api/segments/options', () => {
     expect(body).toEqual({
       services: [{ id: 's1', name: 'Coaching' }],
       organisations: [{ id: 'org-1', name: 'Acme' }],
+      tags: [],
       sources: ['newsletter', 'import', 'manual'],
     })
     // The underscore is a LIKE wildcard; it must be matched literally.

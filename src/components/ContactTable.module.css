@@ -300,3 +300,40 @@
   max-width: 440px;
   line-height: 1.5;
 }
+
+/* A failed load: kept apart from the empty state, with a way to retry (audit M2). */
+.loadError {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm, 8px);
+  margin: 0 0 var(--space-sm, 8px);
+  padding: 10px 14px;
+  font-size: 0.85rem;
+  color: var(--danger, #b42318);
+  background: var(--danger-muted, rgba(180, 35, 24, 0.08));
+  border: 1px solid var(--danger, #b42318);
+  border-radius: var(--radius-sm, 8px);
+}
+
+.retryButton {
+  padding: 4px 12px;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-sm, 8px);
+  cursor: pointer;
+}
+
+.retryButton:focus-visible {
+  outline: 2px solid var(--primary, currentColor);
+  outline-offset: 2px;
+}
+
+.retryButton:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}

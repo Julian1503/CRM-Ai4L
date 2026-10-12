@@ -143,4 +143,66 @@ describe('ContentStudioView', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Connections' }))
     expect(onOpenSettings).toHaveBeenCalled()
   })
+
+  describe('unsaved variant edits', () => {
+    async function editVariant(props: Parameters<typeof ContentStudioView>[0] = {}) {
+      setSearch('?item=item-1')
+      routeFetch(handlers)
+      render(<ContentStudioView {...props} />)
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+      fireEvent.change(screen.getByLabelText('Body'), { target: { value: 'Half-finished edit' } })
+    }
+
+    it('asks before leaving for another section, and stays on Keep editing', async () => {
+      const onDirtyChange = jest.fn()
+      await editVariant({ onDirtyChange })
+      expect(onDirtyChange).toHaveBeenLastCalledWith(true)
+
+      fireEvent.click(screen.getByRole('tab', { name: 'Create' }))
+      expect(screen.getByTestId('confirm-dialog')).toHaveTextContent('Discard your changes?')
+      fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }))
+
+      expect(screen.queryByTestId('confirm-dialog')).toBeNull()
+      expect(screen.getByRole('tab', { name: 'Library' })).toHaveAttribute('aria-selected', 'true')
+      expect(screen.getByLabelText('Body')).toHaveValue('Half-finished edit')
+    })
+
+    it('leaves once the operator discards', async () => {
+      const onDirtyChange = jest.fn()
+      await editVariant({ onDirtyChange })
+
+      fireEvent.click(screen.getByRole('tab', { name: 'Create' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }))
+
+      expect(screen.getByRole('tab', { name: 'Create' })).toHaveAttribute('aria-selected', 'true')
+      expect(onDirtyChange).toHaveBeenLastCalledWith(false)
+    })
+
+    it('moves focus to the new tab after a discard from the keyboard', async () => {
+      await editVariant()
+      const library = screen.getByRole('tab', { name: 'Library' })
+      library.focus()
+      fireEvent.keyDown(library, { key: 'ArrowRight' })
+      fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }))
+      await waitFor(() => expect(screen.getByRole('tab', { name: 'Review' })).toHaveFocus())
+    })
+
+    it('guards Back and Connections too', async () => {
+      const onOpenSettings = jest.fn()
+      await editVariant({ onOpenSettings })
+
+      fireEvent.click(screen.getByRole('button', { name: 'Connections' }))
+      expect(onOpenSettings).not.toHaveBeenCalled()
+      fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }))
+      expect(onOpenSettings).toHaveBeenCalledTimes(1)
+    })
+
+    it('guards the back link of the open item', async () => {
+      await editVariant()
+      fireEvent.click(screen.getByRole('button', { name: '← All content' }))
+      expect(screen.getByTestId('confirm-dialog')).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }))
+      expect(await screen.findByText('Content library')).toBeInTheDocument()
+    })
+  })
 })

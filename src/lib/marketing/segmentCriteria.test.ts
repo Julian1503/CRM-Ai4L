@@ -2,6 +2,8 @@ import {
   EMPTY_CRITERIA,
   buildSegmentFilterExpression,
   criteriaToDefinition,
+  MAX_SEGMENT_TAGS,
+  NO_TAG,
   parseSegmentCriteria,
 } from './segmentCriteria'
 
@@ -20,6 +22,8 @@ describe('parseSegmentCriteria', () => {
         createdTo: '2026-03-31',
         position: ' Manager ',
         department: 'HR',
+        tagIds: 'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA, bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        excludeTagIds: ['cccccccc-cccc-4ccc-8ccc-cccccccccccc'],
       })
     ).toEqual({
       q: 'acme',
@@ -33,6 +37,8 @@ describe('parseSegmentCriteria', () => {
       createdTo: '2026-03-31',
       position: 'Manager',
       department: 'HR',
+      tagIds: ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'],
+      excludeTagIds: ['cccccccc-cccc-4ccc-8ccc-cccccccccccc'],
     })
   })
 
@@ -141,5 +147,37 @@ describe('buildSegmentFilterExpression', () => {
 
   it('includes matching organisations in the search', () => {
     expect(build({ q: 'acme' }, ['org-9'])).toContain('organisation_id.in.(org-9)')
+  })
+})
+
+describe('tag criteria (client plan §8)', () => {
+  const A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+  const B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+
+  it('de-duplicates, keeps valid ids and caps the list', () => {
+    const many = Array.from({ length: 60 }, (_, index) => `${String(index).padStart(8, '0')}-aaaa-4aaa-8aaa-aaaaaaaaaaaa`)
+    expect(parseSegmentCriteria({ tagIds: [A, A.toUpperCase(), 'junk', B] }).tagIds).toEqual([A, B])
+    expect(parseSegmentCriteria({ tagIds: many }).tagIds).toHaveLength(MAX_SEGMENT_TAGS)
+    expect(parseSegmentCriteria({ tagIds: '', excludeTagIds: [] })).toMatchObject({ tagIds: null, excludeTagIds: null })
+  })
+
+  it('never widens a damaged "any of": unreadable ids select nobody', () => {
+    expect(parseSegmentCriteria({ tagIds: ['x),or(id.not.is.null'] }).tagIds).toEqual([NO_TAG])
+    // An unreadable exclusion could never match a real tag: dropping it changes nobody.
+    expect(parseSegmentCriteria({ excludeTagIds: 'junk' }).excludeTagIds).toBeNull()
+  })
+
+  it('stores lists comma-separated and reads them back', () => {
+    const criteria = { ...EMPTY_CRITERIA, tagIds: [A, B], excludeTagIds: [B] }
+    const stored = criteriaToDefinition(criteria)
+    expect(stored).toEqual({ tagIds: `${A},${B}`, excludeTagIds: B })
+    expect(parseSegmentCriteria(stored)).toEqual(criteria)
+  })
+
+  it('filters on any-of and none-of as array overlaps inside the criteria group', () => {
+    expect(buildSegmentFilterExpression({ ...EMPTY_CRITERIA, tagIds: [A, B], excludeTagIds: [B], state: 'NSW' })).toBe(
+      `and(state.eq."NSW",tag_ids.ov.{${A},${B}},tag_ids.not.ov.{${B}})`
+    )
+    expect(buildSegmentFilterExpression({ ...EMPTY_CRITERIA, excludeTagIds: [A] })).toBe(`and(tag_ids.not.ov.{${A}})`)
   })
 })

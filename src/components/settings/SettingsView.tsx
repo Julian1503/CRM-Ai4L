@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import OperationsPanel from '@/components/operations/OperationsPanel'
+import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import EmailOctopusSettings, { type EmailOctopusStatus } from './EmailOctopusSettings'
 import SocialConnectionsSettings from './SocialConnectionsSettings'
 import BrandProfileSettings from './BrandProfileSettings'
@@ -39,6 +40,7 @@ export default function SettingsView({ emailOctopusStatus, onEmailOctopusSaved, 
   const [section, setSection] = useState<SettingsSection>(readSection)
   const [connectionsTab, setConnectionsTab] = useState<'social' | 'email'>('social')
   const [brandDirty, setBrandDirty] = useState(false)
+  const [confirmingLeave, setConfirmingLeave] = useState(false)
 
   useEffect(() => { onDirtyChange?.(brandDirty) }, [brandDirty, onDirtyChange])
 
@@ -95,7 +97,7 @@ export default function SettingsView({ emailOctopusStatus, onEmailOctopusSaved, 
               <h2>{active.label}</h2>
               <p>{active.description}</p>
             </div>
-            {section === 'brand' && <button type="button" className={styles.studioLink} onClick={() => { if (!brandDirty || window.confirm('Discard unsaved brand changes and open Content Studio?')) onOpenStudio() }}>Open Content Studio</button>}
+            {section === 'brand' && <button type="button" className={styles.studioLink} onClick={() => { if (brandDirty) setConfirmingLeave(true); else onOpenStudio() }}>Open Content Studio</button>}
           </div>
 
           {section === 'overview' && (
@@ -131,6 +133,20 @@ export default function SettingsView({ emailOctopusStatus, onEmailOctopusSaved, 
           )}
         </div>
       </div>
+      {confirmingLeave && (
+        <ConfirmDialog
+          title="Discard brand changes?"
+          confirmLabel="Discard and open Content Studio"
+          cancelLabel="Keep editing"
+          onConfirm={() => {
+            setConfirmingLeave(false)
+            onOpenStudio()
+          }}
+          onClose={() => setConfirmingLeave(false)}
+        >
+          <p>The brand profile has unsaved changes. Opening Content Studio drops them.</p>
+        </ConfirmDialog>
+      )}
     </div>
   )
 }

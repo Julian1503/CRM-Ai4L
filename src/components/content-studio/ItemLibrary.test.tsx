@@ -56,23 +56,30 @@ describe('ItemLibrary', () => {
     unmount()
   })
 
-  it('shows only items waiting for review in review mode', async () => {
+  it('asks the server for the review queue, paginated, instead of filtering one page', async () => {
     const mock = routeFetch({
-      [`GET ${ITEMS}`]: page([makeSummary(), makeSummary({ id: 'item-2', title: 'Done post', pendingReviewCount: 0 })]),
+      [`GET ${ITEMS}`]: page([makeSummary(), makeSummary({ id: 'item-2', title: 'Second pending' })], 30),
     })
     render(<ItemLibrary onOpen={jest.fn()} reviewOnly />)
 
     expect(await screen.findByText('Waiting for review')).toBeInTheDocument()
-    expect(await screen.findByText('Spring workshop')).toBeInTheDocument()
-    expect(screen.queryByText('Done post')).not.toBeInTheDocument()
+    expect(await screen.findByText('Second pending')).toBeInTheDocument()
     expect(screen.queryByLabelText('Show archived')).not.toBeInTheDocument()
-    expect(mock.mock.calls[0][0]).toContain('pageSize=100')
+    expect(mock.mock.calls[0][0]).toBe(`${ITEMS}?status=review&page=1&pageSize=25`)
+    // 30 pending across pages: the queue pages like the library does.
+    expect(screen.getByText(/of 30/)).toBeInTheDocument()
   })
 
   it('says when nothing waits for review', async () => {
-    routeFetch({ [`GET ${ITEMS}`]: page([makeSummary({ pendingReviewCount: 0 })]) })
+    routeFetch({ [`GET ${ITEMS}`]: page([]) })
     render(<ItemLibrary onOpen={jest.fn()} reviewOnly />)
     expect(await screen.findByText('Nothing is waiting for review.')).toBeInTheDocument()
+  })
+
+  it('points back to earlier pages when a later page has emptied', async () => {
+    routeFetch({ [`GET ${ITEMS}`]: page([], 3) })
+    render(<ItemLibrary onOpen={jest.fn()} />)
+    expect(await screen.findByText(/No content on this page/)).toBeInTheDocument()
   })
 
   it('reports a load error and retries', async () => {

@@ -40,6 +40,10 @@ export type SegmentCriteria = {
   createdTo: string | null
   position: string | null
   department: string | null
+  /** Contacts having ANY of these CRM tags (client plan §8). */
+  tagIds: string[] | null
+  /** Contacts having NONE of these tags. */
+  excludeTagIds: string[] | null
 }
 
 export const EMPTY_CRITERIA: SegmentCriteria = {
@@ -54,7 +58,18 @@ export const EMPTY_CRITERIA: SegmentCriteria = {
   createdTo: null,
   position: null,
   department: null,
+  tagIds: null,
+  excludeTagIds: null,
 }
+
+/** Most tags one list may name, matching the contact filter (§8). */
+export const MAX_SEGMENT_TAGS = 50
+
+/**
+ * Matches no tag. Stands in for an "any of" list whose every entry was unreadable, so a
+ * damaged definition selects nobody instead of silently widening to everyone.
+ */
+export const NO_TAG = '00000000-0000-0000-0000-000000000000'
 
 /** Creation dates are read as calendar days where the client works. */
 const CRITERIA_TIMEZONE = 'Australia/Sydney'
@@ -100,6 +115,20 @@ function date(value: unknown): string | null {
   return parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day ? candidate : null
 }
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** Tag ids stored as an array or a comma-separated string; unique, lowercased, capped. */
+function tagList(value: unknown, onUnreadable: 'drop' | 'match-nobody'): string[] | null {
+  const raw = Array.isArray(value) ? value : typeof value === 'string' ? value.split(',') : []
+  const entries = raw.map((entry) => (typeof entry === 'string' ? entry.trim() : '')).filter(Boolean)
+  if (entries.length === 0) return null
+
+  const ids = [...new Set(entries.filter((entry) => UUID_PATTERN.test(entry)).map((entry) => entry.toLowerCase()))]
+  if (ids.length === 0) return onUnreadable === 'match-nobody' ? [NO_TAG] : null
+
+  return ids.slice(0, MAX_SEGMENT_TAGS)
+}
+
 export function parseSegmentCriteria(definition: unknown): SegmentCriteria {
   if (typeof definition !== 'object' || definition === null || Array.isArray(definition)) {
     return { ...EMPTY_CRITERIA }
@@ -119,13 +148,19 @@ export function parseSegmentCriteria(definition: unknown): SegmentCriteria {
     createdTo: date(source.createdTo),
     position: text(source.position),
     department: text(source.department),
+    // An unreadable "any of" must not widen the segment; an unreadable exclusion could
+    // never have matched a real tag, so dropping it changes nobody's membership.
+    tagIds: tagList(source.tagIds, 'match-nobody'),
+    excludeTagIds: tagList(source.excludeTagIds, 'drop'),
   }
 }
 
-/** The stored form: only the criteria that are set. */
+/** The stored form: only the criteria that are set. Tag lists are stored comma-separated. */
 export function criteriaToDefinition(criteria: SegmentCriteria): Record<string, string> {
   return Object.fromEntries(
-    Object.entries(criteria).filter((entry): entry is [string, string] => entry[1] !== null)
+    Object.entries(criteria)
+      .map(([key, value]): [string, string | null] => [key, Array.isArray(value) ? value.join(',') : value])
+      .filter((entry): entry is [string, string] => entry[1] !== null && entry[1] !== '')
   )
 }
 
@@ -171,6 +206,9 @@ export function buildSegmentFilterExpression(
   }
   if (criteria.position) clauses.push(contains('position', criteria.position))
   if (criteria.department) clauses.push(contains('department', criteria.department))
+  // Validated UUIDs only, so nothing here can carry PostgREST grammar.
+  if (criteria.tagIds?.length) clauses.push(`tag_ids.ov.{${criteria.tagIds.join(',')}}`)
+  if (criteria.excludeTagIds?.length) clauses.push(`tag_ids.not.ov.{${criteria.excludeTagIds.join(',')}}`)
 
   if (criteria.q) {
     const search = buildSearchOrExpression(criteria.q, organisationIds)

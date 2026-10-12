@@ -91,6 +91,13 @@ interface ContactTableProps {
   onToggleRow?: (id: string, selected: boolean) => void;
   /** Ticks or clears every row on the current page. */
   onTogglePage?: (ids: string[], selected: boolean) => void;
+  /**
+   * The last load failed (audit M2). The rows shown are the last ones that loaded, and
+   * the empty state is never shown for a failure: "no contacts" and "could not load
+   * contacts" are different facts.
+   */
+  loadError?: string | null;
+  onRetry?: () => void;
 }
 
 export default function ContactTable({
@@ -103,6 +110,8 @@ export default function ContactTable({
   selectedIds,
   onToggleRow,
   onTogglePage,
+  loadError = null,
+  onRetry,
 }: ContactTableProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const selectAllRef = useRef<HTMLInputElement>(null);
@@ -164,6 +173,19 @@ export default function ContactTable({
 
   return (
     <div ref={containerRef} className={styles.tableShell}>
+      {loadError && (
+        <div className={styles.loadError} role="alert" data-testid="contacts-load-error">
+          <span>
+            {loadError}
+            {contacts.length > 0 ? ' Showing the last contacts that loaded.' : ''}
+          </span>
+          {onRetry && (
+            <button type="button" className={styles.retryButton} onClick={onRetry} disabled={isLoading}>
+              Try again
+            </button>
+          )}
+        </div>
+      )}
       <div className={styles.tableContainer}>
         <table className={styles.table}>
           <thead className={styles.thead}>
@@ -337,7 +359,7 @@ export default function ContactTable({
               </tr>
               );
             })}
-            {!isLoading && contacts.length === 0 && (
+            {!isLoading && !loadError && contacts.length === 0 && (
               <tr>
                 <td colSpan={columnCount} className={styles.td} style={{ padding: '0' }}>
                   <div className={styles.emptyStateContainer}>

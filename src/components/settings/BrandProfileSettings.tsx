@@ -250,7 +250,7 @@ function BrandForm({ draft, savedDraft, canEdit, saving, message, onChange, onSu
           </>}
           {tab === 'facts' && <FactsEditor facts={draft.approvedFacts} onChange={(facts) => set('approvedFacts', facts)} />}
           {tab === 'rules' && <>
-            <div className={brandStyles.channelNav} aria-label="Channel rules">
+            <div className={brandStyles.channelNav} role="group" aria-label="Channel">
               {CONTENT_CHANNELS.map((item) => <button key={item} type="button" aria-pressed={channel === item} onClick={() => setChannel(item)}>{CHANNEL_NAMES[item]}</button>)}
             </div>
             <ChannelRulesEditor channel={channel} rules={draft.channelRules} onChange={(rules) => set('channelRules', rules)} />

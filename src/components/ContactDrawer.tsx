@@ -9,6 +9,7 @@ import { useGSAP } from '@gsap/react';
 
 import { prefersReducedMotion } from '@/lib/motion';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import { useToast } from '@/components/ui/Toast';
 import TagPicker, { type TagOption } from '@/components/contacts/TagPicker';
 
 interface ContactDrawerProps {
@@ -88,6 +89,49 @@ export default function ContactDrawer({
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   const [isRemoving, setIsRemoving] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
+  const [confirmingArchive, setConfirmingArchive] = useState(false);
+  const [isArchiving, setIsArchiving] = useState(false);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
+  // True once the operator changes anything; closing then asks before dropping it.
+  const [isDirty, setIsDirty] = useState(false);
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false);
+  const { notify } = useToast();
+
+  const contactName = () =>
+    [formData.firstName, formData.lastName].filter(Boolean).join(' ') || formData.email || 'The contact';
+
+  const archiveContact = async () => {
+    const contactId = formData.id;
+    if (!contactId || !onDelete) return;
+
+    setIsArchiving(true);
+    setArchiveError(null);
+
+    try {
+      await onDelete(contactId);
+      setConfirmingArchive(false);
+      notify({ tone: 'success', message: `${contactName()} was archived. Restore them from the Archive.` });
+      onClose();
+    } catch (error) {
+      setArchiveError(error instanceof Error ? error.message : 'Could not archive this contact.');
+    } finally {
+      setIsArchiving(false);
+    }
+  };
+
+  /** Every way out of the drawer except a successful save: asks first if there are edits. */
+  const requestClose = () => {
+    if (isSubmitting) return;
+    if (isDirty) {
+      setConfirmingDiscard(true);
+      return;
+    }
+    onClose();
+  };
+  const requestCloseRef = useRef(requestClose);
+  useEffect(() => {
+    requestCloseRef.current = requestClose;
+  });
 
   const removeContact = async () => {
     const contactId = formData.id;
@@ -99,6 +143,7 @@ export default function ContactDrawer({
     try {
       await onRemove(contactId);
       setConfirmingRemove(false);
+      notify({ tone: 'success', message: `${contactName()} was removed from the CRM.` });
       onClose();
     } catch (error) {
       setRemoveError(error instanceof Error ? error.message : 'Could not remove this contact.');
@@ -205,6 +250,7 @@ export default function ContactDrawer({
       postcode: addr.postcode || prev.postcode,
       country: addr.country || prev.country
     }));
+    setIsDirty(true);
     setAddressSuggestions([]);
   };
 
@@ -265,6 +311,8 @@ export default function ContactDrawer({
       });
       setTagDraft(contact.tags ?? []);
       setTagsTouched(false);
+      setIsDirty(false);
+      setConfirmingDiscard(false);
       setValidationErrors({});
       setSaveError(null);
     }
@@ -281,7 +329,7 @@ export default function ContactDrawer({
       if (suspendedRef.current) return;
 
       if (event.key === 'Escape') {
-        if (!isSubmitting) onClose();
+        requestCloseRef.current();
         return;
       }
 
@@ -307,11 +355,12 @@ export default function ContactDrawer({
       document.removeEventListener('keydown', handleKeyDown);
       previousFocus?.focus?.();
     };
-  }, [contact, isSubmitting, onClose]);
+  }, [contact]);
 
   if (!contact) return <div className={styles.overlay} />;
 
   const handleInputChange = (field: keyof ContactFormData, value: ContactFormValue) => {
+    setIsDirty(true);
     setFormData((prev) => {
       const updated = { ...prev, [field]: value };
       
@@ -338,6 +387,7 @@ export default function ContactDrawer({
   };
 
   const handleServiceToggle = (serviceId: string) => {
+    setIsDirty(true);
     setFormData((prev) => {
       const currentServices = prev.servicesBought || [];
       const updatedServices = currentServices.includes(serviceId)
@@ -374,9 +424,7 @@ export default function ContactDrawer({
     <>
       <div 
         className={`${styles.overlay} ${contact ? styles.overlayActive : ''}`} 
-        onClick={() => {
-          if (!isSubmitting) onClose();
-        }}
+        onClick={requestClose}
       />
       <div
         ref={drawerRef}
@@ -391,7 +439,7 @@ export default function ContactDrawer({
           <h2 id="contact-drawer-title" className={styles.title}>
             {formData.id ? 'Edit Contact' : 'New Contact'}
           </h2>
-          <button ref={closeButtonRef} type="button" className={styles.closeButton} onClick={onClose} disabled={isSubmitting} aria-label="Close contact editor">
+          <button ref={closeButtonRef} type="button" className={styles.closeButton} onClick={requestClose} disabled={isSubmitting} aria-label="Close contact editor">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="18" y1="6" x2="6" y2="18" />
               <line x1="6" y1="6" x2="18" y2="18" />
@@ -549,6 +597,7 @@ export default function ContactDrawer({
                 onChange={(next) => {
                   setTagDraft(next);
                   setTagsTouched(true);
+                  setIsDirty(true);
                 }}
                 label="Tags"
                 hint="Tags are shared across contacts. Type to find one or create a new tag."
@@ -620,6 +669,7 @@ export default function ContactDrawer({
                   </>
                 ) : (
                   <input
+                    id="contact-state"
                     type="text"
                     className={styles.input}
                     value={formData.state || ''}
@@ -732,7 +782,9 @@ export default function ContactDrawer({
           <div className={styles.section}>
             <h3 className={styles.sectionTitle}>Notes</h3>
             <div className={styles.field}>
+              <label className={styles.srOnly} htmlFor="contact-notes">Notes</label>
               <textarea
+                id="contact-notes"
                 className={styles.textarea}
                 value={formData.notes || ''}
                 placeholder="Write any special notes here..."
@@ -748,17 +800,10 @@ export default function ContactDrawer({
               type="button"
               className={`${styles.button} ${styles.deleteBtn}`}
               onClick={() => {
-                const contactId = formData.id;
-                if (
-                  contactId &&
-                  window.confirm(
-                    'Archive this contact? The record is kept and can be restored later.'
-                  )
-                ) {
-                  onDelete(contactId);
-                  onClose();
-                }
+                setArchiveError(null);
+                setConfirmingArchive(true);
               }}
+              data-testid="archive-contact"
             >
               Archive
             </button>
@@ -779,7 +824,7 @@ export default function ContactDrawer({
           <button 
             type="button" 
             className={`${styles.button} ${styles.cancelBtn}`} 
-            onClick={onClose}
+            onClick={requestClose}
             disabled={isSubmitting}
           >
             Cancel
@@ -794,6 +839,40 @@ export default function ContactDrawer({
           </button>
         </div>
       </div>
+
+      {confirmingArchive && (
+        <ConfirmDialog
+          title="Archive this contact?"
+          subject={contactName()}
+          confirmLabel="Archive contact"
+          busyLabel="Archiving…"
+          busy={isArchiving}
+          error={archiveError}
+          tone="neutral"
+          onConfirm={() => void archiveContact()}
+          onClose={() => setConfirmingArchive(false)}
+        >
+          <p>The record is kept and can be restored later from the Archive.</p>
+          {isDirty && <p>Unsaved changes in this drawer are not saved by archiving.</p>}
+        </ConfirmDialog>
+      )}
+
+      {confirmingDiscard && (
+        <ConfirmDialog
+          title="Discard your changes?"
+          subject={contactName()}
+          confirmLabel="Discard changes"
+          cancelLabel="Keep editing"
+          onConfirm={() => {
+            setConfirmingDiscard(false);
+            setIsDirty(false);
+            onClose();
+          }}
+          onClose={() => setConfirmingDiscard(false)}
+        >
+          <p>The edits you made in this drawer have not been saved.</p>
+        </ConfirmDialog>
+      )}
 
       {confirmingRemove && (
         <ConfirmDialog

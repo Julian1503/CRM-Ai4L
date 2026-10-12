@@ -1,5 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 
+import { ToastProvider } from '@/components/ui/Toast'
+
 import MarketingView from './MarketingView'
 
 const mockFetch = jest.fn()
@@ -289,21 +291,35 @@ describe('MarketingView', () => {
       expect(screen.getByTestId('reconcile-retry-camp-1')).toBeInTheDocument()
     })
 
-    it('settles them only after the operator confirms', async () => {
+    it('settles them only after the operator confirms in the dialog', async () => {
       routeFetch(failedWithUncertain)
-      const confirm = jest.spyOn(window, 'confirm')
-      confirm.mockReturnValueOnce(false).mockReturnValueOnce(true)
       render(<MarketingView jobTypes={jobTypes} />)
 
       fireEvent.click(await screen.findByTestId('reconcile-sent-camp-1'))
+      expect(screen.getByTestId('confirm-dialog')).toHaveTextContent('EmailOctopus shows the automation queued them')
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+      expect(screen.queryByTestId('confirm-dialog')).not.toBeInTheDocument()
       expect(mockFetch).not.toHaveBeenCalledWith('/api/campaigns/camp-1/uncertain', expect.anything())
 
       fireEvent.click(screen.getByTestId('reconcile-sent-camp-1'))
+      fireEvent.click(screen.getByTestId('confirm-dialog-confirm'))
       await waitFor(() => {
         const call = mockFetch.mock.calls.find(([url]) => url === '/api/campaigns/camp-1/uncertain')
         expect(JSON.parse(call![1].body)).toEqual({ resolution: 'sent' })
       })
-      confirm.mockRestore()
+    })
+
+    it('warns about duplicates before queuing again', async () => {
+      routeFetch(failedWithUncertain)
+      render(<MarketingView jobTypes={jobTypes} />)
+
+      fireEvent.click(await screen.findByTestId('reconcile-retry-camp-1'))
+      expect(screen.getByTestId('confirm-dialog')).toHaveTextContent('otherwise they get the email twice')
+      fireEvent.click(screen.getByTestId('confirm-dialog-confirm'))
+      await waitFor(() => {
+        const call = mockFetch.mock.calls.find(([url]) => url === '/api/campaigns/camp-1/uncertain')
+        expect(JSON.parse(call![1].body)).toEqual({ resolution: 'retry' })
+      })
     })
   })
 
@@ -527,11 +543,17 @@ describe('MarketingView', () => {
     })
 
     it('re-opens the campaign after the operator confirms', async () => {
-      const confirm = jest.spyOn(window, 'confirm').mockReturnValue(true)
       routeFetch({ ...defaultHandlers, 'GET /api/campaigns': jsonResponse(sentCampaign) })
 
       render(<MarketingView jobTypes={jobTypes} />)
       fireEvent.click(await screen.findByTestId('reopen-camp-1'))
+
+      // Naming the provider-side setting matters: without "Allow contacts to repeat"
+      // the second send is rejected per recipient and nothing arrives.
+      const dialog = screen.getByTestId('confirm-dialog')
+      expect(dialog).toHaveTextContent(/Allow contacts to repeat/)
+      expect(dialog).toHaveTextContent(/back to draft/)
+      fireEvent.click(screen.getByTestId('confirm-dialog-confirm'))
 
       await waitFor(() =>
         expect(mockFetch).toHaveBeenCalledWith(
@@ -539,21 +561,17 @@ describe('MarketingView', () => {
           expect.objectContaining({ method: 'POST' })
         )
       )
-
-      // Naming the provider-side setting matters: without "Allow contacts to repeat"
-      // the second send is rejected per recipient and nothing arrives.
-      expect(confirm.mock.calls[0][0]).toMatch(/Allow contacts to repeat/)
-      expect(confirm.mock.calls[0][0]).toMatch(/back to draft/)
     })
 
     it('does nothing when the operator backs out', async () => {
       // The confirmation is the last gate before real mail goes to people who already
       // received this campaign once.
-      jest.spyOn(window, 'confirm').mockReturnValue(false)
       routeFetch({ ...defaultHandlers, 'GET /api/campaigns': jsonResponse(sentCampaign) })
 
       render(<MarketingView jobTypes={jobTypes} />)
       fireEvent.click(await screen.findByTestId('reopen-camp-1'))
+      fireEvent.keyDown(window, { key: 'Escape' })
+      expect(screen.queryByTestId('confirm-dialog')).not.toBeInTheDocument()
 
       await waitFor(() => expect(screen.getByTestId('reopen-camp-1')).not.toBeDisabled())
       expect(
@@ -561,8 +579,25 @@ describe('MarketingView', () => {
       ).toHaveLength(0)
     })
 
+    it('reports the re-open with a toast', async () => {
+      routeFetch({
+        ...defaultHandlers,
+        'POST /api/campaigns/camp-1/reopen': jsonResponse({ campaign: { id: 'camp-1', status: 'draft' } }),
+        'GET /api/campaigns': jsonResponse(sentCampaign),
+      })
+
+      render(
+        <ToastProvider>
+          <MarketingView jobTypes={jobTypes} />
+        </ToastProvider>
+      )
+      fireEvent.click(await screen.findByTestId('reopen-camp-1'))
+      fireEvent.click(screen.getByTestId('confirm-dialog-confirm'))
+
+      expect(await screen.findByText(/is back in draft for a second send/)).toBeInTheDocument()
+    })
+
     it('surfaces a refusal from the server', async () => {
-      jest.spyOn(window, 'confirm').mockReturnValue(true)
       routeFetch({
         'POST /api/campaigns/camp-1/reopen': jsonResponse(
           { error: 'This campaign was already re-opened.' },
@@ -575,6 +610,7 @@ describe('MarketingView', () => {
 
       render(<MarketingView jobTypes={jobTypes} />)
       fireEvent.click(await screen.findByTestId('reopen-camp-1'))
+      fireEvent.click(screen.getByTestId('confirm-dialog-confirm'))
 
       expect(await screen.findByRole('alert')).toHaveTextContent('already re-opened')
     })

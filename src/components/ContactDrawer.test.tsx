@@ -1,4 +1,6 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+
+import { ToastProvider } from '@/components/ui/Toast'
 
 import ContactDrawer from './ContactDrawer'
 import type { TableContact } from './ContactTable'
@@ -170,37 +172,111 @@ describe('ContactDrawer', () => {
   })
 
   describe('archiving', () => {
-    it('asks for confirmation before archiving', () => {
-      const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(false)
+    it('asks in a dialog before archiving, saying the record can be restored', () => {
       const { onDelete } = setup()
 
-      fireEvent.click(screen.getByRole('button', { name: /archive/i }))
+      fireEvent.click(screen.getByTestId('archive-contact'))
 
-      expect(confirmSpy).toHaveBeenCalled()
+      expect(screen.getByTestId('confirm-dialog')).toHaveTextContent(/restored later/i)
       expect(onDelete).not.toHaveBeenCalled()
-      confirmSpy.mockRestore()
+      fireEvent.click(within(screen.getByTestId('confirm-dialog')).getByRole('button', { name: 'Cancel' }))
+      expect(screen.queryByTestId('confirm-dialog')).toBeNull()
+      expect(onDelete).not.toHaveBeenCalled()
     })
 
-    it('says the record can be restored, since it is not a delete', () => {
-      const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(false)
-      setup()
+    it('archives when confirmed, closes and reports it', async () => {
+      const onClose = jest.fn()
+      const onDelete = jest.fn().mockResolvedValue(undefined)
+      render(
+        <ToastProvider>
+          <ContactDrawer contact={contact} onClose={onClose} onSave={jest.fn()} onDelete={onDelete} availableServices={services} jobTypes={jobTypes} />
+        </ToastProvider>
+      )
 
-      fireEvent.click(screen.getByRole('button', { name: /archive/i }))
-
-      expect(confirmSpy.mock.calls[0][0]).toMatch(/restored later/i)
-      confirmSpy.mockRestore()
-    })
-
-    it('archives when confirmed', async () => {
-      const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true)
-      const { onDelete, onClose } = setup()
-
-      fireEvent.click(screen.getByRole('button', { name: /archive/i }))
+      fireEvent.click(screen.getByTestId('archive-contact'))
+      fireEvent.click(screen.getByTestId('confirm-dialog-confirm'))
 
       await waitFor(() => expect(onDelete).toHaveBeenCalledWith('c1'))
       expect(onClose).toHaveBeenCalled()
-      confirmSpy.mockRestore()
+      expect(await screen.findByTestId('toast-success')).toHaveTextContent(/was archived/)
     })
+
+    it('keeps the dialog open and explains a failed archive', async () => {
+      const onDelete = jest.fn().mockRejectedValue(new Error('Archive failed (HTTP 500)'))
+      const { onClose } = setup({ onDelete })
+
+      fireEvent.click(screen.getByTestId('archive-contact'))
+      fireEvent.click(screen.getByTestId('confirm-dialog-confirm'))
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('Archive failed (HTTP 500)')
+      expect(onClose).not.toHaveBeenCalled()
+    })
+
+    it('warns that archiving does not save pending edits', () => {
+      setup()
+      fireEvent.change(screen.getByLabelText(/preferred name/i), { target: { value: 'Addy' } })
+      fireEvent.click(screen.getByTestId('archive-contact'))
+      expect(screen.getByTestId('confirm-dialog')).toHaveTextContent('Unsaved changes')
+    })
+  })
+
+  describe('unsaved changes', () => {
+    it('closes straight away when nothing was edited', () => {
+      const { onClose } = setup()
+      fireEvent.click(screen.getByRole('button', { name: 'Close contact editor' }))
+      expect(onClose).toHaveBeenCalled()
+    })
+
+    it('asks before discarding edits from close, cancel, Escape or the backdrop', () => {
+      const { onClose } = setup()
+      fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'Call back Friday' } })
+
+      fireEvent.click(screen.getByRole('button', { name: 'Close contact editor' }))
+      expect(screen.getByTestId('confirm-dialog')).toHaveTextContent('Discard your changes?')
+      fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }))
+      expect(screen.queryByTestId('confirm-dialog')).toBeNull()
+      expect(screen.getByLabelText('Notes')).toHaveValue('Call back Friday')
+
+      fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }))
+      expect(screen.getByTestId('confirm-dialog')).toBeInTheDocument()
+      fireEvent.keyDown(window, { key: 'Escape' })
+      expect(screen.queryByTestId('confirm-dialog')).toBeNull()
+
+      fireEvent.keyDown(document, { key: 'Escape' })
+      expect(screen.getByTestId('confirm-dialog')).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }))
+
+      const overlay = document.querySelector('[class*="overlayActive"]') as HTMLElement
+      fireEvent.click(overlay)
+      expect(screen.getByTestId('confirm-dialog')).toBeInTheDocument()
+      expect(onClose).not.toHaveBeenCalled()
+
+      fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }))
+      expect(onClose).toHaveBeenCalledTimes(1)
+    })
+
+    it('counts service, tag and address changes as edits', async () => {
+      const { onClose } = setup()
+      const serviceBox = screen.queryAllByRole('checkbox')[0]
+      if (serviceBox) fireEvent.click(serviceBox)
+      fireEvent.click(screen.getByRole('button', { name: 'Close contact editor' }))
+      expect(screen.getByTestId('confirm-dialog')).toBeInTheDocument()
+      expect(onClose).not.toHaveBeenCalled()
+    })
+
+    it('does not ask after a successful save', async () => {
+      const { onClose, onSave } = setup()
+      fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'Saved note' } })
+      fireEvent.click(screen.getByRole('button', { name: /save contact/i }))
+      await waitFor(() => expect(onSave).toHaveBeenCalled())
+      expect(onClose).toHaveBeenCalled()
+      expect(screen.queryByTestId('confirm-dialog')).toBeNull()
+    })
+  })
+
+  it('gives the notes field an accessible name', () => {
+    setup()
+    expect(screen.getByRole('textbox', { name: 'Notes' })).toBeInTheDocument()
   })
 
   describe('removing', () => {
@@ -666,7 +742,15 @@ describe('managing job types', () => {
     expect(screen.getByLabelText(/preferred name/i)).toHaveValue('Addy')
     expect(screen.getByRole('option', { name: 'RTO' })).toBeInTheDocument()
 
+    // The draft has an edit, so Escape asks before throwing it away.
     fireEvent.keyDown(document, { key: 'Escape' })
+    expect(onClose).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }))
     expect(onClose).toHaveBeenCalled()
+  })
+
+  it('names the free-text State field outside Australia', () => {
+    setup({ contact: { ...contact, country: 'New Zealand' } })
+    expect(screen.getByRole('textbox', { name: 'State' })).toHaveAttribute('placeholder', 'State / Region')
   })
 })
