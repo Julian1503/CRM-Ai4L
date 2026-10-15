@@ -44,6 +44,7 @@ const ALIASES = {
   occurrences: 'verify_20261008000000.sql',
   testsends: 'verify_20261008010000.sql',
   segtags: 'verify_20261010000000.sql',
+  cronruns: 'verify_20261012000000.sql',
 }
 
 function fail(message) {

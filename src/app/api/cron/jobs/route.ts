@@ -6,6 +6,7 @@ import { preferencesOrigin } from '@/lib/contacts/providerSync'
 import { runJobs } from '@/lib/jobs/runJobs'
 import { loadEmailOctopusCredentials } from '@/lib/marketing/providers/credentials'
 import { getStripeClient, getStripeConfig } from '@/lib/stripe/client'
+import { recordCronRun } from '@/lib/health/cronRuns'
 import { getAdminClient } from '@/lib/supabase/admin'
 
 export const runtime = 'nodejs'
@@ -26,8 +27,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return unauthorized()
   }
 
+  // Each run is recorded for the integration health card; recording never fails the run.
+  const startedAt = new Date()
+  let db: ReturnType<typeof getAdminClient> | null = null
+
   try {
-    const db = getAdminClient()
+    db = getAdminClient()
     const stripeConfig = getStripeConfig()
     const stripe = stripeConfig ? getStripeClient(stripeConfig.secretKey) : null
     const report = await runJobs({
@@ -39,9 +44,24 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       budgetMs: BUDGET_MS,
     })
 
+    await recordCronRun(db, {
+      job: 'jobs',
+      status: 'succeeded',
+      startedAt,
+      summary: {
+        consentSynced: report.consent.synced,
+        consentFailed: report.consent.failed,
+        notificationsSent: report.notifications.sent,
+        reconciliationResolved: report.reconciliation.resolved,
+        campaigns: report.campaigns.length,
+        stoppedForBudget: report.stoppedForBudget,
+      },
+    })
+
     return ok(report)
   } catch (error) {
     console.error('Scheduled jobs failed:', error)
+    if (db) await recordCronRun(db, { job: 'jobs', status: 'failed', startedAt, errorCode: 'run_failed' })
     return serverError(null, 'The scheduled jobs failed. See the server log.')
   }
 }

@@ -7,6 +7,12 @@ jest.mock('@/components/operations/OperationsPanel', () => ({
   __esModule: true,
   default: () => <p>Operations panel</p>,
 }))
+jest.mock('./IntegrationHealth', () => ({
+  __esModule: true,
+  default: ({ only, title }: { only?: string[]; title?: string }) => (
+    <section aria-label={title ?? 'Integration health'}>{only ? only.join(',') : 'all checks'}</section>
+  ),
+}))
 jest.mock('./EmailOctopusSettings', () => ({
   __esModule: true,
   default: ({ onSaved }: { onSaved: (status: null) => void }) => (
@@ -72,13 +78,14 @@ describe('SettingsView', () => {
 
     expect(screen.getByRole('heading', { name: 'Overview', level: 2 })).toBeInTheDocument()
     expect(screen.getByText('Operations panel')).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Integration health' })).toHaveTextContent('all checks')
     expect(screen.getByRole('link', { name: 'Overview' })).toHaveAttribute('aria-current', 'page')
 
     fireEvent.click(screen.getByRole('link', { name: 'Job types' }))
     expect(screen.getByRole('heading', { name: 'Job types', level: 2 })).toBeInTheDocument()
     expect(screen.queryByText('Operations panel')).not.toBeInTheDocument()
     expect(section()).toBe('job-types')
-    expect(new URL(window.location.href).searchParams.get('view')).toBe('settings')
+    expect(new URL(window.location.href).searchParams.has('view')).toBe(false)
     fireEvent.click(screen.getByRole('button', { name: 'Job types panel' }))
     expect(props.onJobTypesChanged).toHaveBeenCalled()
 
@@ -87,7 +94,9 @@ describe('SettingsView', () => {
     expect(props.onOrganisationsChanged).toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole('link', { name: 'System' }))
-    expect(screen.getByRole('region', { name: 'Database configuration' })).toHaveTextContent('Configured')
+    // The raw endpoint and key are gone (UX plan P1.6); the platform cards replace them.
+    expect(screen.getByRole('region', { name: 'Platform' })).toHaveTextContent('database,signup,cron')
+    expect(screen.queryByText(/Supabase endpoint|Supabase public key/)).not.toBeInTheDocument()
 
     // Clicking the active section again changes nothing.
     const length = window.history.length
@@ -98,7 +107,7 @@ describe('SettingsView', () => {
   it('leaves modified clicks to the browser, so a section can open in a new tab', () => {
     setup()
     const link = screen.getByRole('link', { name: 'Connections' })
-    expect(link).toHaveAttribute('href', '?view=settings&section=connections')
+    expect(link).toHaveAttribute('href', '/settings?section=connections')
 
     fireEvent.click(link, { ctrlKey: true })
     expect(screen.getByRole('heading', { name: 'Overview', level: 2 })).toBeInTheDocument()
