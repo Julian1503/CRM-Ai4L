@@ -1,5 +1,8 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 
+let mockPathname = '/contacts'
+jest.mock('next/navigation', () => ({ usePathname: () => mockPathname }))
+
 import Sidebar, { type ActiveView } from './Sidebar'
 
 const VIEWS: ActiveView[] = [
@@ -11,17 +14,16 @@ const VIEWS: ActiveView[] = [
   'settings',
 ]
 
-function renderSidebar(currentView: ActiveView = 'contacts') {
-  const onViewChange = jest.fn()
-  render(<Sidebar currentView={currentView} onViewChange={onViewChange} />)
-  return { onViewChange }
+function renderSidebar(pathname = '/contacts', onBeforeNavigate?: (view: ActiveView) => boolean) {
+  mockPathname = pathname
+  render(<Sidebar onBeforeNavigate={onBeforeNavigate} />)
 }
 
 describe('Sidebar', () => {
   describe('badges', () => {
     it('shows how many campaigns are waiting for approval', () => {
       render(
-        <Sidebar currentView="contacts" onViewChange={jest.fn()} badges={{ campaigns: 2 }} />
+        <Sidebar badges={{ campaigns: 2 }} />
       )
 
       const badge = screen.getByTestId('nav-badge-campaigns')
@@ -31,7 +33,7 @@ describe('Sidebar', () => {
 
     it('shows nothing when none are waiting', () => {
       render(
-        <Sidebar currentView="contacts" onViewChange={jest.fn()} badges={{ campaigns: 0 }} />
+        <Sidebar badges={{ campaigns: 0 }} />
       )
 
       expect(screen.queryByTestId('nav-badge-campaigns')).toBeNull()
@@ -39,7 +41,7 @@ describe('Sidebar', () => {
 
     it('caps a large count so the pill keeps its size', () => {
       render(
-        <Sidebar currentView="contacts" onViewChange={jest.fn()} badges={{ campaigns: 140 }} />
+        <Sidebar badges={{ campaigns: 140 }} />
       )
 
       expect(screen.getByTestId('nav-badge-campaigns')).toHaveTextContent('99+')
@@ -47,20 +49,56 @@ describe('Sidebar', () => {
   })
 
   describe('navigation', () => {
-    it('offers every workspace', () => {
+    it.each(VIEWS)('links "%s" to its route', (view) => {
       renderSidebar()
 
-      for (const view of VIEWS) {
-        expect(screen.getByTestId(`nav-item-${view}`)).toBeInTheDocument()
-      }
+      expect(screen.getByTestId(`nav-item-${view}`)).toHaveAttribute('href', `/${view}`)
     })
 
-    it.each(VIEWS)('reports a click on "%s"', (view) => {
-      const { onViewChange } = renderSidebar()
+    it('marks the current workspace with aria-current, sub-paths included', () => {
+      renderSidebar('/settings')
+      expect(screen.getByTestId('nav-item-settings')).toHaveAttribute('aria-current', 'page')
+      expect(screen.getByTestId('nav-item-contacts')).not.toHaveAttribute('aria-current')
+    })
 
-      fireEvent.click(screen.getByTestId(`nav-item-${view}`))
+    it('marks nothing outside the shell', () => {
+      renderSidebar('/login')
+      expect(document.querySelector('[aria-current="page"]')).toBeNull()
+    })
 
-      expect(onViewChange).toHaveBeenCalledWith(view)
+    it('cancels a link the guard refuses, and asks only for another workspace', () => {
+      const guard = jest.fn(() => false)
+      renderSidebar('/settings', guard)
+
+      const leave = fireEvent.click(screen.getByTestId('nav-item-contacts'))
+      expect(leave).toBe(false)
+      expect(guard).toHaveBeenCalledWith('contacts')
+
+      guard.mockClear()
+      fireEvent.click(screen.getByTestId('nav-item-settings'))
+      expect(guard).not.toHaveBeenCalled()
+    })
+
+    it('never guards a modified click, which opens elsewhere', () => {
+      const guard = jest.fn(() => false)
+      renderSidebar('/settings', guard)
+
+      fireEvent.click(screen.getByTestId('nav-item-contacts'), { ctrlKey: true })
+      expect(guard).not.toHaveBeenCalled()
+    })
+
+    it('opens the mobile More menu of secondary workspaces as links, closing on choice', () => {
+      const guard = jest.fn(() => true)
+      renderSidebar('/content', guard)
+
+      fireEvent.click(screen.getByTestId('nav-more'))
+      const settings = screen.getByTestId('mobile-more-settings')
+      expect(settings).toHaveAttribute('href', '/settings')
+      expect(screen.getByTestId('mobile-more-content')).toHaveAttribute('aria-current', 'page')
+
+      fireEvent.click(settings)
+      expect(guard).toHaveBeenCalledWith('settings')
+      expect(screen.queryByTestId('mobile-more-settings')).not.toBeInTheDocument()
     })
   })
 

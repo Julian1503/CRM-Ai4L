@@ -18,6 +18,8 @@ jest.mock('@/lib/booking/notifications', () => ({
   processNotifications: (...args: unknown[]) => mockProcessNotifications(...args),
 }))
 jest.mock('@/lib/supabase/admin', () => ({ getAdminClient: () => ({}) }))
+const mockHeaders = jest.fn()
+jest.mock('next/headers', () => ({ headers: () => mockHeaders() }))
 jest.mock('@/lib/supabase/config', () => ({
   isSupabaseConfigured: () => mockIsSupabaseConfigured(),
 }))
@@ -132,5 +134,35 @@ describe('ScheduledPage', () => {
 
     expect(screen.queryByTitle('Choose a consultation time')).toBeNull()
     expect(mockApplyPayment).not.toHaveBeenCalled()
+  })
+
+  describe('Calendly confirmation (P4.5)', () => {
+    afterEach(() => mockHeaders.mockReset())
+
+    it('names this site in the embed so Calendly can report the booking to the page', async () => {
+      mockHeaders.mockResolvedValue(new Headers({ host: 'crm.ai4l.example' }))
+      await renderPage('cs_1')
+
+      const src = new URL(screen.getByTitle('Choose a consultation time').getAttribute('src')!)
+      expect(src.searchParams.get('embed_domain')).toBe('crm.ai4l.example')
+      expect(src.searchParams.get('embed_type')).toBe('Inline')
+    })
+
+    it('still embeds Calendly when the host is unknown', async () => {
+      mockHeaders.mockImplementation(() => {
+        throw new Error('outside a request')
+      })
+      await renderPage('cs_1')
+
+      const src = new URL(screen.getByTitle('Choose a consultation time').getAttribute('src')!)
+      expect(src.searchParams.get('embed_domain')).toBeNull()
+      expect(src.searchParams.get('utm_content')).toBe('b1')
+    })
+
+    it('leaves the host out when the request has none', async () => {
+      mockHeaders.mockResolvedValue(new Headers())
+      await renderPage('cs_1')
+      expect(screen.getByTitle('Choose a consultation time').getAttribute('src')).not.toContain('embed_domain')
+    })
   })
 })

@@ -6,6 +6,9 @@ import { NextRequest } from 'next/server'
 const mockRunDue = jest.fn()
 const mockGetAdminClient = jest.fn()
 const mockCreateClient = jest.fn()
+const mockRecord = jest.fn()
+
+jest.mock('@/lib/health/cronRuns', () => ({ recordCronRun: (...args: unknown[]) => mockRecord(...args) }))
 
 jest.mock('@/lib/marketing/schedules/runDue', () => ({
   runDueSchedules: (...args: unknown[]) => mockRunDue(...args),
@@ -38,6 +41,7 @@ describe('GET /api/cron/newsletters', () => {
     mockGetAdminClient.mockReturnValue(db)
     mockCreateClient.mockReturnValue({ messages })
     mockRunDue.mockResolvedValue([{ scheduleId: 'sched-1', status: 'in_review' }])
+    mockRecord.mockResolvedValue(undefined)
   })
 
   afterEach(() => {
@@ -90,5 +94,23 @@ describe('GET /api/cron/newsletters', () => {
     const response = await call('Bearer cron-secret-value')
 
     expect(response.status).toBe(500)
+  })
+
+  it('records each run, succeeded or failed', async () => {
+    mockRunDue.mockResolvedValueOnce([
+      { scheduleId: 'a', status: 'in_review' },
+      { scheduleId: 'b', status: 'failed' },
+    ])
+    await call('Bearer cron-secret-value')
+    expect(mockRecord).toHaveBeenCalledWith(db, {
+      job: 'newsletters',
+      status: 'succeeded',
+      startedAt: expect.any(Date),
+      summary: { schedules: 2, failed: 1 },
+    })
+
+    mockRunDue.mockRejectedValueOnce(new Error('boom'))
+    expect((await call('Bearer cron-secret-value')).status).toBe(500)
+    expect(mockRecord).toHaveBeenLastCalledWith(db, { job: 'newsletters', status: 'failed', startedAt: expect.any(Date), errorCode: 'run_failed' })
   })
 })

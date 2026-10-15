@@ -11,7 +11,7 @@ export const MAIN_VIEWS = [
   { id: 'bookings', heading: 'Consultation bookings' },
   { id: 'imports', heading: 'Spreadsheet importer' },
   { id: 'integrations', heading: 'EmailOctopus campaigns' },
-  { id: 'settings', heading: 'System settings' },
+  { id: 'settings', heading: 'Settings' },
   { id: 'archive', heading: 'Archive' },
 ] as const
 

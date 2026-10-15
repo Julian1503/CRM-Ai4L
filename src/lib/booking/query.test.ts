@@ -11,6 +11,7 @@ import {
   hasSettledPayment,
   isBookingStatus,
   parseBookingFilters,
+  readIsoInstant,
 } from './query'
 
 function params(query: string): URLSearchParams {
@@ -119,5 +120,48 @@ describe('hasSettledPayment', () => {
   it('distinguishes a confirmed $0 charge from an unconfirmed one', () => {
     expect(hasSettledPayment({ charged_amount_cents: 0 })).toBe(true)
     expect(hasSettledPayment({ charged_amount_cents: null })).toBe(false)
+  })
+})
+
+describe('work-queue filters', () => {
+  it('defaults to every booking, created date, no search or range', () => {
+    expect(parseBookingFilters(params(''))).toMatchObject({ queue: 'all', search: null, dateField: 'created', from: null, to: null })
+  })
+
+  it('reads the queue, a capped search, the date field and ISO bounds', () => {
+    const filters = parseBookingFilters(
+      params(`queue=needs_action&q=${'a'.repeat(150)}&dateField=scheduled&from=2026-10-01T00:00:00%2B10:00&to=2026-10-08`)
+    )
+    expect(filters.queue).toBe('needs_action')
+    expect(filters.search).toHaveLength(100)
+    expect(filters.dateField).toBe('scheduled')
+    expect(filters.from).toBe('2026-09-30T14:00:00.000Z')
+    expect(filters.to).toBe('2026-10-08T00:00:00.000Z')
+  })
+
+  it('ignores unknown queues and date fields, and dates that do not parse', () => {
+    expect(parseBookingFilters(params('queue=everything&dateField=updated&from=yesterday'))).toMatchObject({
+      queue: 'all',
+      dateField: 'created',
+      from: null,
+    })
+  })
+
+  it('rejects absurdly long date values', () => {
+    expect(readIsoInstant('2026-10-01'.padEnd(60, '0'))).toBeNull()
+    expect(readIsoInstant(null)).toBeNull()
+  })
+})
+
+describe('business status labels', () => {
+  it('uses the plan wording, kept in this one map', () => {
+    expect(BOOKING_STATUS_LABELS).toEqual({
+      pending: 'Link sent',
+      checkout_started: 'Checkout opened',
+      paid: 'Choose a time',
+      booked: 'Scheduled',
+      cancelled: 'Cancelled',
+      expired: 'Expired',
+    })
   })
 })

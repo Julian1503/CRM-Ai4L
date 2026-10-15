@@ -40,6 +40,37 @@ function setup(props: Partial<TagPickerProps> & { initial?: TagOption[] } = {}, 
 }
 
 describe('TagPicker', () => {
+  it('ignores Enter while the list still shows results for an older query', async () => {
+    const { input, onChangeSpy } = setup()
+
+    fireEvent.focus(input)
+    expect(await screen.findByRole('option', { name: 'VIP' })).toBeInTheDocument()
+
+    // A new query is typed; until its results arrive the list still shows the old ones.
+    fireEvent.change(input, { target: { value: 'Work' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(onChangeSpy).not.toHaveBeenCalled()
+
+    // Once the results answer "Work", Enter picks the matching tag.
+    await waitFor(() => expect(screen.queryByRole('option', { name: 'VIP' })).not.toBeInTheDocument())
+    expect(await screen.findByRole('option', { name: 'Workshop 2026' })).toBeInTheDocument()
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(onChangeSpy).toHaveBeenLastCalledWith([WORKSHOP])
+  })
+
+  it('does not offer to create a tag before the search for it has answered', async () => {
+    const { input } = setup({ allowCreate: true })
+
+    fireEvent.focus(input)
+    expect(await screen.findByRole('option', { name: 'VIP' })).toBeInTheDocument()
+
+    // "VIP" exists, but until the search for it answers the list is stale.
+    fireEvent.change(input, { target: { value: 'Workshop 2026' } })
+    expect(screen.queryByRole('option', { name: /Create/ })).not.toBeInTheDocument()
+    expect(await screen.findByRole('option', { name: 'Workshop 2026' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: /Create/ })).not.toBeInTheDocument()
+  })
+
   it('suggests existing tags from the server when focused', async () => {
     const { input } = setup()
 

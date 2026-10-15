@@ -35,11 +35,42 @@ export const BOOKING_SORT_COLUMNS: Record<BookingSortKey, string> = {
   scheduled: 'scheduled_at',
 }
 
+/** Which bookings the list shows: the work queue, or everything. */
+export const BOOKING_QUEUES = ['needs_action', 'all'] as const
+export type BookingQueue = (typeof BOOKING_QUEUES)[number]
+
+/** Which timestamp a date range applies to. */
+export const BOOKING_DATE_FIELDS = ['created', 'scheduled'] as const
+export type BookingDateField = (typeof BOOKING_DATE_FIELDS)[number]
+
+export const BOOKING_DATE_COLUMNS: Record<BookingDateField, string> = {
+  created: 'created_at',
+  scheduled: 'scheduled_at',
+}
+
+/** Longest search term accepted; anything longer is not a name or an address. */
+export const MAX_BOOKING_SEARCH_LENGTH = 100
+
 export type BookingFilters = PageParams & {
   status: BookingStatus | null
   campaignId: string | null
   sort: BookingSortKey
   dir: 'asc' | 'desc'
+  /** `all` when absent, so existing callers keep their behaviour. */
+  queue: BookingQueue
+  /** Contact name or email, matched case-insensitively. */
+  search: string | null
+  dateField: BookingDateField
+  /** ISO instants, inclusive start and exclusive end. The browser sends local-day bounds. */
+  from: string | null
+  to: string | null
+}
+
+/** An ISO date-time the database can compare, or null for anything else. */
+export function readIsoInstant(value: string | null): string | null {
+  if (!value || value.length > 40) return null
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString()
 }
 
 export function isBookingStatus(value: unknown): value is BookingStatus {
@@ -57,9 +88,18 @@ export function parseBookingFilters(input: ParamInput): BookingFilters {
   const sort = readTrimmed(input, 'sort')
   const dir = readTrimmed(input, 'dir')
 
+  const queue = readTrimmed(input, 'queue')
+  const dateField = readTrimmed(input, 'dateField')
+  const search = readTrimmed(input, 'q')
+
   return {
     status: isBookingStatus(status) ? status : null,
     campaignId: readTrimmed(input, 'campaignId'),
+    queue: queue === 'needs_action' ? 'needs_action' : 'all',
+    search: search ? search.slice(0, MAX_BOOKING_SEARCH_LENGTH) : null,
+    dateField: dateField === 'scheduled' ? 'scheduled' : 'created',
+    from: readIsoInstant(readTrimmed(input, 'from')),
+    to: readIsoInstant(readTrimmed(input, 'to')),
     sort: sort && (BOOKING_SORT_KEYS as readonly string[]).includes(sort)
       ? (sort as BookingSortKey)
       : 'created',
@@ -79,13 +119,16 @@ export function getBookingPageRange(filters: BookingFilters): { from: number; to
  * What each status means to someone reading the screen.
  *
  * The enum values are engineering vocabulary — `checkout_started` tells an operator
- * nothing about whether they need to do something. These are what the table shows.
+ * nothing about whether they need to do something. These are what every bookings
+ * screen shows, and the only place they are defined: renaming one here renames it
+ * everywhere, without touching the statuses stored in the database.
+ * (Business states from docs/UX_IMPLEMENTATION_PLAN.md §3.8.)
  */
 export const BOOKING_STATUS_LABELS: Record<BookingStatus, string> = {
   pending: 'Link sent',
-  checkout_started: 'Claiming',
-  paid: 'Awaiting a time',
-  booked: 'Booked',
+  checkout_started: 'Checkout opened',
+  paid: 'Choose a time',
+  booked: 'Scheduled',
   cancelled: 'Cancelled',
   expired: 'Expired',
 }

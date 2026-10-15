@@ -4,6 +4,7 @@ import { ok, serverError, unauthorized } from '@/lib/api/responses'
 import { isAuthorisedCronRequest } from '@/lib/auth/cron'
 import { createAnthropicClient, getAnthropicApiKey } from '@/lib/marketing/generateCampaign'
 import { runDueSchedules } from '@/lib/marketing/schedules/runDue'
+import { recordCronRun } from '@/lib/health/cronRuns'
 import { getAdminClient } from '@/lib/supabase/admin'
 
 export const runtime = 'nodejs'
@@ -26,16 +27,29 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return unauthorized()
   }
 
+  // Each run is recorded for the integration health card; recording never fails the run.
+  const startedAt = new Date()
+  let db: ReturnType<typeof getAdminClient> | null = null
+
   try {
+    db = getAdminClient()
     const apiKey = getAnthropicApiKey()
     const runs = await runDueSchedules({
-      db: getAdminClient(),
+      db,
       messages: apiKey ? createAnthropicClient(apiKey).messages : null,
-      now: new Date(),
+      now: startedAt,
+    })
+
+    await recordCronRun(db, {
+      job: 'newsletters',
+      status: 'succeeded',
+      startedAt,
+      summary: { schedules: runs.length, failed: runs.filter((run) => run.status === 'failed').length },
     })
 
     return ok({ runs })
   } catch (error) {
+    if (db) await recordCronRun(db, { job: 'newsletters', status: 'failed', startedAt, errorCode: 'run_failed' })
     return serverError(error, 'The newsletter run failed.')
   }
 }

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import OperationsPanel from '@/components/operations/OperationsPanel'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
+import IntegrationHealth from './IntegrationHealth'
 import EmailOctopusSettings, { type EmailOctopusStatus } from './EmailOctopusSettings'
 import SocialConnectionsSettings from './SocialConnectionsSettings'
 import BrandProfileSettings from './BrandProfileSettings'
@@ -54,7 +55,6 @@ export default function SettingsView({ emailOctopusStatus, onEmailOctopusSaved, 
     if (next === section) return
     setSection(next)
     const url = new URL(window.location.href)
-    url.searchParams.set('view', 'settings')
     url.searchParams.set('section', next)
     window.history.pushState(null, '', url)
   }
@@ -72,7 +72,7 @@ export default function SettingsView({ emailOctopusStatus, onEmailOctopusSaved, 
           {SECTIONS.map((item) => (
             <a
               key={item.id}
-              href={`?view=settings&section=${item.id}`}
+              href={`/settings?section=${item.id}`}
               aria-current={section === item.id ? 'page' : undefined}
               className={`${styles.navLink} ${section === item.id ? styles.navActive : ''}`}
               onClick={(event) => {
@@ -103,6 +103,7 @@ export default function SettingsView({ emailOctopusStatus, onEmailOctopusSaved, 
           {section === 'overview' && (
             <div className={styles.panelStack}>
               <OperationsPanel />
+              <IntegrationHealth />
               <div className={styles.shortcutList}>
                 <button type="button" onClick={() => select('connections')}>Manage connections <span aria-hidden="true">→</span></button>
                 <button type="button" onClick={() => select('brand')}>Edit brand profile <span aria-hidden="true">→</span></button>
@@ -121,15 +122,15 @@ export default function SettingsView({ emailOctopusStatus, onEmailOctopusSaved, 
           {section === 'job-types' && <JobTypesSettings onChanged={onJobTypesChanged} />}
           {section === 'organisations' && <OrganisationSettings onChanged={onOrganisationsChanged} />}
           {section === 'system' && (
-            <section className={styles.systemPanel} aria-label="Database configuration">
-              <h3>Database configuration</h3>
-              <p>These values are managed in the deployment environment.</p>
-              <dl>
-                <div><dt>Supabase endpoint</dt><dd>{process.env.NEXT_PUBLIC_SUPABASE_URL || 'Not configured'}</dd></div>
-                <div><dt>Supabase public key</dt><dd>{process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? 'Configured' : 'Not configured'}</dd></div>
-              </dl>
-              <details><summary>Environment variable names</summary><p>NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY</p></details>
-            </section>
+            <div className={styles.panelStack}>
+              {/* Cards replace the raw endpoint and key fields (UX plan P1.6): what matters is
+                  whether the platform works; its values stay in the deployment environment. */}
+              <IntegrationHealth
+                only={['database', 'signup', 'cron']}
+                title="Platform"
+                description="The database, who may sign up, and the scheduled jobs. Values are managed in the deployment environment."
+              />
+            </div>
           )}
         </div>
       </div>

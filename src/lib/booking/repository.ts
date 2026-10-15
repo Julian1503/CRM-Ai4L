@@ -5,6 +5,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { BookingRow, BookingStatus, Database } from '@/lib/db/types'
 
 import {
+  BOOKING_DATE_COLUMNS,
   BOOKING_SORT_COLUMNS,
   BOOKING_STATUSES,
   type BookingFilters,
@@ -151,10 +152,21 @@ export type BookingListRow = BookingRow & {
  * opens nothing on its own -- but it is the credential's shadow, it has no reason to
  * reach a browser, and the cheapest way to keep it out of one is never to select it.
  */
+/** Narrowing worked out by the caller from other tables (see queue.ts). */
+export type BookingListScope = {
+  /** Only these contacts (a name/email search). An empty list matches nothing. */
+  contactIds?: readonly string[]
+  /** A PostgREST `.or()` expression selecting the "Needs action" queue. */
+  needsActionExpression?: string
+}
+
 export async function fetchBookings(
   db: SupabaseClient<Database>,
-  filters: BookingFilters
+  filters: BookingFilters,
+  scope: BookingListScope = {}
 ): Promise<{ rows: BookingListRow[]; total: number }> {
+  if (scope.contactIds && scope.contactIds.length === 0) return { rows: [], total: 0 }
+
   const range = getBookingPageRange(filters)
 
   let query = db
@@ -173,6 +185,22 @@ export async function fetchBookings(
 
   if (filters.campaignId) {
     query = query.eq('campaign_id', filters.campaignId)
+  }
+
+  if (scope.contactIds) {
+    query = query.in('contact_id', [...scope.contactIds])
+  }
+
+  if (filters.from) {
+    query = query.gte(BOOKING_DATE_COLUMNS[filters.dateField], filters.from)
+  }
+
+  if (filters.to) {
+    query = query.lt(BOOKING_DATE_COLUMNS[filters.dateField], filters.to)
+  }
+
+  if (scope.needsActionExpression) {
+    query = query.or(scope.needsActionExpression)
   }
 
   const { data, error, count } = await query

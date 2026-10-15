@@ -602,6 +602,7 @@ export type ContactConsentEventRow = {
 // resolves the embed to SelectQueryError instead of the joined row.
 // `npm run db:types` fills these in properly against the live schema.
 import type { CampaignTestSendTables } from './campaignTestSendTypes'
+import type { CronRunTables } from './cronRunTypes'
 import type { ContentStudioFunctions, ContentStudioTables } from './contentStudioTypes'
 import type { ScheduleOccurrenceFunctions, ScheduleOccurrenceTables } from './scheduleOccurrenceTypes'
 import type { SegmentContactTagColumns } from './segmentTagTypes'
@@ -609,6 +610,7 @@ import type { SegmentContactTagColumns } from './segmentTagTypes'
 export type * from './contentStudioTypes'
 export type * from './campaignTestSendTypes'
 export type * from './scheduleOccurrenceTypes'
+export type * from './cronRunTypes'
 
 type TableDef<
   Row,
@@ -685,7 +687,7 @@ export interface Database {
       newsletter_topics: TableDef<NewsletterTopicRow>
       segment_overrides: TableDef<SegmentOverrideRow>
       bookings: TableDef<BookingRow>
-    } & ContentStudioTables & CampaignTestSendTables & ScheduleOccurrenceTables
+    } & ContentStudioTables & CampaignTestSendTables & ScheduleOccurrenceTables & CronRunTables
     Views: {
       /** contacts filtered to deleted_at IS NULL (security_invoker). */
       active_contacts: { Row: ContactRow; Relationships: [] }

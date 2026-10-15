@@ -1,0 +1,25 @@
+.health { display: grid; gap: 1rem; }
+.healthHeader { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: .75rem; }
+.healthHeader h3 { margin: 0; font-size: 1.125rem; }
+.healthHeader p { margin: .25rem 0 0; color: #53616e; font-size: .875rem; }
+.refresh { min-height: 2.75rem; padding: .55rem .9rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #fff; color: #075778; font-size: .85rem; font-weight: 650; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: .875rem; margin: 0; padding: 0; list-style: none; }
+.card { display: grid; align-content: start; gap: .55rem; padding: 1rem 1.1rem; background: #fff; border: 1px solid var(--border); border-radius: var(--radius-md); }
+.cardTop { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+.cardTop h4 { margin: 0; font-size: .95rem; }
+.badge { display: inline-flex; align-items: center; gap: .35rem; padding: .15rem .55rem; border-radius: 999px; font-size: .75rem; font-weight: 700; white-space: nowrap; }
+.badge::before { content: ""; width: .5rem; height: .5rem; border-radius: 50%; background: currentColor; }
+.ok { color: #146c35; background: #e3f5e8; }
+.degraded { color: #7a4405; background: #fdf0d9; }
+.down { color: #8a1c1c; background: #fbe4e4; }
+.not_configured { color: #41505d; background: #eef1f4; }
+.summary { margin: 0; font-size: .875rem; }
+.details { margin: 0; padding-left: 1.1rem; color: #53616e; font-size: .8rem; }
+.next { margin: 0; font-size: .8rem; }
+.next strong { color: #075778; }
+.meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; margin-top: .25rem; color: #53616e; font-size: .75rem; }
+.test { min-height: 2.25rem; padding: .35rem .7rem; border: 1px solid #0b7597; border-radius: var(--radius-sm); background: #fff; color: #075778; font-size: .8rem; font-weight: 650; }
+.test:disabled, .refresh:disabled { opacity: .6; cursor: progress; }
+.test:focus-visible, .refresh:focus-visible { outline: 2px solid #075778; outline-offset: 2px; }
+.error { margin: 0; padding: .75rem 1rem; border-radius: var(--radius-sm); background: #fbe4e4; color: #8a1c1c; font-size: .85rem; }
+.cardError { margin: 0; color: #8a1c1c; font-size: .8rem; }

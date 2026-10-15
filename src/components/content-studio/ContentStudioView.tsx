@@ -97,7 +97,6 @@ export default function ContentStudioView({ onOpenSettings, onCreateEmail, onOpe
     if (section !== 'review') setSection('library')
     const url = new URL(window.location.href)
     url.searchParams.set('item', itemId)
-    url.searchParams.set('view', 'content')
     if (section === 'review') url.searchParams.set('studioSection', 'review')
     else url.searchParams.delete('studioSection')
     window.history.replaceState(null, '', url)

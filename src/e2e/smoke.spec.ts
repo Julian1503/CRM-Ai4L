@@ -51,7 +51,7 @@ test.describe('CRM shell', () => {
     ).toBeVisible()
 
     await page.getByTestId('nav-item-settings').click()
-    await expect(page.getByRole('heading', { name: 'System settings', level: 1 })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Settings', level: 1 })).toBeVisible()
 
     await page.getByTestId('nav-item-contacts').click()
     await expect(page.getByRole('heading', { name: 'Dashboard overview', level: 1 })).toBeVisible()
