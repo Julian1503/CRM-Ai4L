@@ -194,7 +194,7 @@ describe('Stripe', () => {
 })
 
 describe('Calendly', () => {
-  const env = { CALENDLY_SCHEDULING_URL: 'https://calendly.com/ai4l/consult', CALENDLY_WEBHOOK_SECRET: 'w' }
+  const env = { NEXT_PUBLIC_CALENDLY_SCHEDULING_URL: 'https://calendly.com/ai4l/consult', CALENDLY_WEBHOOK_SECRET: 'w' }
   const ledger = (row: unknown, error: unknown = null) => createDbMock(createQueryBuilderMock({ data: row, error })) as never
 
   it('is ok with a reachable page and a recent webhook', async () => {

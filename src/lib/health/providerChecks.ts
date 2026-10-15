@@ -100,13 +100,13 @@ export async function checkStripe(deps: HealthDeps): Promise<CheckOutcome> {
 const STALE_WEBHOOK_DAYS = 30
 
 export async function checkCalendly(deps: HealthDeps): Promise<CheckOutcome> {
-  const absent = unset(deps.env, ['CALENDLY_SCHEDULING_URL', 'CALENDLY_WEBHOOK_SECRET'])
+  const absent = unset(deps.env, ['NEXT_PUBLIC_CALENDLY_SCHEDULING_URL', 'CALENDLY_WEBHOOK_SECRET'])
   if (absent.length > 0) return missing(absent)
 
   const details: string[] = []
   let pageOk = false
   try {
-    const page = await deps.fetch(deps.env.CALENDLY_SCHEDULING_URL!.trim(), { method: 'GET', redirect: 'follow' })
+    const page = await deps.fetch(deps.env.NEXT_PUBLIC_CALENDLY_SCHEDULING_URL!.trim(), { method: 'GET', redirect: 'follow' })
     pageOk = page.ok
     if (!page.ok) details.push(`The scheduling page answered HTTP ${page.status}.`)
   } catch {
@@ -127,7 +127,7 @@ export async function checkCalendly(deps: HealthDeps): Promise<CheckOutcome> {
   else details.push('No Calendly webhook has ever been received.')
 
   if (!pageOk) {
-    return { state: 'down', summary: 'The booking scheduling page is not reachable.', details, actionHint: 'Check CALENDLY_SCHEDULING_URL.' }
+    return { state: 'down', summary: 'The booking scheduling page is not reachable.', details, actionHint: 'Check NEXT_PUBLIC_CALENDLY_SCHEDULING_URL.' }
   }
   if (!last) {
     return {
