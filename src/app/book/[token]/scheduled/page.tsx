@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { headers } from 'next/headers'
 
 import { processNotifications } from '@/lib/booking/notifications'
 import { applyCheckoutPayment, isCompletedCheckout } from '@/lib/booking/payment'
@@ -8,6 +9,7 @@ import { getAdminClient } from '@/lib/supabase/admin'
 import { isSupabaseConfigured } from '@/lib/supabase/config'
 
 import styles from '../book.module.css'
+import SchedulingStep from './SchedulingStep'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -25,6 +27,19 @@ export const metadata: Metadata = {
  * `invitee.created` webhook can attach the appointment to the right record without
  * relying on an email match.
  */
+/**
+ * The host this page is served from, for Calendly's `embed_domain`. Calendly only posts
+ * its in-page events (P4.5) to an embed that names the page's domain. Null outside a
+ * request, in which case the embed still works, just without those events.
+ */
+async function embedDomain(): Promise<string | null> {
+  try {
+    return (await headers()).get('host')
+  } catch {
+    return null
+  }
+}
+
 export default async function ScheduledPage({
   params,
   searchParams,
@@ -37,6 +52,7 @@ export default async function ScheduledPage({
   const requestedSession = Array.isArray(query.session) ? query.session[0] : query.session
 
   const schedulingUrl = process.env.NEXT_PUBLIC_CALENDLY_SCHEDULING_URL?.trim()
+  const host = await embedDomain()
 
   let name = ''
   let email = ''
@@ -99,6 +115,11 @@ export default async function ScheduledPage({
       if (bookingId) url.searchParams.set('utm_content', bookingId)
       // Chrome-less embed; the surrounding page already carries the branding.
       url.searchParams.set('hide_gdpr_banner', '1')
+      // Lets Calendly tell this page when the appointment is booked (display only).
+      if (host) {
+        url.searchParams.set('embed_domain', host)
+        url.searchParams.set('embed_type', 'Inline')
+      }
       return url.toString()
     } catch {
       return null
@@ -131,35 +152,27 @@ export default async function ScheduledPage({
           </p>
         )}
 
-        {confirmed && (
-          <ol className={styles.stepper} aria-label="Booking steps">
-            <li className={styles.stepDone}><span>1</span> Free offer confirmed</li>
-            <li className={styles.stepActive}><span>2</span> Choose a time</li>
-          </ol>
-        )}
-
-        <h1 className={styles.title}>
-          {confirmed ? 'Choose a time that suits you' : 'We could not confirm your consultation'}
-        </h1>
-        {confirmed && (
-          <p className={styles.lede}>
-            Pick any 30-minute slot below. You will get a calendar invitation straight away.
-          </p>
-        )}
-
-        {calendlyHref ? (
-          <iframe
-            className={styles.calendlyFrame}
-            src={calendlyHref}
-            title="Choose a consultation time"
-            loading="eager"
-          />
+        {confirmed && calendlyHref ? (
+          <SchedulingStep calendlyHref={calendlyHref} email={email} />
         ) : (
-          <p className={styles.error} role="alert">
-            {confirmed
-              ? 'Scheduling is not configured yet. Reply to the email you received and we will arrange a time with you directly.'
-              : 'Return to the original booking link and complete the $0 checkout before choosing a time.'}
-          </p>
+          <>
+            {confirmed && (
+              <ol className={styles.stepper} aria-label="Booking steps">
+                <li className={styles.stepDone}><span>1</span> Free offer confirmed</li>
+                <li className={styles.stepActive}><span>2</span> Choose a time</li>
+              </ol>
+            )}
+
+            <h1 className={styles.title}>
+              {confirmed ? 'Choose a time that suits you' : 'We could not confirm your consultation'}
+            </h1>
+
+            <p className={styles.error} role="alert">
+              {confirmed
+                ? 'Scheduling is not configured yet. Reply to the email you received and we will arrange a time with you directly.'
+                : 'Return to the original booking link and complete the $0 checkout before choosing a time.'}
+            </p>
+          </>
         )}
       </div>
     </main>

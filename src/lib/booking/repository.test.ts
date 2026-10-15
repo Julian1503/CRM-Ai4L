@@ -127,6 +127,11 @@ describe('fetchBookings', () => {
     dir: 'desc' as const,
     page: 1,
     pageSize: 50,
+    queue: 'all' as const,
+    search: null,
+    dateField: 'created' as const,
+    from: null,
+    to: null,
   }
 
   it('never selects the token hash into a browser-bound payload', async () => {

@@ -44,24 +44,24 @@ function setup(response: unknown = { data: [BOOKING], error: null, count: 1 }) {
  * exactly what the filter tests need to tell apart.
  */
 function setupPerQuery(response: unknown = { data: [BOOKING], error: null, count: 1 }) {
-  const builders: ReturnType<typeof createQueryBuilderMock>[] = []
+  const builders: { table: string; builder: ReturnType<typeof createQueryBuilderMock> }[] = []
 
   mockCreateServerClient.mockResolvedValue(
-    createDbMock(() => {
+    createDbMock((table: string) => {
       const builder = createQueryBuilderMock(response)
-      builders.push(builder)
+      builders.push({ table, builder })
       return builder
     })
   )
 
-  /** The page query is the one that is not a `head: true` count. */
+  /** The page query: the `bookings` read that is not a `head: true` count or an id lookup. */
   const listBuilder = () =>
-    builders.find((builder) => {
+    builders.find(({ table, builder }) => {
       const args = builder.argsFor('select') as [string, { head?: boolean }] | undefined
-      return args !== undefined && args[1]?.head !== true
-    })
+      return table === 'bookings' && args !== undefined && args[1]?.head !== true && args[0] !== 'id'
+    })?.builder
 
-  return { listBuilder }
+  return { listBuilder, builders }
 }
 
 function list(query = '') {
@@ -89,7 +89,7 @@ describe('GET /api/bookings', () => {
     const body = await response.json()
 
     expect(response.status).toBe(200)
-    expect(body.bookings).toEqual([BOOKING])
+    expect(body.bookings).toEqual([{ ...BOOKING, reasons: [] }])
     expect(body.total).toBe(1)
   })
 
@@ -165,5 +165,30 @@ describe('GET /api/bookings', () => {
     const response = await list()
 
     expect(response.status).toBe(500)
+  })
+
+  it('returns the queue size and the scheduling health alongside the page', async () => {
+    const response = await list()
+    const body = await response.json()
+
+    expect(body.needsActionCount).toBe(1)
+    expect(body.schedulingHealth).toEqual({ delayed: true, unmatchedEvents: 1, failedDeliveries: 1 })
+  })
+
+  it('narrows the page to the work queue when asked', async () => {
+    const { listBuilder } = setupPerQuery()
+
+    await list('?queue=needs_action')
+
+    expect(String(listBuilder()!.argsFor('or')?.[0])).toContain('and(status.eq.paid,updated_at.lt.')
+  })
+
+  it('applies a created-date range', async () => {
+    const { listBuilder } = setupPerQuery()
+
+    await list('?from=2026-10-01T00:00:00.000Z&to=2026-10-02T00:00:00.000Z')
+
+    expect(listBuilder()!.argsFor('gte')).toEqual(['created_at', '2026-10-01T00:00:00.000Z'])
+    expect(listBuilder()!.argsFor('lt')).toEqual(['created_at', '2026-10-02T00:00:00.000Z'])
   })
 })
