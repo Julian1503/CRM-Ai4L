@@ -40,8 +40,7 @@ export function settingsRedirect(
   detail: { reason?: string; count?: number } = {},
   env: Env = process.env
 ): NextResponse {
-  const url = new URL('/', appOrigin(request, env))
-  url.searchParams.set('view', 'settings')
+  const url = new URL('/settings', appOrigin(request, env))
   url.searchParams.set('social', outcome)
   if (detail.reason) url.searchParams.set('reason', detail.reason)
   if (detail.count !== undefined) url.searchParams.set('count', String(detail.count))

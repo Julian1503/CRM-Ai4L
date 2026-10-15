@@ -88,7 +88,7 @@ test.describe('Content Studio', () => {
 
   test('fits a phone screen', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
-    await page.goto('/?view=content')
+    await page.goto('/content')
 
     await expect(page.getByRole('heading', { name: 'Content Studio', level: 1 })).toBeVisible({ timeout: 120_000 })
     await expect(page.getByRole('tablist', { name: 'Content Studio sections' })).toBeVisible()

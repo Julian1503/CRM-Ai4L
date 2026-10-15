@@ -89,8 +89,8 @@ describe('reviewEmail', () => {
     it('links straight to the campaign in the CRM', () => {
       const email = renderReviewEmail(BASE, 'https://crm.example.org')
 
-      expect(email.text).toContain('https://crm.example.org/?view=campaigns&campaign=camp-1')
-      expect(email.html).toContain('href="https://crm.example.org/?view=campaigns&amp;campaign=camp-1"')
+      expect(email.text).toContain('https://crm.example.org/campaigns?campaign=camp-1')
+      expect(email.html).toContain('href="https://crm.example.org/campaigns?campaign=camp-1"')
     })
 
     it('escapes generated text in the HTML', () => {

@@ -69,7 +69,7 @@ export function renderReviewEmail(
   notice: ReviewNotice,
   appUrl: string
 ): { subject: string; html: string; text: string } {
-  const link = `${appUrl}/?view=campaigns&campaign=${encodeURIComponent(notice.campaignId)}`
+  const link = `${appUrl}/campaigns?campaign=${encodeURIComponent(notice.campaignId)}`
   const failed = notice.generationError !== null
 
   const subject = failed

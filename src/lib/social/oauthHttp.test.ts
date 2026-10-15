@@ -20,7 +20,7 @@ describe('oauthHttp', () => {
     const url = new URL(response.headers.get('location') ?? '')
     expect(response.status).toBe(303)
     expect(response.headers.get('cache-control')).toContain('no-store')
-    expect(Object.fromEntries(url.searchParams)).toEqual({ view: 'settings', social: 'connected', count: '2' })
+    expect(Object.fromEntries(url.searchParams)).toEqual({ social: 'connected', count: '2' })
   })
 
   it.each([

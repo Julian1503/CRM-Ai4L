@@ -1,27 +1,38 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import styles from './Sidebar.module.css';
 import { gsap } from 'gsap';
 import { useGSAP } from '@gsap/react';
 
 import { prefersReducedMotion } from '@/lib/motion';
+import { ACTIVE_VIEWS, VIEW_ROUTES, viewForPath, type ActiveView } from '@/lib/navigation/routes';
 
-export const ACTIVE_VIEWS = ['contacts', 'archive', 'campaigns', 'content', 'bookings', 'imports', 'integrations', 'settings'] as const;
+export { ACTIVE_VIEWS };
+export type { ActiveView };
 
-export type ActiveView = (typeof ACTIVE_VIEWS)[number];
-
+/**
+ * The workspace navigation: real links to the CRM's routes (UX plan P1.1), so a
+ * workspace can be opened in a new tab, bookmarked and reached with Back/Forward. The
+ * current one is marked with aria-current="page".
+ */
 interface SidebarProps {
-  currentView: ActiveView;
-  onViewChange: (view: ActiveView) => void;
   /** Counts that need someone's attention, e.g. campaigns waiting for approval. */
   badges?: Partial<Record<ActiveView, number>>;
+  /**
+   * Asked before following a link to another workspace; false cancels the navigation
+   * (e.g. unsaved changes the user chose to keep).
+   */
+  onBeforeNavigate?: (view: ActiveView) => boolean;
 }
 
 /** Past this a count stops being information and starts breaking the pill. */
 const BADGE_CAP = 99;
 
-export default function Sidebar({ currentView, onViewChange, badges = {} }: SidebarProps) {
+export default function Sidebar({ badges = {}, onBeforeNavigate }: SidebarProps) {
+  const currentView = viewForPath(usePathname());
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -260,6 +271,19 @@ export default function Sidebar({ currentView, onViewChange, badges = {} }: Side
     };
   }, []);
 
+  /**
+   * Plain clicks only: a modified click (new tab, new window) leaves this page alone, so
+   * there is nothing to guard. A cancelled navigation keeps the menu as it was.
+   */
+  const followLink = (event: React.MouseEvent<HTMLAnchorElement>, view: ActiveView) => {
+    const modified = event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey;
+    if (!modified && view !== currentView && onBeforeNavigate && !onBeforeNavigate(view)) {
+      event.preventDefault();
+      return;
+    }
+    setIsMoreOpen(false);
+  };
+
   const handleToggle = () => {
     // Prevent double-click spam during active transition
     if (tlRef.current && tlRef.current.isActive()) return;
@@ -293,15 +317,13 @@ export default function Sidebar({ currentView, onViewChange, badges = {} }: Side
         </div>
         <nav className={styles.nav}>
           {navItems.map((item) => (
-            <button
+            <Link
               key={item.id}
+              href={VIEW_ROUTES[item.id]}
               data-testid={`nav-item-${item.id}`}
+              aria-current={currentView === item.id ? 'page' : undefined}
               className={`${styles.navItem} ${mobileSecondaryItems.includes(item) ? styles.mobileSecondary : ''} ${currentView === item.id ? styles.activeItem : ''}`}
-              onClick={() => {
-                onViewChange(item.id)
-                setIsMoreOpen(false)
-              }}
-              type="button"
+              onClick={(event) => followLink(event, item.id)}
             >
               <div className={styles.iconContainer}>
                 {item.icon}
@@ -320,11 +342,11 @@ export default function Sidebar({ currentView, onViewChange, badges = {} }: Side
                 {item.id === 'imports' ? 'Import' : item.id === 'integrations' ? 'Sync' : item.id === 'campaigns' ? 'Send' : item.label}
               </span>
               {currentView === item.id && <span className={styles.activeDot} />}
-            </button>
+            </Link>
           ))}
           <button
             type="button"
-            className={`${styles.navItem} ${styles.moreButton} ${mobileSecondaryItems.some((item) => item.id === currentView) ? styles.activeItem : ''}`}
+            className={`${styles.navItem} ${styles.navButton} ${styles.moreButton} ${mobileSecondaryItems.some((item) => item.id === currentView) ? styles.activeItem : ''}`}
             aria-expanded={isMoreOpen}
             aria-controls="mobile-more-menu"
             data-testid="nav-more"
@@ -344,19 +366,17 @@ export default function Sidebar({ currentView, onViewChange, badges = {} }: Side
         {isMoreOpen && (
           <div id="mobile-more-menu" className={styles.mobileMoreMenu} role="menu">
             {mobileSecondaryItems.map((item) => (
-              <button
+              <Link
                 key={item.id}
-                type="button"
+                href={VIEW_ROUTES[item.id]}
                 role="menuitem"
                 data-testid={`mobile-more-${item.id}`}
-                className={currentView === item.id ? styles.moreMenuActive : ''}
-                onClick={() => {
-                  onViewChange(item.id)
-                  setIsMoreOpen(false)
-                }}
+                aria-current={currentView === item.id ? 'page' : undefined}
+                className={`${styles.moreMenuLink} ${currentView === item.id ? styles.moreMenuActive : ''}`}
+                onClick={(event) => followLink(event, item.id)}
               >
                 {item.label}
-              </button>
+              </Link>
             ))}
             <form method="post" action="/auth/logout">
               <button type="submit" role="menuitem" data-testid="mobile-sign-out">

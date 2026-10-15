@@ -33,7 +33,7 @@ describe('a Content Studio campaign in Campaigns', () => {
     )
 
     expect(await screen.findByTestId('studio-content-source')).toHaveTextContent('Content comes from Content Studio (revision 4)')
-    expect(screen.getByRole('link', { name: 'Open it in the Content Studio' })).toHaveAttribute('href', '/?view=content&item=item-1')
+    expect(screen.getByRole('link', { name: 'Open it in the Content Studio' })).toHaveAttribute('href', '/content?item=item-1')
     expect(screen.getByText('Term update')).toBeInTheDocument()
     expect(screen.getByText(/Button linking to https:\/\/ai4l\.com\.au\/guide/)).toBeInTheDocument()
     expect(screen.getByText('A classroom')).toBeInTheDocument()

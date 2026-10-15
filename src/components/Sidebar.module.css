@@ -79,6 +79,8 @@
 }
 
 .navItem {
+  /* Links and the More button share this look; neither underlines nor inherits link colour. */
+  text-decoration: none;
   display: flex;
   align-items: center;
   gap: var(--space-md);
@@ -320,7 +322,10 @@
     box-shadow: var(--shadow-lg);
   }
 
-  .mobileMoreMenu button {
+  .mobileMoreMenu button,
+  .mobileMoreMenu a {
+    display: block;
+    box-sizing: border-box;
     width: 100%;
     min-height: 42px;
     padding: 8px 12px;
@@ -334,6 +339,8 @@
 
   .mobileMoreMenu button:hover,
   .mobileMoreMenu button:focus-visible,
+  .mobileMoreMenu a:hover,
+  .mobileMoreMenu a:focus-visible,
   .mobileMoreMenu .moreMenuActive {
     background: var(--info-bg);
     outline: none;
@@ -419,4 +426,15 @@
   .signOutBtn {
     transition: none;
   }
+}
+
+/* The More toggle is a button: reset what a button brings that a link does not. */
+.navButton {
+  background: none;
+  font: inherit;
+}
+
+.moreMenuLink {
+  text-decoration: none;
+  color: inherit;
 }

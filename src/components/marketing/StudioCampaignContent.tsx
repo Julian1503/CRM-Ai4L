@@ -49,7 +49,7 @@ export default function StudioCampaignContent({ campaignId }: { campaignId: stri
       <p className={styles.panelHint} data-testid="studio-content-source">
         Content comes from Content Studio ({revision}) and cannot be edited here.{' '}
         {content.sourceItemId && (
-          <a href={`/?view=content&item=${encodeURIComponent(content.sourceItemId)}`}>Open it in the Content Studio</a>
+          <a href={`/content?item=${encodeURIComponent(content.sourceItemId)}`}>Open it in the Content Studio</a>
         )}
       </p>
       <dl className={styles.itemMeta}>
