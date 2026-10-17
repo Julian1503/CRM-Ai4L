@@ -110,6 +110,12 @@ describe('validateJobResult', () => {
     ).toMatchObject({ ok: true })
   })
 
+  it('accepts a result without token counts, as the mock engine sends it (usage: null)', () => {
+    expect(
+      validateJobResult('generate_text', { variants: [variant], failures: [], promptVersion: 'p1', model: 'mock', usage: null, providerRequestId: 'mock-1' })
+    ).toMatchObject({ ok: true })
+  })
+
   it.each([
     [{ variants: [], failures: [], promptVersion: 'p', model: 'm' }, /1 to 12/],
     [{ variants: [{ ...variant, channel: 'tiktok' }], failures: [], promptVersion: 'p', model: 'm' }, /invalid shape/],

@@ -3,6 +3,7 @@
 import { useId, useRef, useState } from 'react'
 
 import Dialog from './Dialog'
+import SuggestionChips, { type SuggestionChipsProps } from './SuggestionChips'
 import styles from './ContentStudio.module.css'
 
 type PromptDialogProps = {
@@ -17,6 +18,8 @@ type PromptDialogProps = {
   error?: string | null
   onSubmit: (value: string) => void
   onClose: () => void
+  /** Optional AI suggestions under the field; picking one replaces the text. */
+  suggestions?: Omit<SuggestionChipsProps, 'onPick'>
 }
 
 /** A dialog that asks for one piece of text: a rejection reason, a rewrite instruction. */
@@ -31,12 +34,18 @@ export default function PromptDialog({
   error = null,
   onSubmit,
   onClose,
+  suggestions,
 }: PromptDialogProps) {
   const [value, setValue] = useState('')
   const [touched, setTouched] = useState(false)
   const fieldId = useId()
   const fieldRef = useRef<HTMLTextAreaElement>(null)
   const missing = required && value.trim().length === 0
+
+  const fill = (text: string) => {
+    setValue(text)
+    fieldRef.current?.focus()
+  }
 
   const submit = () => {
     setTouched(true)
@@ -78,6 +87,7 @@ export default function PromptDialog({
           onChange={(event) => setValue(event.target.value)}
         />
       </label>
+      {suggestions && <SuggestionChips {...suggestions} onPick={fill} />}
       {touched && missing && (
         <p className={styles.fieldError} role="alert">
           {label} is required.

@@ -100,9 +100,45 @@ describe('VariantCard', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Regenerate' }))
     await waitFor(() => expect(onChanged).toHaveBeenCalled())
 
-    const bodies = mock.mock.calls.map(([, init]) => JSON.parse(String(init.body)))
+    const bodies = mock.mock.calls.filter(([url]) => url === GENERATE).map(([, init]) => JSON.parse(String(init.body)))
     expect(bodies[0]).toMatchObject({ channels: ['facebook'], variantId: 'var-1', baseRevisionId: 'rev-1', instruction: 'Shorter' })
     expect(bodies[0].idempotencyKey).toBe(bodies[1].idempotencyKey)
+  })
+
+  it('suggests instructions when the regenerate dialog opens, and sends the picked one', async () => {
+    const mock = routeFetch({
+      ['POST /api/content-studio/suggestions']: jsonResponse({
+        kind: 'rewrite_instructions',
+        cached: false,
+        suggestions: [{ text: 'Lead with the date' }, { text: 'Add a question' }],
+      }),
+      [`POST ${GENERATE}`]: jsonResponse({ job: makeJob() }, 202),
+    })
+    renderCard()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Regenerate' }))
+    const dialog = screen.getByRole('dialog', { name: 'Regenerate this variant' })
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Lead with the date' }))
+
+    const field = within(dialog).getByLabelText('Instruction (optional)')
+    expect(field).toHaveValue('Lead with the date')
+    expect(document.activeElement).toBe(field)
+    expect(bodyOf(mock, 'POST', '/api/content-studio/suggestions')).toEqual({ kind: 'rewrite_instructions', variantId: 'var-1', fresh: false })
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Regenerate' }))
+    await waitFor(() => expect(bodyOf(mock, 'POST', GENERATE)).toMatchObject({ instruction: 'Lead with the date' }))
+  })
+
+  it('keeps the regenerate dialog usable when suggestions fail', async () => {
+    routeFetch({ ['POST /api/content-studio/suggestions']: errorResponse(503, 'Suggestions are unavailable right now.') })
+    renderCard()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Regenerate' }))
+    const dialog = screen.getByRole('dialog', { name: 'Regenerate this variant' })
+
+    expect(await within(dialog).findByText(/Suggestions are unavailable/)).toBeInTheDocument()
+    expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Regenerate' })).toBeEnabled()
   })
 
   it('closes the prompt with Escape and returns focus to the opener', () => {

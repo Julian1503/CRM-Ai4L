@@ -154,8 +154,9 @@ function isStringList(value: unknown, maxItems: number, maxLength: number): bool
   return Array.isArray(value) && value.length <= maxItems && value.every((entry) => isText(entry, maxLength))
 }
 
+/** Optional like the engine's `usage: dict | None`: a run without token counts (the mock) sends null. */
 function isUsage(value: unknown): boolean {
-  return value === undefined || (isRecord(value) && Object.values(value).every((entry) => typeof entry === 'number'))
+  return isOptional(value, (entry): entry is Record<string, number> => isRecord(entry) && Object.values(entry).every((count) => typeof count === 'number'))
 }
 
 function isGeneratedVariant(value: unknown): boolean {

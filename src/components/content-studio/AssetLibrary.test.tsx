@@ -136,6 +136,24 @@ describe('AssetLibrary', () => {
     expect(screen.getByLabelText('Generate images')).toHaveValue('')
   })
 
+  it('suggests prompts on request and fills the prompt with the picked one', async () => {
+    const mock = routeFetch({
+      ['POST /api/content-studio/suggestions']: jsonResponse({
+        kind: 'image_prompts',
+        cached: true,
+        suggestions: [{ label: 'Team at work', prompt: 'A small team around a table, warm light' }],
+      }),
+    })
+    renderLibrary()
+
+    expect(mock).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Suggest prompts' }))
+    fireEvent.click(await screen.findByRole('button', { name: /Team at work/ }))
+
+    expect(screen.getByLabelText('Generate images')).toHaveValue('A small team around a table, warm light')
+    expect(bodyOf(mock, 'POST', '/api/content-studio/suggestions')).toEqual({ kind: 'image_prompts', itemId: 'item-1', fresh: false })
+  })
+
   it('reports a failed image generation', async () => {
     routeFetch({ ['POST /api/content-studio/items/item-1/images']: errorResponse(503, 'Image model offline') })
     renderLibrary()

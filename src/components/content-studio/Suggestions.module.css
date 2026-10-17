@@ -1,0 +1,190 @@
+/* AI suggestion chips (SuggestionChips.tsx). Quieter than the form around them: a
+   suggestion is an offer, so it sits on the surface tint with no shadow, and only the
+   picked chip takes the primary colour. */
+
+.suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+/* A small two-tone mark that says "generated", without an icon font. */
+.spark {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 2px;
+  background: linear-gradient(135deg, var(--accent) 0 50%, var(--primary) 50% 100%);
+  transform: rotate(45deg);
+}
+
+.action {
+  padding: 0;
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--primary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 3px;
+  transition: text-decoration-color var(--transition-fast);
+}
+
+.action:hover:not(:disabled) {
+  text-decoration-color: currentColor;
+}
+
+.action:disabled {
+  color: var(--text-secondary);
+  cursor: progress;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  transition: opacity var(--transition-normal);
+}
+
+.stale {
+  opacity: 0.55;
+}
+
+.chip {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  max-width: 100%;
+  padding: 0.45rem 0.75rem;
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  text-align: left;
+  color: var(--text-primary);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition:
+    border-color var(--transition-fast),
+    background var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.chip:hover:not(:disabled) {
+  border-color: var(--primary);
+  transform: translateY(-1px);
+}
+
+.chip:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+/* --bg-highlight, not --primary-muted: the image form already sits on that tint. */
+.chip[aria-pressed='true'] {
+  background: var(--bg-highlight);
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+.chip:focus-visible,
+.action:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.chip:disabled {
+  cursor: progress;
+}
+
+.chipLabel {
+  font-weight: 600;
+}
+
+/* Long image prompts stay to two lines; the full text is in the chip's title. */
+.chipDetail {
+  display: -webkit-box;
+  max-width: 34rem;
+  overflow: hidden;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.skeleton {
+  width: 9rem;
+  height: 2rem;
+  border-radius: var(--radius-md);
+  background: linear-gradient(90deg, var(--bg-surface) 0%, var(--bg-card) 50%, var(--bg-surface) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.2s ease-in-out infinite;
+}
+
+.skeleton:nth-child(3) {
+  width: 12rem;
+}
+
+.skeleton:nth-child(4) {
+  width: 7rem;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+
+  .chip,
+  .chip:hover:not(:disabled) {
+    transform: none;
+  }
+}
+
+.note {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

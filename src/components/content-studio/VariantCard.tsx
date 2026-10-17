@@ -1,17 +1,18 @@
 'use client'
 
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 
 import type { ContentAsset, ContentRevision, ContentVariant, RevisionContent } from '@/lib/content-studio/types'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 
-import { ApiError, duplicateVariant, errorMessage, generate, reviewRevision, setVariantArchived } from './api'
+import { ApiError, duplicateVariant, errorMessage, generate, reviewRevision, setVariantArchived, suggest } from './api'
 import { composePostText } from './composePostText'
 import { useIdempotencyKey } from './hooks'
 import { REVIEW_LABELS, REVIEW_TONES, formatDateTime, isSocialChannel } from './labels'
 import PromptDialog from './PromptDialog'
 import { contentOf, previewImages } from './revision'
 import SocialPreview from './SocialPreview'
+import type { Suggestion } from './SuggestionChips'
 import { ChannelTag, StatusPill } from './StatusPill'
 import VariantEditor, { EMAIL_FIELDS } from './VariantEditor'
 import styles from './ContentStudio.module.css'
@@ -109,6 +110,14 @@ export default function VariantCard({ itemId, variant, assets, onChanged, onPubl
       },
       'Could not start regeneration.'
     )
+
+  const loadRewrites = useCallback(
+    async (fresh: boolean): Promise<Suggestion[]> => {
+      const { suggestions } = await suggest({ kind: 'rewrite_instructions', variantId: variant.id, fresh })
+      return suggestions.map((entry) => ({ key: entry.text, label: entry.text, value: entry.text }))
+    },
+    [variant.id]
+  )
 
   const duplicate = () =>
     void run(
@@ -279,6 +288,7 @@ export default function VariantCard({ itemId, variant, assets, onChanged, onPubl
           error={error}
           onSubmit={regenerate}
           onClose={() => setPrompt(null)}
+          suggestions={{ title: 'Suggested instructions', load: loadRewrites, autoLoad: true }}
         />
       )}
       {prompt === 'archive' && (

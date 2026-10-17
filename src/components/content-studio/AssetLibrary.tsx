@@ -1,17 +1,18 @@
 'use client'
 
-import { useId, useRef, useState } from 'react'
+import { useCallback, useId, useRef, useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 
 import type { ContentAsset, ContentJob, GenerateImagesRequest } from '@/lib/content-studio/types'
 
-import { ApiError, createUpload, errorMessage, generateImages, ingestAsset, uploadToSignedUrl } from './api'
+import { ApiError, createUpload, errorMessage, generateImages, ingestAsset, suggest, uploadToSignedUrl } from './api'
 import { AssetThumb } from './AssetSelection'
 import { useIdempotencyKey } from './hooks'
 import JobStatusLine from './JobStatusLine'
 import { INGEST_LABELS, INGEST_TONES } from './labels'
 import { assetLabel } from './revision'
 import { StatusPill } from './StatusPill'
+import SuggestionChips, { type Suggestion } from './SuggestionChips'
 import styles from './ContentStudio.module.css'
 import jobStyles from './Jobs.module.css'
 import mediaStyles from './Media.module.css'
@@ -233,6 +234,21 @@ function ImageGenerateForm({ itemId, onStarted }: { itemId: string; onStarted: (
   const [error, setError] = useState<string | null>(null)
   const { keyFor, settle } = useIdempotencyKey()
   const id = useId()
+  const promptRef = useRef<HTMLTextAreaElement>(null)
+
+  const loadPrompts = useCallback(
+    async (fresh: boolean): Promise<Suggestion[]> => {
+      const { suggestions } = await suggest({ kind: 'image_prompts', itemId, fresh })
+      return suggestions.map((entry) => ({ key: entry.prompt, label: entry.label, detail: entry.prompt, value: entry.prompt }))
+    },
+    [itemId]
+  )
+
+  const applyPrompt = (text: string) => {
+    setPrompt(text)
+    setError(null)
+    promptRef.current?.focus()
+  }
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -259,9 +275,11 @@ function ImageGenerateForm({ itemId, onStarted }: { itemId: string; onStarted: (
     <form className={styles.generateForm} onSubmit={submit} aria-label="Image generation">
       <label className={`${styles.field} ${styles.grow}`} htmlFor={`${id}-prompt`}>
         <span className={styles.label}>Generate images</span>
-        <input
+        <textarea
           id={`${id}-prompt`}
-          className={styles.input}
+          ref={promptRef}
+          className={styles.textarea}
+          rows={2}
           value={prompt}
           placeholder="e.g. A bright workshop room with people collaborating"
           onChange={(event) => setPrompt(event.target.value)}
@@ -285,6 +303,9 @@ function ImageGenerateForm({ itemId, onStarted }: { itemId: string; onStarted: (
           {error}
         </p>
       )}
+      <div className={styles.fullRow}>
+        <SuggestionChips title="Prompt ideas" startLabel="Suggest prompts" load={loadPrompts} onPick={applyPrompt} />
+      </div>
     </form>
   )
 }
