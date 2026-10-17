@@ -188,3 +188,93 @@
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
+
+/* --- Brief assist (BriefAssist.tsx) ----------------------------------------- */
+
+/* A tinted card under the topic: the suggestion sits beside what it would fill,
+   not mixed into the form, so typed and suggested text are never confused. */
+.assist {
+  padding: 0.875rem 1rem;
+  background: var(--bg-card);
+  border: 1px dashed var(--border-focus);
+  border-radius: var(--radius-md);
+}
+
+.assistRows {
+  display: grid;
+  gap: 0.125rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  transition: opacity var(--transition-normal);
+}
+
+.assistRow {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: var(--space-sm) var(--space-md);
+  padding: 0.5rem 0;
+  border-top: 1px solid var(--bg-surface);
+}
+
+.assistRow:first-child {
+  border-top: none;
+}
+
+.assistLabel {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.assistValue {
+  font-size: 0.875rem;
+  line-height: 1.45;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.assistDone {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.fillAll {
+  justify-self: start;
+  padding: 0.4rem 0.75rem;
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--primary);
+  background: var(--bg-surface);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color var(--transition-fast);
+}
+
+.fillAll:hover:not(:disabled) {
+  border-color: var(--primary);
+}
+
+.fillAll:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.fillAll:disabled {
+  opacity: 0.45;
+  cursor: progress;
+}
+
+/* On a phone the label moves above the value; the action stays at the right. */
+@media (max-width: 480px) {
+  .assistRow {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .assistLabel {
+    grid-column: 1 / -1;
+  }
+}

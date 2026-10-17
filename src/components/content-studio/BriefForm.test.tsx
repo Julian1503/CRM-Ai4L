@@ -173,4 +173,45 @@ describe('BriefForm', () => {
     expect(screen.getByRole('checkbox', { name: /^Email/ })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Retry generation' })).toBeEnabled()
   })
+
+  it('completes the brief with AI and adds a suggested fact to the source facts', async () => {
+    routeFetch({
+      ['GET /api/content-studio/brand']: jsonResponse({ brand: { name: 'AI4L', region: 'NSW', tone: 'Warm', approvedFacts: [{ id: 'f1', text: 'Workshops run online every month.' }] } }),
+      ['POST /api/content-studio/suggestions']: jsonResponse({
+        kind: 'brief_completion',
+        cached: false,
+        completion: { title: 'AI workshops for small teams', factIds: ['f1'], channels: ['facebook', 'linkedin'] },
+      }),
+    })
+    render(<BriefForm onCreated={jest.fn()} />)
+    await screen.findByText('Brand context used for new generations')
+
+    fireEvent.change(screen.getByLabelText(/^Topic/), { target: { value: 'Monthly AI workshops' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Complete with AI' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Use title: AI workshops for small teams' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add fact: Workshops run online every month.' }))
+
+    expect(screen.getByLabelText(/^Title/)).toHaveValue('AI workshops for small teams')
+    expect(screen.getByRole('button', { name: 'Remove fact: Workshops run online every month.' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Reference URL').closest('details')).toHaveAttribute('open')
+    expect(screen.getAllByText('In use').length).toBeGreaterThan(0)
+  })
+
+  it('unfolds the supporting context when suggested notes are used', async () => {
+    routeFetch({
+      ['POST /api/content-studio/suggestions']: jsonResponse({
+        kind: 'brief_completion',
+        cached: false,
+        completion: { notes: 'Lead with the cadence.', factIds: [], channels: [] },
+      }),
+    })
+    render(<BriefForm onCreated={jest.fn()} />)
+
+    fireEvent.change(screen.getByLabelText(/^Topic/), { target: { value: 'Monthly AI workshops' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Complete with AI' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Use notes: Lead with the cadence.' }))
+
+    expect(screen.getByLabelText('Notes')).toHaveValue('Lead with the cadence.')
+    expect(screen.getByLabelText('Notes').closest('details')).toHaveAttribute('open')
+  })
 })

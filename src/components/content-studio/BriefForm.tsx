@@ -6,6 +6,7 @@ import type { FormEvent } from 'react'
 import type { BrandProfile, ContentBrief, ContentChannel, ContentItem, GenerateRequest } from '@/lib/content-studio/types'
 
 import { createItem, errorMessage, generate } from './api'
+import BriefAssist from './BriefAssist'
 import { useIdempotencyKey } from './hooks'
 import { parseHttpsUrl } from './labels'
 import ChannelSelector from './ChannelSelector'
@@ -103,6 +104,22 @@ export default function BriefForm({ onCreated }: BriefFormProps) {
   const update = <K extends keyof BriefDraft>(key: K, value: BriefDraft[K]) =>
     setDraft((previous) => ({ ...previous, [key]: value }))
 
+  /** Notes live in the folded context: unfold it so the filled-in text is seen. */
+  const applySuggestion = (field: 'title' | 'audience' | 'objective' | 'notes', value: string) => {
+    update(field, value)
+    if (field === 'notes' && supportingRef.current) supportingRef.current.open = true
+  }
+
+  /** A suggested approved fact joins the brief's own facts, where the member can see and remove it. */
+  const addFact = (text: string) => {
+    setDraft((previous) =>
+      previous.sourceFacts.length >= MAX_FACTS || previous.sourceFacts.includes(text)
+        ? previous
+        : { ...previous, sourceFacts: [...previous.sourceFacts, text] }
+    )
+    if (supportingRef.current) supportingRef.current.open = true
+  }
+
   const startGeneration = async (item: ContentItem) => {
     const channels = item.channels.length > 0 ? item.channels : draft.channels
     const idempotencyKey = keyFor(`generate:${item.id}`)
@@ -167,6 +184,16 @@ export default function BriefForm({ onCreated }: BriefFormProps) {
           <div className={styles.briefGrid}>
           <div className={styles.briefMain}>
             <TextField id={`${formId}-topic`} label="Topic" value={draft.topic} error={errors.topic} required multiline onChange={(value) => update('topic', value)} wide />
+            <BriefAssist
+              topic={draft.topic}
+              values={{ title: draft.title, audience: draft.audience, objective: draft.objective, notes: draft.notes }}
+              sourceFacts={draft.sourceFacts}
+              channels={draft.channels}
+              approvedFacts={brand.data?.approvedFacts ?? []}
+              onUse={applySuggestion}
+              onAddFact={addFact}
+              onChannels={(channels) => update('channels', channels)}
+            />
             <TextField id={`${formId}-name`} label="Title" value={draft.title} error={errors.title} required onChange={(value) => update('title', value)} />
             <div className={styles.formGrid}>
               <TextField id={`${formId}-audience`} label="Audience" value={draft.audience} onChange={(value) => update('audience', value)} placeholder="e.g. Small business owners in NSW" />
