@@ -214,4 +214,33 @@ describe('BriefForm', () => {
     expect(screen.getByLabelText('Notes')).toHaveValue('Lead with the cadence.')
     expect(screen.getByLabelText('Notes').closest('details')).toHaveAttribute('open')
   })
+
+  it('starts a brief from an idea, switches ideas without touching typed text, and hides once the topic is typed', async () => {
+    const ideas = [
+      { title: 'Five quick AI tips', topic: 'Five quick AI tips for small teams.', angle: 'Easy wins this month.', channels: ['linkedin'] },
+      { title: 'A story from the field', topic: 'How one team saved a day a week.', angle: 'Proof it works.', channels: ['facebook', 'email'] },
+    ]
+    const mock = routeFetch({ ['POST /api/content-studio/suggestions']: jsonResponse({ kind: 'content_ideas', cached: false, suggestions: ideas }) })
+    render(<BriefForm onCreated={jest.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Suggest ideas' }))
+    fireEvent.click(await screen.findByRole('button', { name: /Five quick AI tips/ }))
+
+    expect(bodyOf(mock, 'POST', '/api/content-studio/suggestions')).toEqual({ kind: 'content_ideas', fresh: false })
+    expect(screen.getByLabelText(/^Topic/)).toHaveValue('Five quick AI tips for small teams.')
+    expect(screen.getByLabelText(/^Title/)).toHaveValue('Five quick AI tips')
+    expect(screen.getByLabelText('Notes')).toHaveValue('Angle: Easy wins this month.')
+    expect(screen.getByRole('checkbox', { name: /^LinkedIn/ })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: /^Facebook/ })).not.toBeChecked()
+
+    // The member rewrites the title; switching ideas keeps it and replaces the rest.
+    fireEvent.change(screen.getByLabelText(/^Title/), { target: { value: 'My title' } })
+    fireEvent.click(screen.getByRole('button', { name: /A story from the field/ }))
+    expect(screen.getByLabelText(/^Topic/)).toHaveValue('How one team saved a day a week.')
+    expect(screen.getByLabelText(/^Title/)).toHaveValue('My title')
+    expect(screen.getByLabelText('Notes')).toHaveValue('Angle: Proof it works.')
+
+    fireEvent.change(screen.getByLabelText(/^Topic/), { target: { value: 'Something of my own' } })
+    expect(screen.queryByRole('button', { name: 'More ideas' })).not.toBeInTheDocument()
+  })
 })

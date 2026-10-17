@@ -3,10 +3,12 @@
 import { useId, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 
+import type { ContentIdea } from '@/lib/content-studio/suggestionTypes'
 import type { BrandProfile, ContentBrief, ContentChannel, ContentItem, GenerateRequest } from '@/lib/content-studio/types'
 
 import { createItem, errorMessage, generate } from './api'
 import BriefAssist from './BriefAssist'
+import IdeaPicker from './IdeaPicker'
 import { useIdempotencyKey } from './hooks'
 import { parseHttpsUrl } from './labels'
 import ChannelSelector from './ChannelSelector'
@@ -94,6 +96,8 @@ export default function BriefForm({ onCreated }: BriefFormProps) {
   const [draft, setDraft] = useState<BriefDraft>(EMPTY_BRIEF)
   const [errors, setErrors] = useState<BriefErrors>({})
   const [created, setCreated] = useState<ContentItem | null>(null)
+  // The idea the brief was last filled from: switching ideas replaces only what it wrote.
+  const [idea, setIdea] = useState<ContentIdea | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const { keyFor, settle } = useIdempotencyKey()
@@ -103,6 +107,21 @@ export default function BriefForm({ onCreated }: BriefFormProps) {
 
   const update = <K extends keyof BriefDraft>(key: K, value: BriefDraft[K]) =>
     setDraft((previous) => ({ ...previous, [key]: value }))
+
+  const applyIdea = (next: ContentIdea) => {
+    setDraft((previous) => {
+      const fromIdea = (value: string, earlier: string | undefined) => !value.trim() || value === earlier
+      const earlierNotes = idea?.angle ? `Angle: ${idea.angle}` : undefined
+      return {
+        ...previous,
+        topic: next.topic,
+        title: fromIdea(previous.title, idea?.title) ? next.title : previous.title,
+        notes: next.angle && fromIdea(previous.notes, earlierNotes) ? `Angle: ${next.angle}` : previous.notes,
+        channels: next.channels,
+      }
+    })
+    setIdea(next)
+  }
 
   /** Notes live in the folded context: unfold it so the filled-in text is seen. */
   const applySuggestion = (field: 'title' | 'audience' | 'objective' | 'notes', value: string) => {
@@ -127,6 +146,7 @@ export default function BriefForm({ onCreated }: BriefFormProps) {
     settle()
     setCreated(null)
     setDraft(EMPTY_BRIEF)
+    setIdea(null)
     onCreated(item)
   }
 
@@ -183,6 +203,8 @@ export default function BriefForm({ onCreated }: BriefFormProps) {
           <legend className={styles.visuallyHidden}>Brief</legend>
           <div className={styles.briefGrid}>
           <div className={styles.briefMain}>
+            {/* Only on an empty brief, or one filled from an idea: a typed topic is never replaced. */}
+            {(!draft.topic.trim() || draft.topic === idea?.topic) && <IdeaPicker onPick={applyIdea} />}
             <TextField id={`${formId}-topic`} label="Topic" value={draft.topic} error={errors.topic} required multiline onChange={(value) => update('topic', value)} wide />
             <BriefAssist
               topic={draft.topic}

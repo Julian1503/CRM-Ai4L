@@ -110,7 +110,8 @@
 .briefPanel { padding: clamp(1rem, 2.2vw, 1.75rem); background: #fff; border: 1px solid var(--border); border-radius: var(--radius-md); }
 .briefGrid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(18rem, 1fr); gap: clamp(1.25rem, 2.5vw, 2.5rem); }
 .briefMain { display: grid; align-content: start; gap: 1.15rem; }
-.briefMain > .field:first-child textarea { min-height: 8rem; font-size: 1rem; }
+/* The topic: the first field (an idea picker may sit above it, as a section). */
+.briefMain > .field:first-of-type textarea { min-height: 8rem; font-size: 1rem; }
 .briefOptions { align-self: start; display: grid; gap: 1.5rem; padding: 1.25rem; background: #f2fafc; border-radius: var(--radius-md); }
 .supportingDetails { border-top: 1px solid var(--border); padding-top: 1rem; }
 .supportingDetails summary { cursor: pointer; color: var(--text-primary); font-weight: 700; }
