@@ -17,6 +17,7 @@ import {
   parseUpdateItem,
   parseUpdateVariant,
   parseBrandUpdate,
+  parseSuggestionRequest,
   readIdempotencyKey,
 } from './validation'
 
@@ -287,5 +288,34 @@ describe('parseBrandUpdate', () => {
     [{ hashtagSeeds: [1] }, /entry/],
   ])('refuses %p', (body, message) => {
     expect(error(parseBrandUpdate(body as never))).toMatch(message)
+  })
+})
+
+describe('parseSuggestionRequest', () => {
+  it.each([
+    [{ kind: 'rewrite_instructions', variantId: UUID }, { kind: 'rewrite_instructions', variantId: UUID, fresh: false }],
+    [{ kind: 'image_prompts', itemId: UUID, fresh: true }, { kind: 'image_prompts', itemId: UUID, fresh: true }],
+    [{ kind: 'content_ideas', variantId: UUID }, { kind: 'content_ideas', fresh: false }],
+    [
+      { kind: 'brief_completion', topic: '  Workshops  ', draft: { title: ' T ', audience: '   ', notes: 'N' } },
+      { kind: 'brief_completion', topic: 'Workshops', draft: { title: 'T', notes: 'N' }, fresh: false },
+    ],
+    [{ kind: 'brief_completion', topic: 'Workshops' }, { kind: 'brief_completion', topic: 'Workshops', draft: {}, fresh: false }],
+  ])('accepts %p', (body, expected) => {
+    expect(parseSuggestionRequest(body as never)).toEqual({ ok: true, value: expected })
+  })
+
+  it.each([
+    [{ kind: 'poems' }, /kind must be one of/],
+    [{}, /kind must be one of/],
+    [{ kind: 'rewrite_instructions', variantId: 'nope' }, /variantId must be a UUID/],
+    [{ kind: 'image_prompts' }, /itemId must be a UUID/],
+    [{ kind: 'brief_completion', topic: '   ' }, /topic is required/],
+    [{ kind: 'brief_completion', topic: 'x'.repeat(4001) }, /topic must be at most 4000/],
+    [{ kind: 'brief_completion', topic: 'T', draft: [] }, /draft must be an object/],
+    [{ kind: 'brief_completion', topic: 'T', draft: { title: 'x'.repeat(201) } }, /title must be at most 200/],
+    [{ kind: 'content_ideas', fresh: 'yes' }, /fresh must be true or false/],
+  ])('refuses %p', (body, message) => {
+    expect(error(parseSuggestionRequest(body as never))).toMatch(message)
   })
 })

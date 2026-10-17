@@ -1,5 +1,7 @@
 import { isUuid } from '@/lib/contacts/tags'
 
+import { SUGGESTION_KINDS, type BriefDraftFields, type SuggestionRequest } from './suggestionTypes'
+
 import {
   CONTENT_CHANNELS,
   type ApprovedFact,
@@ -411,4 +413,46 @@ export function parseBrandUpdate(body: Body): Parsed<BrandProfileUpdate> {
 
   const update = compact(fields.value) as BrandProfileUpdate
   return Object.keys(update).length > 0 ? ok(update) : fail('Nothing to update.')
+}
+
+function parseBriefDraft(raw: unknown): Parsed<BriefDraftFields> {
+  if (raw === undefined || raw === null) return ok({})
+  if (!isRecord(raw)) return fail('draft must be an object.')
+  const fields = collect({
+    title: readString(raw, 'title', { max: 200 }),
+    audience: readString(raw, 'audience', { max: 1000 }),
+    objective: readString(raw, 'objective', { max: 1000 }),
+    notes: readString(raw, 'notes', { max: 4000 }),
+  })
+  if (!fields.ok) return fields
+  // A blank field is "not written yet", the same as an absent one.
+  return ok(Object.fromEntries(Object.entries(fields.value).filter(([, value]) => value)) as BriefDraftFields)
+}
+
+/** Limits mirror services/content-engine/app/suggestions/models.py. */
+export function parseSuggestionRequest(body: Body): Parsed<SuggestionRequest> {
+  const fresh = body.fresh ?? false
+  if (typeof fresh !== 'boolean') return fail('fresh must be true or false.')
+
+  switch (body.kind) {
+    case 'rewrite_instructions': {
+      if (!isUuid(body.variantId)) return fail('variantId must be a UUID.')
+      return ok({ kind: 'rewrite_instructions', variantId: body.variantId, fresh })
+    }
+    case 'image_prompts': {
+      if (!isUuid(body.itemId)) return fail('itemId must be a UUID.')
+      return ok({ kind: 'image_prompts', itemId: body.itemId, fresh })
+    }
+    case 'brief_completion': {
+      const topic = readString(body, 'topic', { min: 1, max: 4000, required: true })
+      if (!topic.ok) return topic
+      const draft = parseBriefDraft(body.draft)
+      if (!draft.ok) return draft
+      return ok({ kind: 'brief_completion', topic: topic.value as string, draft: draft.value, fresh })
+    }
+    case 'content_ideas':
+      return ok({ kind: 'content_ideas', fresh })
+    default:
+      return fail(`kind must be one of ${SUGGESTION_KINDS.join(', ')}.`)
+  }
 }

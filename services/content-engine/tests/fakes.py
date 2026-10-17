@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -119,6 +120,12 @@ class ScriptedLLM:
         if kind:
             raise LLMError(kind, f"{ctx.channel} failed")  # type: ignore[arg-type]
         return await self._mock.complete_json(prompt, schema, ctx)
+
+    async def complete_structured(
+        self, prompt: str, schema: type[BaseModel], *, offline: Callable[[], BaseModel]
+    ) -> LLMResponse:
+        self.calls += 1
+        return await self._mock.complete_structured(prompt, schema, offline=offline)
 
 
 class StorageRecorder:

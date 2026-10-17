@@ -79,6 +79,12 @@ class LLMClient(Protocol):
 
     async def complete_json(self, prompt: str, schema: type[BaseModel], ctx: DraftContext) -> LLMResponse: ...
 
+    async def complete_structured(
+        self, prompt: str, schema: type[BaseModel], *, offline: Callable[[], BaseModel]
+    ) -> LLMResponse:
+        """Any schema, without a draft context. ``offline`` is what the mock returns."""
+        ...
+
 
 def supports_reasoning_effort(model: str) -> bool:
     return model.startswith(_REASONING_MODEL_PREFIXES)
@@ -220,6 +226,12 @@ class MockLLMClient:
         parsed: BaseModel = _mock_email(ctx) if schema is EmailDraft else _mock_social(ctx)
         return LLMResponse(parsed=parsed, request_id=f"mock-{digest}", usage={})
 
+    async def complete_structured(
+        self, prompt: str, schema: type[BaseModel], *, offline: Callable[[], BaseModel]
+    ) -> LLMResponse:
+        digest = hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16]
+        return LLMResponse(parsed=offline(), request_id=f"mock-{digest}", usage={})
+
 
 # --- Live ----------------------------------------------------------------------------------
 
@@ -239,6 +251,14 @@ class OpenAILLMClient:
         )
 
     async def complete_json(self, prompt: str, schema: type[BaseModel], ctx: DraftContext) -> LLMResponse:
+        return await self._complete(prompt, schema)
+
+    async def complete_structured(
+        self, prompt: str, schema: type[BaseModel], *, offline: Callable[[], BaseModel]
+    ) -> LLMResponse:
+        return await self._complete(prompt, schema)
+
+    async def _complete(self, prompt: str, schema: type[BaseModel]) -> LLMResponse:
         async def attempt_once() -> LLMResponse:
             response = await self._client.chat.completions.create(
                 model=self.model_name,
@@ -275,6 +295,14 @@ class GeminiLLMClient:
         self._attempts = settings.llm_max_attempts
 
     async def complete_json(self, prompt: str, schema: type[BaseModel], ctx: DraftContext) -> LLMResponse:
+        return await self._complete(prompt, schema)
+
+    async def complete_structured(
+        self, prompt: str, schema: type[BaseModel], *, offline: Callable[[], BaseModel]
+    ) -> LLMResponse:
+        return await self._complete(prompt, schema)
+
+    async def _complete(self, prompt: str, schema: type[BaseModel]) -> LLMResponse:
         async def attempt_once() -> LLMResponse:
             response = await self._client.aio.models.generate_content(
                 model=self.model_name,

@@ -17,6 +17,7 @@ describe('contentErrorResponse', () => {
     ['CRM06', 'stale_revision', 409],
     ['CRM07', 'asset_not_ready', 422],
     ['CRM01', null, 409],
+    ['CRM10', 'rate_limited', 429],
     ['P0002', null, 404],
     ['22023', null, 400],
   ])('maps SQLSTATE %s (hint %s) to %i', async (code, hint, status) => {

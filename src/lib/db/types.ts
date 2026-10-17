@@ -604,6 +604,7 @@ export type ContactConsentEventRow = {
 import type { CampaignTestSendTables } from './campaignTestSendTypes'
 import type { CronRunTables } from './cronRunTypes'
 import type { ContentStudioFunctions, ContentStudioTables } from './contentStudioTypes'
+import type { ContentSuggestionFunctions, ContentSuggestionTables } from './contentSuggestionTypes'
 import type { ScheduleOccurrenceFunctions, ScheduleOccurrenceTables } from './scheduleOccurrenceTypes'
 import type { SegmentContactTagColumns } from './segmentTagTypes'
 
@@ -611,6 +612,7 @@ export type * from './contentStudioTypes'
 export type * from './campaignTestSendTypes'
 export type * from './scheduleOccurrenceTypes'
 export type * from './cronRunTypes'
+export type * from './contentSuggestionTypes'
 
 type TableDef<
   Row,
@@ -687,7 +689,7 @@ export interface Database {
       newsletter_topics: TableDef<NewsletterTopicRow>
       segment_overrides: TableDef<SegmentOverrideRow>
       bookings: TableDef<BookingRow>
-    } & ContentStudioTables & CampaignTestSendTables & ScheduleOccurrenceTables & CronRunTables
+    } & ContentStudioTables & CampaignTestSendTables & ScheduleOccurrenceTables & CronRunTables & ContentSuggestionTables
     Views: {
       /** contacts filtered to deleted_at IS NULL (security_invoker). */
       active_contacts: { Row: ContactRow; Relationships: [] }
@@ -800,7 +802,7 @@ export interface Database {
         Args: Record<string, never>
         Returns: import('@/lib/operations/types').OperationsSummary
       }
-    } & ContentStudioFunctions & ScheduleOccurrenceFunctions
+    } & ContentStudioFunctions & ScheduleOccurrenceFunctions & ContentSuggestionFunctions
     Enums: {
       contact_status: ContactStatus
       campaign_status: CampaignStatus

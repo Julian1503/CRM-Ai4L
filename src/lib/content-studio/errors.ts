@@ -11,6 +11,7 @@ import { NextResponse } from 'next/server'
  *   CRM07  validation (hint: asset_not_ready, channel_mismatch, ...)                   422
  *          except hints archived, blocked_content, asset_not_pending               409
  *   CRM01  archive rule                                                               409
+ *   CRM10  too many requests (hint: rate_limited)                                     429
  *   42501  permission                                                                403
  *   P0002  not found                                                                 404
  *   22023  invalid argument; 22P02 malformed value; 23514 check constraint            400
@@ -59,6 +60,7 @@ const STATUS_BY_SQLSTATE: Readonly<Record<string, number>> = {
   CRM06: 409,
   CRM07: 422,
   CRM01: 409,
+  CRM10: 429,
   '42501': 403,
   P0002: 404,
   '22023': 400,

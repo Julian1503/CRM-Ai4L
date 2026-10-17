@@ -3,9 +3,11 @@
 * ``GET /health`` — liveness and mode flags; no secrets, no configuration values.
 * ``POST /v1/oauth/{provider}/authorize-url`` ``{state, redirectUri, options}`` → ``{url}``
 * ``POST /v1/oauth/{provider}/exchange`` ``{code, redirectUri, options}`` → ``{accounts}``
+* ``POST /v1/suggest/{kind}`` ``{brand, avoid, ...context}`` → ``{suggestions | completion,
+  model, promptVersion, usage}`` (app/suggestions; errors carry a ``code``)
 
-The two OAuth routes are authenticated with the same HMAC scheme as the worker protocol
-but a separate secret, CONTENT_ENGINE_SECRET (CRM → engine; the worker's
+The OAuth and suggestion routes are authenticated with the same HMAC scheme as the worker
+protocol but a separate secret, CONTENT_ENGINE_SECRET (CRM → engine; the worker's
 CONTENT_WORKER_SECRET signs engine → CRM), 300 s tolerance, verified over the exact raw
 body, which is capped at 256 KiB before it is read. OAuth app
 secrets live only in this service's environment. Responses from ``exchange`` carry
@@ -16,6 +18,7 @@ Run: ``uvicorn app.main:create_app --factory``.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -26,9 +29,12 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from app import signing
 from app.config import MIN_WORKER_SECRET_LENGTH, Settings, get_settings
 from app.contracts import WORKER_PROTOCOL_VERSION, SocialProvider
+from app.generation.llm import LLMClient, get_llm_client
 from app.redact import redact
 from app.social.oauth import get_oauth_provider
 from app.social.oauth.base import OAuthError, OAuthNotConfigured, validate_redirect_uri
+from app.suggestions.models import SUGGESTION_KINDS, SuggestionKind
+from app.suggestions.service import SuggestionError, parse_context, suggest
 
 logger = logging.getLogger(__name__)
 
@@ -96,12 +102,21 @@ def _parse(model: type[BaseModel], body: bytes) -> Any:
         raise HTTPException(status_code=422, detail="Invalid request body.") from None
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def _suggestion_kind(name: str) -> SuggestionKind:
+    if name not in SUGGESTION_KINDS:
+        raise HTTPException(status_code=404, detail="Unknown suggestion kind.")
+    return name  # type: ignore[return-value]
+
+
+def create_app(settings: Settings | None = None, *, llm: LLMClient | None = None) -> FastAPI:
     config = settings or get_settings()
     if len(config.content_engine_secret.strip()) < MIN_WORKER_SECRET_LENGTH:
         raise ValueError("CONTENT_ENGINE_SECRET is required for the api role (at least 32 characters).")
     app = FastAPI(title="AI4L content engine", docs_url=None, redoc_url=None, openapi_url=None)
     allow_local_http = config.app_env != "production"
+    llm_client = llm or get_llm_client(config)
+    # Bounds concurrent model calls from this process, like the worker's generation fan-out.
+    suggest_slots = asyncio.Semaphore(config.llm_max_concurrency)
 
     @app.exception_handler(HTTPException)
     async def _http_error(_request: Request, exc: HTTPException) -> JSONResponse:
@@ -146,5 +161,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             logger.info("OAuth exchange for %s refused", name)
             raise HTTPException(status_code=400, detail=redact(exc)) from None
         return {"accounts": [account.to_wire() for account in accounts]}
+
+    @app.post("/v1/suggest/{kind}", response_model=None)
+    async def suggestions(kind: str, request: Request) -> dict[str, Any] | JSONResponse:
+        body = await _authenticated_body(request, config)
+        name = _suggestion_kind(kind)
+        try:
+            ctx = parse_context(name, body)
+        except ValidationError:
+            raise HTTPException(status_code=422, detail="Invalid request body.") from None
+        try:
+            # The deadline also covers waiting for a slot, so a queued request is dropped
+            # rather than answered after the CRM has given up on it.
+            return await suggest(
+                name, ctx, llm_client, deadline_seconds=config.suggest_deadline_seconds, slots=suggest_slots
+            )
+        except SuggestionError as exc:
+            logger.warning("suggest kind=%s failed: %s", name, exc.code)
+            return JSONResponse(status_code=exc.status, content={"error": str(exc), "code": exc.code})
 
     return app

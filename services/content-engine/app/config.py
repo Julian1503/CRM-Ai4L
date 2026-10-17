@@ -71,6 +71,9 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = Field(default=60.0, gt=0)
     llm_max_attempts: int = Field(default=2, ge=1, le=3)
     llm_max_concurrency: int = Field(default=6, ge=1, le=20)
+    # Suggestions are answered while a person waits: one deadline bounds the whole call,
+    # retries included (POST /v1/suggest/{kind}).
+    suggest_deadline_seconds: float = Field(default=25.0, gt=0, le=60)
     generation_deadline_seconds: float = Field(default=240.0, gt=0)
 
     # ── Images ──

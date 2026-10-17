@@ -31,6 +31,7 @@ import type {
   UpdateItemRequest,
   VariantExport,
 } from '@/lib/content-studio/types'
+import type { SuggestionRequest, SuggestionResponse } from '@/lib/content-studio/suggestionTypes'
 
 const STUDIO = '/api/content-studio'
 const SOCIAL = '/api/social'
@@ -188,6 +189,15 @@ export async function generate(itemId: string, input: GenerateRequest): Promise<
 
 export async function generateImages(itemId: string, input: GenerateImagesRequest): Promise<ContentJob> {
   return unwrap<ContentJob>(await request(`${STUDIO}/items/${enc(itemId)}/images`, 'POST', input), 'job')
+}
+
+// --- Suggestions ------------------------------------------------------------
+
+/** AI suggestions for a form; a 429 means the member's 50 per minute are used up. */
+export async function suggest<K extends SuggestionRequest['kind']>(
+  input: Extract<SuggestionRequest, { kind: K }>
+): Promise<Extract<SuggestionResponse, { kind: K }>> {
+  return (await request(`${STUDIO}/suggestions`, 'POST', input)) as Extract<SuggestionResponse, { kind: K }>
 }
 
 // --- Variants ---------------------------------------------------------------
