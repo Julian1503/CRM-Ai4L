@@ -23,9 +23,10 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, ValidationInfo, field_validator
 
 from app.config import Settings
+from app.generation.profiles import EMAIL_FIELD_LIMITS
 from app.generation.prompts import DraftContext
 from app.redact import redact
 
@@ -42,8 +43,31 @@ class SocialPostDraft(BaseModel):
     call_to_action: str | None = None
 
 
+def fit_to_limit(text: str, limit: int) -> str:
+    """Trim to ``limit`` chars, ending on a sentence if one ends late enough, else a word."""
+    text = text.strip()
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    sentence_end = max(cut.rfind(mark) for mark in (". ", "! ", "? ", "\n"))
+    if sentence_end >= limit // 2:
+        return cut[: sentence_end + 1].rstrip()
+    words = cut[: limit - 1].rsplit(" ", 1)[0].rstrip(" ,;:-–—")
+    return (words or cut[: limit - 1]) + "…"
+
+
 class EmailDraft(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
+
+    # Models routinely overshoot character limits by a few chars; trim instead of
+    # rejecting the whole draft (and burning every retry on the same overshoot).
+    @field_validator("subject", "preheader", "headline", "intro", "body", "cta_label", mode="before")
+    @classmethod
+    def _fit_to_limit(cls, value: object, info: ValidationInfo) -> object:
+        if not isinstance(value, str) or info.field_name is None:
+            return value
+        name = cls.model_fields[info.field_name].alias or info.field_name
+        return fit_to_limit(value, EMAIL_FIELD_LIMITS[name])
 
     subject: str = Field(min_length=1, max_length=90)
     preheader: str = Field(min_length=1, max_length=120)
