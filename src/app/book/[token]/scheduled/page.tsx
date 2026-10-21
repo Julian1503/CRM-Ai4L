@@ -58,6 +58,10 @@ export default async function ScheduledPage({
   let email = ''
   let bookingId = ''
   let confirmed = false
+  // Past the scheduling step already: a booked or cancelled consultation is not offered
+  // Calendly again — a new appointment would match no booking and the CRM would keep
+  // showing the old state (audit B12).
+  let settledAs: 'booked' | 'cancelled' | null = null
 
   if (isSupabaseConfigured()) {
     try {
@@ -81,6 +85,9 @@ export default async function ScheduledPage({
             // the currency itself, and never moves a booking backwards.
             const outcome = await applyCheckoutPayment(db, { bookingId: booking.id, session })
             confirmed = outcome === 'applied' || outcome === 'already_applied'
+            if (outcome === 'already_applied' && (booking.status === 'booked' || booking.status === 'cancelled')) {
+              settledAs = booking.status
+            }
 
             if (outcome === 'applied') {
               // The confirmation email is queued with the payment; this only sends it
@@ -88,6 +95,7 @@ export default async function ScheduledPage({
               await processNotifications(db, {
                 retrieveCheckout: (id) => stripe.checkout.sessions.retrieve(id),
                 limit: 1,
+                bookingId: booking.id,
               }).catch((emailError) => console.error('Confirmation email left queued:', emailError))
             }
           }
@@ -105,7 +113,7 @@ export default async function ScheduledPage({
   }
 
   const calendlyHref = (() => {
-    if (!confirmed || !schedulingUrl) return null
+    if (!confirmed || settledAs || !schedulingUrl) return null
 
     try {
       const url = new URL(schedulingUrl)
@@ -152,7 +160,18 @@ export default async function ScheduledPage({
           </p>
         )}
 
-        {confirmed && calendlyHref ? (
+        {settledAs ? (
+          <>
+            <h1 className={styles.title}>
+              {settledAs === 'booked' ? 'Your consultation is already booked' : 'This consultation was cancelled'}
+            </h1>
+            <p className={styles.error} role="status">
+              {settledAs === 'booked'
+                ? 'Use the links in your Calendly confirmation email to change the time.'
+                : 'Reply to the email you received and we will arrange another time with you.'}
+            </p>
+          </>
+        ) : confirmed && calendlyHref ? (
           <SchedulingStep calendlyHref={calendlyHref} email={email} />
         ) : (
           <>

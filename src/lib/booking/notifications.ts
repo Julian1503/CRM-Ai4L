@@ -36,17 +36,26 @@ type Rpc = (fn: string, args: Record<string, unknown>) => PromiseLike<{
 
 export async function processNotifications(
   db: SupabaseClient<Database>,
-  options: { retrieveCheckout: RetrieveCheckout | null; limit?: number }
+  options: {
+    retrieveCheckout: RetrieveCheckout | null
+    limit?: number
+    /** Only this booking's email — the payment page sends its own, not the oldest queued. */
+    bookingId?: string
+  }
 ): Promise<NotificationResult> {
   const rpc = db.rpc.bind(db) as unknown as Rpc
-  const { data, error } = await rpc('claim_notifications', { p_limit: options.limit ?? 20 })
+  const { data, error } = options.bookingId
+    ? await rpc('claim_booking_notifications', { p_booking_id: options.bookingId })
+    : await rpc('claim_notifications', { p_limit: options.limit ?? 20 })
   if (error) throw new Error(`Could not claim notifications: ${error.message}`)
 
   const claimed = (data ?? []) as ClaimedNotification[]
   const result: NotificationResult = { claimed: claimed.length, sent: 0, skipped: 0, retried: 0 }
 
   for (const note of claimed) {
-    let status: 'sent' | 'skipped' | 'retry' = 'retry'
+    // 'deferred': nothing was attempted (email or Stripe not configured), so no attempt is
+    // spent — the email stays queued until it is configured, as WEBHOOKS.md promises (B08).
+    let status: 'sent' | 'skipped' | 'retry' | 'deferred' = 'retry'
     let reason: string | null = null
 
     try {
@@ -54,6 +63,7 @@ export async function processNotifications(
         status = 'skipped'
         reason = 'unsupported or incomplete notification'
       } else if (!options.retrieveCheckout) {
+        status = 'deferred'
         reason = 'Stripe is not configured'
       } else {
         const session = await options.retrieveCheckout(note.stripe_session_id)
@@ -62,6 +72,7 @@ export async function processNotifications(
           status = 'sent'
         } else if (sent.reason === 'not_configured') {
           // Email switched off: keep it queued so enabling Resend later still sends it.
+          status = 'deferred'
           reason = 'email is not configured'
         } else {
           status = 'skipped'

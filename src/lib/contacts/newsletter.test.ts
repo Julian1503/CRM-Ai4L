@@ -29,6 +29,7 @@ describe('parseNewsletterEvent', () => {
         lastName: 'Hopper',
         externalId: 'eo-1',
         occurredAt: '2026-08-09T10:15:00Z',
+        crmNewsletterField: null,
       },
     })
   })
@@ -190,6 +191,7 @@ describe('applyNewsletterEvent', () => {
     lastName: 'Hopper',
     externalId: 'eo-1',
     occurredAt: '2026-08-09T10:15:00Z',
+    crmNewsletterField: null,
   }
 
   function dbReturning(...responses: unknown[]) {
@@ -216,6 +218,43 @@ describe('applyNewsletterEvent', () => {
         p_programs: null,
         p_source: 'newsletter_webhook',
       })
+    )
+  })
+
+  it.each(['contact.updated', 'contact.created'])(
+    'ignores a %s "subscribed" echo of a contact the CRM pushed (courses-only stays courses-only)',
+    async (providerType) => {
+      // providerStatus pushes a courses-only contact as SUBSCRIBED; EmailOctopus reports
+      // that API write back with the CRM's own Newsletter field.
+      const parsed = parseNewsletterEvent({
+        id: 'evt-echo',
+        type: providerType,
+        contact_email_address: 'grace@example.com',
+        contact_status: 'SUBSCRIBED',
+        contact_fields: { Newsletter: 'no', Courses: 'yes' },
+      })
+      if (!parsed.ok) throw new Error('expected a parsed event')
+      expect(parsed.event.crmNewsletterField).toBe('no')
+
+      const { db } = dbReturning({ data: { id: 'c1', deleted_at: null }, error: null })
+      const result = await applyNewsletterEvent(db as never, parsed.event)
+
+      expect(result).toMatchObject({ action: 'noop', contactId: 'c1' })
+      expect(db.rpc).not.toHaveBeenCalled()
+    }
+  )
+
+  it('still applies an unsubscribe on a contact the CRM pushed', async () => {
+    const { db } = dbReturning(
+      { data: { id: 'c1', deleted_at: null }, error: null },
+      { data: null, error: null }
+    )
+
+    await applyNewsletterEvent(db as never, { ...event, type: 'unsubscribed', crmNewsletterField: 'yes' })
+
+    expect(db.rpc).toHaveBeenCalledWith(
+      'apply_contact_consent',
+      expect.objectContaining({ p_contact_id: 'c1', p_newsletter: false, p_programs: false })
     )
   })
 

@@ -31,6 +31,12 @@ export type CheckoutParams = {
   email: string
   successUrl: string
   cancelUrl: string
+  /**
+   * The expired session this one replaces. Part of the idempotency key, so a fresh
+   * checkout can be opened after Stripe expired the first (its key would otherwise
+   * replay the dead session); concurrent restarts still share one session.
+   */
+  replacesSessionId?: string
 }
 
 export async function createConsultationCheckout(
@@ -60,7 +66,9 @@ export async function createConsultationCheckout(
     metadata: { booking_id: params.bookingId },
   }, {
     // Concurrent clicks return the same session instead of minting two live checkouts.
-    idempotencyKey: `consultation-booking-${params.bookingId}`,
+    idempotencyKey: params.replacesSessionId
+      ? `consultation-booking-${params.bookingId}-after-${params.replacesSessionId}`
+      : `consultation-booking-${params.bookingId}`,
   })
 
   return { sessionId: session.id, url: session.url }

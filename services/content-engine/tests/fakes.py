@@ -28,6 +28,7 @@ class FakeCrm:
     heartbeat_states: list[str] = field(default_factory=list)
     begin_decision: str = "go"
     complete_accepted: bool = True
+    complete_error: Exception | None = None
     calls: list[tuple[str, Any]] = field(default_factory=list)
     claim_batches: list[list[ClaimedJob]] = field(default_factory=list)
 
@@ -61,6 +62,8 @@ class FakeCrm:
 
     async def complete(self, job_id: str, claim_token: str, result: dict[str, Any]) -> bool:
         self.calls.append(("complete", result))
+        if self.complete_error is not None:
+            raise self.complete_error
         return self.complete_accepted
 
     async def fail(self, job_id: str, claim_token: str, **kwargs: Any) -> bool:

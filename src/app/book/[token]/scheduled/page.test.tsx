@@ -98,6 +98,19 @@ describe('ScheduledPage', () => {
     expect(mockProcessNotifications).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ['booked', /already booked/],
+    ['cancelled', /was cancelled/],
+  ])('does not offer Calendly again for a %s consultation', async (status, heading) => {
+    mockFindBookingByToken.mockResolvedValue({ ...booking, status })
+    mockApplyPayment.mockResolvedValue('already_applied')
+
+    await renderPage('cs_1')
+
+    expect(screen.queryByTitle('Choose a consultation time')).toBeNull()
+    expect(screen.getByRole('heading', { name: heading })).toBeInTheDocument()
+  })
+
   it('does not confirm a checkout the database refuses', async () => {
     mockApplyPayment.mockResolvedValue('mismatch')
 

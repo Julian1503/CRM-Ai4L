@@ -46,6 +46,7 @@ const ALIASES = {
   segtags: 'verify_20261010000000.sql',
   cronruns: 'verify_20261012000000.sql',
   suggestions: 'verify_20261017000000.sql',
+  auditfixes: 'verify_20261021000000.sql',
 }
 
 function fail(message) {

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { Database } from '@/lib/db/types'
+import { CONSENT_STATE_MERGE_FIELDS } from '@/lib/marketing/mergeFields'
 
 /**
  * Automated newsletter intake (scope 3.2).
@@ -30,7 +31,16 @@ export type NewsletterEvent = {
   externalId: string | null
   /** ISO 8601 instant the event occurred. Orders a batch; null when absent. */
   occurredAt: string | null
+  /**
+   * The `Newsletter` field as the event carries it, or null when absent. Only the CRM
+   * writes that field (providerSync), so its presence marks a contact the CRM pushed —
+   * and a "subscribed" status on such a contact is the CRM's own list status echoed
+   * back, not a signup. See applyNewsletterEvent.
+   */
+  crmNewsletterField: string | null
 }
+
+const [NEWSLETTER_FIELD] = CONSENT_STATE_MERGE_FIELDS
 
 export type ParseResult =
   | { ok: true; event: NewsletterEvent }
@@ -127,6 +137,7 @@ export function parseNewsletterEvent(payload: unknown): ParseResult {
       lastName: readString(fields.LastName),
       externalId: readString(body.contact_id) || null,
       occurredAt: readString(body.occurred_at) || null,
+      crmNewsletterField: readString(fields[NEWSLETTER_FIELD]) || null,
     },
   }
 }
@@ -230,6 +241,19 @@ export async function applyNewsletterEvent(
   }
 
   if (active) {
+    // EmailOctopus has one list status for two consents: a contact who keeps courses
+    // but withdrew the newsletter is SUBSCRIBED there (providerStatus), and every write
+    // the CRM makes to them (consent sync, a send's fields) comes back as a
+    // contact.updated/created event saying "subscribed". Read as newsletter consent,
+    // that echo silently re-granted what the person withdrew. So for a contact that
+    // already exists, a "subscribed" event only grants the newsletter when it did not
+    // come from a contact the CRM pushed (no CRM-written Newsletter field) — i.e. a
+    // genuine signup. Withdrawals always apply. A person whose address the CRM already
+    // syncs re-subscribes through the preference page, which records it directly.
+    if (subscribed && event.crmNewsletterField !== null) {
+      return { action: 'noop', contactId: active.id, archivedMatchExists: false }
+    }
+
     // Through the RPC rather than a plain update: it is the only path that can label
     // the resulting ledger entries, and a provider unsubscribe is the single most
     // important thing in that ledger to be able to attribute.

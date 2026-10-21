@@ -189,7 +189,9 @@ begin
 
   set local session_replication_role = replica;   -- place the fixture in 'failed' without replaying a send
   update public.campaigns set status = 'failed', send_run = 1 where id = v_legacy;
-  insert into public.campaign_sends (campaign_id, contact_id, run, status) values (v_legacy, v_contact, 1, 'sent');
+  -- Nobody received run 1 (20261021000000, audit B02: with a sent or uncertain recipient
+  -- the audience can no longer change at all; verify_20261021000000 covers that).
+  insert into public.campaign_sends (campaign_id, contact_id, run, status) values (v_legacy, v_contact, 1, 'failed');
   set local session_replication_role = origin;
 
   update public.campaigns set segment_id = (select id from public.segments where name = 'Seg __snapverify')

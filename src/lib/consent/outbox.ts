@@ -37,6 +37,10 @@ type ClaimedConsentSync = {
   last_name: string | null
   newsletter: boolean
   programs: boolean
+  /** The address before an email change, to retire at the provider (audit B04). */
+  previous_email?: string | null
+  /** Another live contact with consent owns that address now: leave it alone. */
+  previous_email_in_use?: boolean
 }
 
 type Push = (state: ClaimedConsentSync) => Promise<void>
@@ -74,7 +78,23 @@ export async function processConsentOutbox(
   const push: Push =
     options.push ??
     (async (state) => {
-      if (!credentials || !state.email) return
+      if (!credentials) return
+      // An email change: the provider still holds the old address as a subscriber, and
+      // every later push names only the new one, so a withdrawal would never reach it.
+      // Retired first; if that fails the entry is retried whole (audit B04).
+      const previous = state.previous_email?.trim().toLowerCase()
+      if (previous && !state.previous_email_in_use && previous !== state.email?.trim().toLowerCase()) {
+        await syncContactToEmailOctopus(
+          credentials.apiKey,
+          credentials.listId,
+          previous,
+          state.first_name ?? '',
+          state.last_name ?? '',
+          'UNSUBSCRIBED',
+          { fields: providerContactFields({ email: previous, subscribedToNewsletter: false, subscribedToPrograms: false }, null) }
+        )
+      }
+      if (!state.email) return
       const contact = {
         id: state.contact_id,
         email: state.email,

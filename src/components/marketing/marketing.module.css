@@ -533,6 +533,15 @@
   color: var(--text-secondary);
 }
 
+/* Settling one uncertain recipient: wraps under the status on narrow screens. */
+.recipientActions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: 0.5rem;
+}
+
 /* The send ledger, reported under the campaign row it belongs to. Full-width so a
    provider's own error message can be read rather than truncated into the row. */
 .sendReport {

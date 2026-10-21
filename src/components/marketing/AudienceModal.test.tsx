@@ -124,3 +124,29 @@ describe('AudienceModal', () => {
     expect(screen.getByText(/no audience yet/i)).toBeInTheDocument()
   })
 })
+
+describe('settling one uncertain recipient (audit B13)', () => {
+  const withUncertain: Audience = {
+    ...audience,
+    recipients: [
+      { contactId: 'c3', firstName: 'Grace', lastName: 'Hopper', email: 'grace@example.com', status: 'uncertain', sendId: 's3', error: 'timeout' },
+    ],
+  }
+
+  it('labels the unknown outcome and asks again before queueing it', async () => {
+    const onSettleUncertain = jest.fn(async () => undefined)
+    renderModal({ audience: withUncertain, onSettleUncertain })
+
+    expect(screen.getByText(/Unknown — check EmailOctopus/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Not received' }))
+    expect(onSettleUncertain).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Queue again' }))
+    expect(onSettleUncertain).toHaveBeenCalledWith('s3', 'retry')
+  })
+
+  it('offers no row actions without a handler', () => {
+    renderModal({ audience: withUncertain })
+    expect(screen.queryByRole('button', { name: 'Received' })).toBeNull()
+  })
+})

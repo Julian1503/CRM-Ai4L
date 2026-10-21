@@ -182,14 +182,14 @@ describe('archiveContact', () => {
 })
 
 describe('restoreContact', () => {
-  it('clears deleted_at and returns the contact to prospect', async () => {
+  it('clears deleted_at and leaves the status to the database, which restores the archived one', async () => {
     const builder = createQueryBuilderMock({ data: null, error: null })
     const db = createDbMock(builder)
 
     await restoreContact(db as never, 'contact-1')
 
     const update = builder.argsFor('update') as [Record<string, unknown>]
-    expect(update[0]).toMatchObject({ deleted_at: null, status: 'prospect' })
+    expect(update[0]).toEqual({ deleted_at: null })
   })
 
   it('explains the conflict when the email is already live again', async () => {

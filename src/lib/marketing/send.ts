@@ -109,6 +109,23 @@ async function beginDispatch(
   return data === 'go' || data === 'skipped' ? data : 'lost'
 }
 
+/**
+ * Expires a booking minted for an attempt that ended without the provider taking the
+ * email (rate limited, skipped, refused, lost). Nobody received that link; left
+ * `pending`, it would count as an unclaimed invitation in the bookings funnel, one more
+ * per retry (audit B09). Never deleted. A failure here is logged, not thrown: a stray
+ * pending booking is harmless, while halting the chunk would stall the send.
+ */
+async function expireUnsentBooking(db: SupabaseClient<Database>, bookingId: string | null): Promise<void> {
+  if (!bookingId) return
+  const rpc = db.rpc.bind(db) as unknown as (
+    fn: 'expire_unsent_campaign_booking',
+    args: { p_booking_id: string }
+  ) => PromiseLike<{ error: { message: string } | null }>
+  const { error } = await rpc('expire_unsent_campaign_booking', { p_booking_id: bookingId })
+  if (error) console.error(`Could not expire unsent booking ${bookingId}:`, error.message)
+}
+
 export async function claimCampaignSends(
   db: SupabaseClient<Database>,
   campaign: Pick<CampaignRow, 'id' | 'send_run'>,
@@ -198,12 +215,15 @@ export async function executeCampaignSends(
     // Minted per attempt: only the token's hash is stored, so an earlier token cannot be
     // reconstructed on a retry. A superseded booking is harmless and expires.
     const mergeFields: Record<string, string> = { ...contentFields }
+    let bookingId: string | null = null
 
     // Only a booking email mints a booking. An external-link or no-CTA email never
     // creates one and never writes BookingUrl; its template must not reference it.
     if (ctaMode === 'booking' && options.baseUrl) {
       try {
-        const { token } = await createBooking(db, { contactId: row.contact_id, campaignId: campaign.id })
+        const booking = await createBooking(db, { contactId: row.contact_id, campaignId: campaign.id })
+        bookingId = booking.bookingId
+        const token = booking.token
         mergeFields[BOOKING_URL_MERGE_FIELD] = `${options.baseUrl.replace(/\/$/, '')}/book/${token}`
       } catch (bookingError) {
         // An email whose call to action is a dead link is worse than no email.
@@ -218,6 +238,7 @@ export async function executeCampaignSends(
       const fieldOutcome = await provider.setContactFields(row.email, mergeFields)
 
       if (!fieldOutcome.ok) {
+        await expireUnsentBooking(db, bookingId)
         if (fieldOutcome.retryable || fieldOutcome.ambiguous) {
           await defer(row, fieldOutcome.error, fieldOutcome.retryAfterMs)
         } else {
@@ -230,6 +251,7 @@ export async function executeCampaignSends(
     // Eligibility is re-checked here, atomically with recording the attempt: a consent
     // withdrawal that landed after the claim still stops this email (audit H4).
     const go = await beginDispatch(db, row)
+    if (go !== 'go') await expireUnsentBooking(db, bookingId)
     if (go === 'skipped') {
       progress.skipped += 1
       continue
@@ -257,6 +279,10 @@ export async function executeCampaignSends(
       else progress.lost += 1
       continue
     }
+
+    // Known not to have been queued: the link went nowhere. (An ambiguous outcome keeps
+    // its booking — the email may have gone out with it.)
+    await expireUnsentBooking(db, bookingId)
 
     if (outcome.retryable) {
       await defer(row, outcome.error, outcome.retryAfterMs)

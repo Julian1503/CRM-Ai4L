@@ -453,14 +453,20 @@ export async function archiveContact(
   }
 }
 
-/** Restores an archived contact. A removed one is final and is left alone. */
+/**
+ * Restores an archived contact. A removed one is final and is left alone.
+ *
+ * The status is not written: the database restores the one the contact had when it was
+ * archived (`status_before_archive`), so a customer comes back a customer with their
+ * services, rather than as a prospect whose next save unlinks them (audit B03).
+ */
 export async function restoreContact(
   db: SupabaseClient<Database>,
   id: string
 ): Promise<void> {
   const { error } = await db
     .from('contacts')
-    .update({ deleted_at: null, status: 'prospect' })
+    .update({ deleted_at: null })
     .eq('id', id)
     .not('deleted_at', 'is', null)
     .is('removed_at', null)

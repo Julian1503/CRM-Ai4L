@@ -55,11 +55,13 @@ The return page (`/book/[token]/scheduled`, browser-first) and the Stripe webhoo
 - refuses a checkout whose id is not the one the booking recorded, a non-zero amount or a currency other than AUD (`mismatch`; the webhook event becomes `failed_terminal`);
 - answers `not_ready` when the booking has not recorded its checkout yet (the webhook beat the checkout's own write) — the event stays `failed_retryable` and Stripe's retry applies it;
 - marks a `pending`/`checkout_started` booking `paid` (`applied`) and queues one confirmation email in `notification_outbox` with the unique key `booking-paid:<booking id>`;
-- treats the same checkout reported again as success without moving anything (`already_applied`), even for a booking that is already `booked` or `cancelled`.
+- treats the same checkout reported again as success without moving anything (`already_applied`), even for a booking that is already `booked` or `cancelled`. The return page then says the consultation is booked or cancelled instead of offering Calendly again.
+
+A checkout the visitor abandons expires at Stripe after a day. Reopening the booking link (still within its own 30 days) opens a fresh checkout and records its session in place of the expired one; nothing was redeemed. A booking minted for a campaign recipient whose email never left (rate limited, skipped, refused) is `expired`, never deleted.
 
 So browser-first, webhook-first, duplicates, delayed deliveries and both at once all end with one paid booking and one logical email, and a different checkout can never claim the booking.
 
-**Confirmation email.** `notification_outbox` is drained by `processNotifications` (inline after a payment, and by the scheduled worker): claimed under a lease, sent with Resend's idempotency key `booking-paid-<id>`, settled as `sent`, `skipped` (nothing to send) or `retry` with exponential backoff (2^attempts minutes, capped at 6 hours). After eight attempts it is `failed` and visible. If Resend is not configured the email stays queued, so enabling it later still sends it. Email failures never touch the payment.
+**Confirmation email.** `notification_outbox` is drained by `processNotifications` (inline after a payment, and by the scheduled worker): claimed under a lease, sent with Resend's idempotency key `booking-paid-<id>`, settled as `sent`, `skipped` (nothing to send) or `retry` with exponential backoff (2^attempts minutes, capped at 6 hours). After eight attempts it is `failed` and visible. If Resend (or Stripe) is not configured the email is *deferred*: it stays queued for an hour at a time without spending an attempt, so enabling it later still sends it. The payment page sends its own booking's email (`claim_booking_notifications`), not the oldest queued one. Email failures never touch the payment.
 
 ## 4. Calendly (M4)
 

@@ -53,8 +53,32 @@ describe('POST /api/campaigns/[id]/uncertain (H3)', () => {
       p_campaign_id: 'camp-1',
       p_run: 2,
       p_resolution: 'retry',
+      p_send_ids: null,
     })
   })
+
+  it('settles only the named recipients when sendIds is given (audit B13)', async () => {
+    const db = setup()
+    const id = '3f2b6c1e-8a4d-4e7f-9b0a-1c2d3e4f5a6b'
+
+    await post({ resolution: 'sent', sendIds: [id, id] })
+
+    expect(db.rpc).toHaveBeenCalledWith('resolve_uncertain_campaign_sends', {
+      p_campaign_id: 'camp-1',
+      p_run: 2,
+      p_resolution: 'sent',
+      p_send_ids: [id],
+    })
+  })
+
+  it.each([[[]], [['not-a-uuid']], ['3f2b6c1e-8a4d-4e7f-9b0a-1c2d3e4f5a6b']])(
+    'refuses a malformed sendIds (%p)',
+    async (sendIds) => {
+      const db = setup()
+      expect((await post({ resolution: 'sent', sendIds })).status).toBe(400)
+      expect(db.rpc).not.toHaveBeenCalled()
+    }
+  )
 
   it('refuses while the campaign is still sending', async () => {
     setup({ id: 'camp-1', status: 'sending', send_run: 1, removed_at: null })

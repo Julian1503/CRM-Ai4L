@@ -292,6 +292,25 @@ describe('runDueSchedules — drafting a claimed occurrence', () => {
     expect(rpcCalls(db, 'complete_newsletter_occurrence')).toHaveLength(1)
   })
 
+  it('never rewrites a draft that already has copy (a "Generate now" issue for the same date)', async () => {
+    const { db, tables } = setup({
+      campaigns: [
+        { data: null, error: { code: '23505', message: 'duplicate key' } },
+        {
+          data: { id: 'camp-1', name: 'x', status: 'draft', merge_fields: { Headline: 'Written by hand' } },
+          error: null,
+        },
+      ],
+    })
+
+    const [report] = await run(db)
+
+    expect(report).toMatchObject({ status: 'skipped', reason: 'already_drafted', campaignId: 'camp-1' })
+    expect(mockGenerate).not.toHaveBeenCalled()
+    expect(tables.campaigns.argsFor('update')).toBeUndefined()
+    expect(rpcCalls(db, 'complete_newsletter_occurrence')).toHaveLength(1)
+  })
+
   it('records an occurrence whose campaign is already past draft as drafted, without redoing it', async () => {
     const { db } = setup({
       campaigns: [

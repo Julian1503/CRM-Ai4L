@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import Pagination from '@/components/ui/Pagination'
 import Portal from '@/components/ui/Portal'
@@ -21,9 +21,13 @@ export type Recipient = {
   firstName: string
   lastName: string
   email: string
-  status: 'planned' | 'pending' | 'sent' | 'failed' | 'skipped'
+  status: 'planned' | 'pending' | 'processing' | 'sent' | 'failed' | 'skipped' | 'uncertain'
+  /** The ledger row; null for a planned recipient. */
+  sendId?: string | null
   error: string | null
 }
+
+export type UncertainResolution = 'sent' | 'retry'
 
 export type Audience = {
   /** `ledger` is who was written to; `segment` is who would be, if sent now. */
@@ -40,9 +44,11 @@ export type Audience = {
 const STATUS_LABELS: Record<Recipient['status'], string> = {
   planned: 'Will receive',
   pending: 'Queued',
+  processing: 'Sending',
   sent: 'Sent',
   failed: 'Failed',
   skipped: 'Skipped',
+  uncertain: 'Unknown — check EmailOctopus',
 }
 
 const numberFormat = new Intl.NumberFormat('en-AU')
@@ -57,6 +63,7 @@ export default function AudienceModal({
   onPageChange,
   onPageSizeChange,
   onClose,
+  onSettleUncertain,
 }: {
   campaignName: string
   audience: Audience | null
@@ -67,7 +74,27 @@ export default function AudienceModal({
   onPageChange: (page: number) => void
   onPageSizeChange: (pageSize: number) => void
   onClose: () => void
+  /**
+   * Settles one uncertain recipient after the operator checked EmailOctopus (audit B13).
+   * Resolves once settled; the caller reloads the list. Omitted: no row actions.
+   */
+  onSettleUncertain?: (sendId: string, resolution: UncertainResolution) => Promise<void>
 }) {
+  // A requeue can email someone twice, so it is never one click: the row asks again.
+  const [confirming, setConfirming] = useState<{ sendId: string; resolution: UncertainResolution } | null>(null)
+  const [settling, setSettling] = useState<string | null>(null)
+
+  const settle = async (sendId: string, resolution: UncertainResolution) => {
+    if (!onSettleUncertain) return
+    setSettling(sendId)
+    try {
+      await onSettleUncertain(sendId, resolution)
+      setConfirming(null)
+    } finally {
+      setSettling(null)
+    }
+  }
+
   const closeRef = useRef<HTMLButtonElement>(null)
   const dialogRef = useRef<HTMLDivElement>(null)
 
@@ -180,7 +207,7 @@ export default function AudienceModal({
                 </tr>
               </thead>
               <tbody>
-                {audience?.recipients.map((recipient) => (
+                {audience?.recipients?.map((recipient) => (
                   <tr key={recipient.contactId}>
                     <td>{recipient.firstName}</td>
                     <td>{recipient.lastName}</td>
@@ -198,10 +225,20 @@ export default function AudienceModal({
                       {recipient.error && (
                         <span className={styles.recipientError}> — {recipient.error}</span>
                       )}
+                      {recipient.status === 'uncertain' && recipient.sendId && onSettleUncertain && (
+                        <UncertainActions
+                          sendId={recipient.sendId}
+                          confirming={confirming?.sendId === recipient.sendId ? confirming.resolution : null}
+                          busy={settling !== null}
+                          onAsk={(resolution) => setConfirming({ sendId: recipient.sendId as string, resolution })}
+                          onCancel={() => setConfirming(null)}
+                          onConfirm={(resolution) => void settle(recipient.sendId as string, resolution)}
+                        />
+                      )}
                     </td>
                   </tr>
                 ))}
-                {!loading && audience?.recipients.length === 0 && (
+                {!loading && audience?.recipients?.length === 0 && (
                   <tr>
                     <td colSpan={4} className={styles.empty}>
                       This campaign has no audience yet. Point it at a segment first.
@@ -223,7 +260,7 @@ export default function AudienceModal({
             page={page}
             pageSize={pageSize}
             total={audience?.total ?? 0}
-            shown={audience?.recipients.length}
+            shown={audience?.recipients?.length}
             isLoading={loading}
             onPageChange={onPageChange}
             onPageSizeChange={onPageSizeChange}
@@ -233,5 +270,49 @@ export default function AudienceModal({
         </div>
       </div>
     </Portal>
+  )
+}
+
+/** Per-recipient settlement of an unknown provider outcome, with an explicit second step. */
+function UncertainActions({
+  sendId,
+  confirming,
+  busy,
+  onAsk,
+  onCancel,
+  onConfirm,
+}: {
+  sendId: string
+  confirming: UncertainResolution | null
+  busy: boolean
+  onAsk: (resolution: UncertainResolution) => void
+  onCancel: () => void
+  onConfirm: (resolution: UncertainResolution) => void
+}) {
+  if (confirming) {
+    return (
+      <span className={styles.recipientActions} data-testid={`uncertain-confirm-${sendId}`}>
+        {confirming === 'sent'
+          ? ' Record as received?'
+          : ' Queue again? Only if EmailOctopus shows it was NOT queued.'}
+        <button type="button" className={styles.secondaryBtn} disabled={busy} onClick={() => onConfirm(confirming)}>
+          {confirming === 'sent' ? 'Record as received' : 'Queue again'}
+        </button>
+        <button type="button" className={styles.secondaryBtn} disabled={busy} onClick={onCancel}>
+          Cancel
+        </button>
+      </span>
+    )
+  }
+
+  return (
+    <span className={styles.recipientActions} data-testid={`uncertain-actions-${sendId}`}>
+      <button type="button" className={styles.secondaryBtn} disabled={busy} onClick={() => onAsk('sent')}>
+        Received
+      </button>
+      <button type="button" className={styles.secondaryBtn} disabled={busy} onClick={() => onAsk('retry')}>
+        Not received
+      </button>
+    </span>
   )
 }

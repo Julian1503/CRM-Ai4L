@@ -11,7 +11,9 @@ const NOTE = { id: 'n1', claim_token: 't1', kind: 'booking_paid_confirmation', b
 function db(claimed: unknown[], complete: { error: { message: string } | null } = { error: null }) {
   const mock = createDbMock(createQueryBuilderMock())
   mock.rpc.mockImplementation(async (fn: string) =>
-    fn === 'claim_notifications' ? { data: claimed, error: null } : { data: true, error: complete.error }
+    fn === 'claim_notifications' || fn === 'claim_booking_notifications'
+      ? { data: claimed, error: null }
+      : { data: true, error: complete.error }
   )
   return mock
 }
@@ -38,6 +40,16 @@ describe('processNotifications', () => {
     expect(settled(mock)).toEqual([{ p_id: 'n1', p_token: 't1', p_status: 'sent', p_error: null }])
   })
 
+  it('claims only its own booking email when given one (audit B08)', async () => {
+    mockSend.mockResolvedValue({ status: 'sent', emailId: 'e1' })
+    const mock = db([NOTE])
+
+    await processNotifications(mock as never, { retrieveCheckout, limit: 1, bookingId: 'b1' })
+
+    expect(mock.rpc).toHaveBeenCalledWith('claim_booking_notifications', { p_booking_id: 'b1' })
+    expect(mock.rpc).not.toHaveBeenCalledWith('claim_notifications', expect.anything())
+  })
+
   it('claims 20 by default', async () => {
     const mock = db([])
     await expect(processNotifications(mock as never, { retrieveCheckout })).resolves.toEqual({ claimed: 0, sent: 0, skipped: 0, retried: 0 })
@@ -53,10 +65,10 @@ describe('processNotifications', () => {
     await processNotifications(noStripe as never, { retrieveCheckout: null })
 
     expect(settled(mock).map((args) => [args.p_status, args.p_error])).toEqual([
-      ['retry', 'email is not configured'],
-      ['retry', 'email is not configured'],
+      ['deferred', 'email is not configured'],
+      ['deferred', 'email is not configured'],
     ])
-    expect(settled(noStripe)[0]).toMatchObject({ p_status: 'retry', p_error: 'Stripe is not configured' })
+    expect(settled(noStripe)[0]).toMatchObject({ p_status: 'deferred', p_error: 'Stripe is not configured' })
   })
 
   it('skips a send that should not happen, and an unsupported or incomplete row', async () => {

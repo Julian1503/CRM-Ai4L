@@ -42,8 +42,12 @@ HANDLERS: dict[str, Handler] = {
 REPORT_ATTEMPTS = 4
 
 
-async def _report(call: Callable[[], Awaitable[bool]], what: str, job_id: str) -> None:
-    """complete/fail must land: retry transient CRM failures while the lease lives."""
+async def _report(call: Callable[[], Awaitable[bool]], what: str, job_id: str) -> CrmError | None:
+    """complete/fail must land: retry transient CRM failures while the lease lives.
+
+    Returns the CRM's refusal when it rejected the report outright (a 4xx): the caller
+    decides what that means. None when it landed, or could not be delivered at all.
+    """
     delay = 1.0
     for attempt in range(1, REPORT_ATTEMPTS + 1):
         try:
@@ -51,13 +55,14 @@ async def _report(call: Callable[[], Awaitable[bool]], what: str, job_id: str) -
         except CrmError as exc:
             if not exc.retryable or attempt == REPORT_ATTEMPTS:
                 logger.error("Job %s: %s could not be reported: %s", job_id, what, exc)
-                return
+                return None if exc.retryable else exc
             await asyncio.sleep(delay)
             delay *= 2
             continue
         if not accepted:
             logger.warning("Job %s: %s refused (lease lost); result discarded by the CRM", job_id, what)
-        return
+        return None
+    return None
 
 
 class JobRunner:
@@ -104,7 +109,22 @@ class JobRunner:
                 ),
             )
             return
-        await _report(lambda: self._crm.complete(job.job_id, job.claim_token, result), "complete", job.job_id)
+        rejected = await _report(
+            lambda: self._crm.complete(job.job_id, job.claim_token, result), "complete", job.job_id
+        )
+        if rejected is not None:
+            # The CRM refused the result itself (e.g. it no longer fits the content). Said
+            # out loud while the lease still holds, instead of letting the lease expire
+            # into a misleading "uncertain". A publication refused at this point did go
+            # out, so it stays uncertain for a person; anything else failed.
+            await self._fail(
+                job,
+                JobFailure(
+                    "uncertain" if job.kind == "publish_social" else "failed",
+                    "complete_rejected",
+                    f"The CRM refused the result: {rejected}",
+                ),
+            )
 
     async def _fail(self, job: ClaimedJob, failure: JobFailure) -> None:
         async def call() -> bool:

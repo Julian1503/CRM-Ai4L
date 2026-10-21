@@ -7,11 +7,12 @@ import asyncio
 import pytest
 
 from app.contracts import IngestAssetReady, PublishSocialResult
+from app.crm_client import CrmError
 from app.jobs.session import JobSession
 from app.social.publishers.base import DispatchRejected, DispatchUncertain
 from app.worker import JobRunner, Worker
 from tests.conftest import load_fixture, make_settings
-from tests.fakes import FakeCrm, FakePublisher, claimed, make_deps
+from tests.fakes import FakeCrm, FakePublisher, claimed, generate_text_context, make_deps
 
 PUBLISH_INPUT = {"publicationId": "55555555-5555-4555-8555-555555555555"}
 
@@ -173,3 +174,28 @@ async def test_worker_claims_only_free_slots() -> None:
     assert [data["limit"] for name, data in crm.calls if name == "claim"] == [3, 2]
     gate.set()
     await worker.drain()
+
+
+async def test_a_generation_result_the_crm_refuses_is_reported_failed_not_left_to_expire() -> None:
+    # audit B06: a 4xx on complete used to be logged and dropped; the lease then expired
+    # after begin-dispatch and the job surfaced as "uncertain" for a person to chase.
+    context = generate_text_context()
+    crm = FakeCrm(context, complete_error=CrmError("CRM complete refused (HTTP 422)", status=422, retryable=False))
+
+    await _run(crm, claimed("generate_text", context["input"]), make_deps())
+
+    protocol = [op for op in crm.ops() if op != "heartbeat"]
+    assert protocol[-2:] == ["complete", "fail"]
+    assert crm.payload("fail")["outcome"] == "failed"
+    assert crm.payload("fail")["error_code"] == "complete_rejected"
+
+
+async def test_a_publication_result_the_crm_refuses_stays_uncertain() -> None:
+    crm = FakeCrm(
+        load_fixture("context-publish-social.json"),
+        complete_error=CrmError("CRM complete refused (HTTP 422)", status=422, retryable=False),
+    )
+
+    await _run(crm, claimed("publish_social", PUBLISH_INPUT), make_deps())
+
+    assert crm.payload("fail")["outcome"] == "uncertain"

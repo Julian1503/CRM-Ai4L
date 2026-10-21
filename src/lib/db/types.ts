@@ -344,6 +344,8 @@ export type ConsentSyncOutboxRow = {
   contact_id: string
   consent_version: number
   source: string | null
+  /** The address before an email change; the worker unsubscribes it (audit B04). */
+  previous_email?: string | null
   status: 'pending' | 'processing' | 'done' | 'superseded' | 'failed'
   attempts: number
   next_attempt_at: string
@@ -398,6 +400,8 @@ export type ContactRow = {
   source: string | null
   /** Moves on every consent or email change; drives the consent outbox (H5). */
   consent_version: number
+  /** The status held when archived; a restore returns to it. Null while live (audit B03). */
+  status_before_archive?: ContactStatus | null
   /**
    * Moves on every change to the row, including tag changes; editors send it back (H8).
    * Always present in the database; optional here so fixtures predating it still type-check.
@@ -718,7 +722,7 @@ export interface Database {
         Returns: boolean
       }
       resolve_uncertain_campaign_sends: {
-        Args: { p_campaign_id: string; p_run: number; p_resolution: 'sent' | 'retry' }
+        Args: { p_campaign_id: string; p_run: number; p_resolution: 'sent' | 'retry'; p_send_ids?: string[] | null }
         Returns: number
       }
       campaign_send_summaries: {

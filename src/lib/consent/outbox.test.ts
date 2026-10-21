@@ -61,6 +61,28 @@ describe('processConsentOutbox', () => {
     })
   })
 
+  it('retires the previous address after an email change, then pushes the current one', async () => {
+    const client = db([claimed({ newsletter: true, previous_email: 'Ada@OldJob.com', previous_email_in_use: false })])
+
+    await processConsentOutbox(client as never, { credentials, origin: null })
+
+    expect(mockSync).toHaveBeenNthCalledWith(1, 'k', 'l', 'ada@oldjob.com', 'Ada', 'L', 'UNSUBSCRIBED', {
+      fields: { Newsletter: 'no', Courses: 'no' },
+    })
+    expect(mockSync).toHaveBeenNthCalledWith(2, 'k', 'l', 'ada@example.com', 'Ada', 'L', 'SUBSCRIBED', {
+      fields: { Newsletter: 'yes', Courses: 'no' },
+    })
+  })
+
+  it('leaves a previous address alone when another live contact now uses it', async () => {
+    const client = db([claimed({ previous_email: 'shared@example.com', previous_email_in_use: true })])
+
+    await processConsentOutbox(client as never, { credentials, origin: null })
+
+    expect(mockSync).toHaveBeenCalledTimes(1)
+    expect(mockSync.mock.calls[0][2]).toBe('ada@example.com')
+  })
+
   it('settles the entry with the version it pushed, so older entries are covered', async () => {
     const client = db([claimed({ state_version: 9 })])
 

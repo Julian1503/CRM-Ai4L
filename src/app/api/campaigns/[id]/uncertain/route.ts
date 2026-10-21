@@ -21,11 +21,18 @@ type RouteContext = { params: Promise<{ id: string }> }
  * A timeout or a 5xx on the EmailOctopus queue call, or a worker that died mid-call,
  * leaves a recipient `uncertain`. Nothing retries those automatically — the email may
  * already be in their inbox. After checking the automation's activity in EmailOctopus,
- * an operator settles them all one way:
+ * an operator settles them:
  *
  *   { resolution: 'sent' }   they did receive it
  *   { resolution: 'retry' }  they did not; queue them again (sent on the next retry)
+ *
+ * With `sendIds`, only those recipients are settled, so a run whose uncertain recipients
+ * turned out differently can be recorded truthfully, one by one (audit B13). Without it,
+ * every uncertain recipient of the current run.
  */
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const MAX_SEND_IDS = 1000
 export async function POST(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
   const guard = await requireSessionOr401()
   if ('response' in guard) return guard.response
@@ -36,6 +43,20 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
 
   if (resolution !== 'sent' && resolution !== 'retry') {
     return badRequest('resolution must be "sent" or "retry".')
+  }
+
+  const rawIds = body?.sendIds
+  let sendIds: string[] | null = null
+  if (rawIds !== undefined) {
+    if (
+      !Array.isArray(rawIds) ||
+      rawIds.length === 0 ||
+      rawIds.length > MAX_SEND_IDS ||
+      !rawIds.every((value) => typeof value === 'string' && UUID.test(value))
+    ) {
+      return badRequest(`sendIds must be a list of 1 to ${MAX_SEND_IDS} recipient ids.`)
+    }
+    sendIds = [...new Set(rawIds as string[])]
   }
 
   try {
@@ -56,6 +77,7 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
       p_campaign_id: id,
       p_run: campaign.send_run,
       p_resolution: resolution,
+      p_send_ids: sendIds,
     })
     if (error) throw new Error(error.message)
 

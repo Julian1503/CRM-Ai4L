@@ -135,6 +135,35 @@ export async function markCheckoutStarted(
   }
 }
 
+/**
+ * Points a started booking at a fresh checkout after Stripe expired its first one.
+ *
+ * Nothing was redeemed — an expired checkout can never complete — so the link the lead
+ * holds stays usable for its remaining life (audit B11). Conditioned on the session it
+ * replaces: a concurrent restart, or the original completing, leaves this a no-op.
+ * Returns whether this call recorded the new session.
+ */
+export async function replaceExpiredCheckout(
+  db: SupabaseClient<Database>,
+  bookingId: string,
+  expiredSessionId: string,
+  sessionId: string
+): Promise<boolean> {
+  const { data, error } = await db
+    .from('bookings')
+    .update({ stripe_session_id: sessionId, updated_at: new Date().toISOString() })
+    .eq('id', bookingId)
+    .eq('status', 'checkout_started')
+    .eq('stripe_session_id', expiredSessionId)
+    .select('id')
+
+  if (error) {
+    throw new Error(`Could not restart checkout: ${error.message}`)
+  }
+
+  return (data ?? []).length > 0
+}
+
 // Payment and Calendly updates live in the database now — apply_checkout_payment() and
 // apply_calendly_event() in 20261005000000 — so each commits atomically with its webhook
 // completion. See src/lib/booking/payment.ts and src/lib/booking/calendly.ts.

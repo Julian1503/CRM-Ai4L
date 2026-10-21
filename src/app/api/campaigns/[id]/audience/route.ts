@@ -16,11 +16,14 @@ type Recipient = {
   lastName: string
   email: string
   /** `planned` for an audience that has not been sent to yet. */
-  status: 'planned' | 'pending' | 'sent' | 'failed' | 'skipped'
+  status: 'planned' | 'pending' | 'processing' | 'sent' | 'failed' | 'skipped' | 'uncertain'
+  /** The ledger row, so an uncertain recipient can be settled on its own. Null when planned. */
+  sendId: string | null
   error: string | null
 }
 
 type LedgerRow = {
+  id: string
   contact_id: string
   status: Recipient['status']
   error: string | null
@@ -80,7 +83,7 @@ export async function GET(
       count,
     } = await db
       .from('campaign_sends')
-      .select('contact_id, status, error, contact:contacts(id, email, first_name, last_name)', {
+      .select('id, contact_id, status, error, contact:contacts(id, email, first_name, last_name)', {
         count: 'exact',
       })
       .eq('campaign_id', campaign.id)
@@ -101,6 +104,7 @@ export async function GET(
         // and the history must not disappear with the record.
         email: row.contact?.email ?? 'Contact removed',
         status: row.status,
+        sendId: row.id,
         error: row.error,
       }))
 
@@ -144,6 +148,7 @@ export async function GET(
         lastName: member.last_name,
         email: member.email,
         status: 'planned' as const,
+        sendId: null,
         error: null,
       })),
       ...buildPageMeta(pageParams, page.total),

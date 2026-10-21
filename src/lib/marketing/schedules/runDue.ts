@@ -243,7 +243,11 @@ async function draftIssue(
   }
 
   const existing = await findOccurrenceCampaign(deps.db, schedule.id, scheduledFor)
-  if (resumeExisting && existing?.status === 'draft') {
+  // Only a draft with no copy is resumed. "Generate now" dates its draft today, which
+  // can be this occurrence's date; the operator may have rewritten that copy by hand,
+  // and regenerating would replace their text without a trace. A draft with copy is
+  // left exactly as it is and recorded as this occurrence's issue.
+  if (resumeExisting && existing?.status === 'draft' && !hasCopy(existing.merge_fields)) {
     return { kind: 'done', report: await writeAndSubmit(deps, schedule, existing, scheduledFor) }
   }
   return {
@@ -252,7 +256,11 @@ async function draftIssue(
   }
 }
 
-type ExistingCampaign = { id: string; name: string; status: string }
+type ExistingCampaign = { id: string; name: string; status: string; merge_fields?: Record<string, string> | null }
+
+function hasCopy(fields: ExistingCampaign['merge_fields']): boolean {
+  return Object.values(fields ?? {}).some((value) => typeof value === 'string' && value.trim() !== '')
+}
 
 async function findOccurrenceCampaign(
   db: Db,
@@ -261,7 +269,7 @@ async function findOccurrenceCampaign(
 ): Promise<ExistingCampaign | null> {
   const { data, error } = await db
     .from('campaigns')
-    .select('id, name, status')
+    .select('id, name, status, merge_fields')
     .eq('schedule_id', scheduleId)
     .eq('scheduled_for', scheduledFor)
     .maybeSingle()

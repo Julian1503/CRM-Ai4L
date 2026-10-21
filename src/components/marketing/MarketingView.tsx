@@ -9,7 +9,7 @@ import LifecycleActions from '@/components/ui/LifecycleActions'
 import Pagination from '@/components/ui/Pagination'
 import { campaignLifecycle } from '@/lib/lifecycle/entityLifecycle'
 
-import AudienceModal, { type Audience } from './AudienceModal'
+import AudienceModal, { type Audience, type UncertainResolution } from './AudienceModal'
 import AutomationConnectionField, {
   type AutomationStatus,
   type TemplateOption,
@@ -269,6 +269,8 @@ export default function MarketingView({ jobTypes, initialCampaignId }: Marketing
   // The campaign whose recipient list is open, and that list.
   const [audienceFor, setAudienceFor] = useState<Campaign | null>(null)
   const [audience, setAudience] = useState<Audience | null>(null)
+  // Bumped to re-read the open recipient list after one of its rows was settled.
+  const [audienceReload, setAudienceReload] = useState(0)
   const [audienceLoading, setAudienceLoading] = useState(false)
   const [audienceError, setAudienceError] = useState<string | null>(null)
   const [audiencePage, setAudiencePage] = useState(1)
@@ -508,7 +510,7 @@ export default function MarketingView({ jobTypes, initialCampaignId }: Marketing
     return () => {
       cancelled = true
     }
-  }, [audienceFor, audiencePage, audiencePageSize])
+  }, [audienceFor, audiencePage, audiencePageSize, audienceReload])
 
   const openAudience = (campaign: Campaign) => {
     // Cleared rather than kept: showing the previous campaign's recipients under this
@@ -711,6 +713,31 @@ export default function MarketingView({ jobTypes, initialCampaignId }: Marketing
       setError(reconcileError instanceof Error ? reconcileError.message : 'Could not settle the recipients.')
     } finally {
       setBusy(null)
+    }
+  }
+
+  /**
+   * Settles ONE uncertain recipient from the recipient list (audit B13): EmailOctopus may
+   * show that some of a run's uncertain recipients got the email and others did not.
+   * Errors are thrown back to the list, which keeps the row as it was.
+   */
+  const settleRecipient = async (campaign: Campaign, sendId: string, resolution: UncertainResolution) => {
+    setAudienceError(null)
+    try {
+      const response = await fetch(`/api/campaigns/${campaign.id}/uncertain`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resolution, sendIds: [sendId] }),
+      })
+      if (!response.ok) throw new Error(await readError(response))
+      await loadSendReports([campaign])
+      setAudienceReload((value) => value + 1)
+      notify({
+        tone: 'success',
+        message: resolution === 'sent' ? 'Recorded as received.' : 'Queued again. Resume the send to deliver it.',
+      })
+    } catch (settleError) {
+      setAudienceError(settleError instanceof Error ? settleError.message : 'Could not settle the recipient.')
     }
   }
 
@@ -1264,6 +1291,7 @@ export default function MarketingView({ jobTypes, initialCampaignId }: Marketing
             setAudiencePage(1)
           }}
           onClose={() => setAudienceFor(null)}
+          onSettleUncertain={(sendId, resolution) => settleRecipient(audienceFor, sendId, resolution)}
         />
       )}
 

@@ -62,5 +62,6 @@ No borrar tablas, snapshots ni objetos de `content-public`: emails ya enviados s
 - La generación desde catálogo, el calendario, la analítica y la bandeja de comentarios/DM no forman parte de esta entrega.
 - Exportar o crear un email copia su imagen a `content-public` en ese momento (el HTML necesita una URL pública estable), antes de que la campaña se apruebe. La URL no es adivinable ni listable, pero no debe usarse una imagen confidencial en un email.
 - El checksum que informa el worker al terminar la ingesta no se vuelve a calcular sobre los bytes guardados. La ruta de destino la fija el CRM y solo el titular del lease recibe URLs de subida.
-- La biblioteca muestra solo imágenes activas; las archivadas siguen en Storage y en las revisiones que las usan.
+- La biblioteca muestra solo imágenes activas; las archivadas siguen en Storage y en las revisiones que las usan. Al regenerar una variante, las imágenes archivadas desde entonces se quitan de la nueva revisión (auditoría 2026-10-21, B06).
+- Archivar un contenido (item) retira su aprobación: no se pueden pedir publicaciones nuevas y las que estaban en cola se cancelan en begin-dispatch con el motivo `item_archived` (B05).
 - Antes de generar contenido real, un admin debe completar el perfil de marca (Settings → Brand profile): sin `allowedLinkOrigins`, todo enlace generado queda bloqueado hasta que una persona lo edite.

@@ -24,12 +24,15 @@ longer stalls a campaign. Both are safe at once.
    consent stream; the audience count is checked and returned at approval. The recipient
    snapshot is materialised once per run at the first dispatch step, and after that only
    eligibility removals apply. Changing the segment or stream of a failed campaign starts a
-   new run. *Not implemented:* showing the exact recipient list before approval — the count
+   new run — but only while nobody has received it: once any recipient is `sent` or
+   `uncertain`, the audience is locked (CRM03), because the new run would email them again
+   (audit 2026-10-21, B02). Retry the failed recipients, or create a new campaign. *Not implemented:* showing the exact recipient list before approval — the count
    is shown; the list is available through "Recipients".
 2. **Provider uncertainty (14.3).** EmailOctopus's queue endpoint has no idempotency key
    (checked against its v2 API reference; re-verify at release). Unknown outcomes become
    `uncertain`; an operator checks the automation's activity in EmailOctopus and settles them
-   from the send report ("They received it" / "They did not, queue again").
+   from the send report ("They received it" / "They did not, queue again"), or one by one
+   from the Recipients list when their outcomes differ (`sendIds`, B13).
 3. **Accepted ≠ delivered.** "Sent" means EmailOctopus accepted the queue request.
 4. **Withdrawal after acceptance.** A withdrawal that lands after EmailOctopus accepted a
    send cannot recall that email. The preference page says so.

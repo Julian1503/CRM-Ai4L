@@ -148,6 +148,29 @@ describe('POST /api/booking/create-session', () => {
     expect(body.url).toBe('https://crm.example.com/book/tok-1/scheduled?session=cs_1')
   })
 
+  it('opens a fresh checkout when Stripe expired the first, instead of killing the link', async () => {
+    const { bookings } = setupDb({
+      ...validBooking,
+      consumed_at: new Date().toISOString(),
+      status: 'checkout_started',
+      stripe_session_id: 'cs_1',
+    })
+    mockSessionRetrieve.mockResolvedValue({ id: 'cs_1', status: 'expired', url: null })
+    mockSessionCreate.mockResolvedValue({ id: 'cs_2', url: 'https://checkout.stripe.com/cs_2' })
+
+    const response = await POST(request())
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({ url: 'https://checkout.stripe.com/cs_2' })
+    // A new idempotency key: the original one would replay the expired session.
+    expect(mockSessionCreate).toHaveBeenCalledWith(expect.anything(), {
+      idempotencyKey: 'consultation-booking-b1-after-cs_1',
+    })
+    // Swapped only if the booking still holds the session it replaces.
+    expect(bookings.argsFor('update')).toEqual([expect.objectContaining({ stripe_session_id: 'cs_2' })])
+    expect(bookings.allFor('eq').map((call) => call.args)).toContainEqual(['stripe_session_id', 'cs_1'])
+  })
+
   it('rejects a cancelled booking', async () => {
     setupDb({ ...validBooking, status: 'cancelled' })
 

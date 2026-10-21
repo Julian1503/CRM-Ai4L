@@ -25,6 +25,7 @@ function ledger(
 ) {
   const outcomes: Array<{ id: string; status: string; reference?: unknown; error?: unknown }> = []
   const begun: string[] = []
+  const expired: string[] = []
   const rows: ClaimedCampaignSend[] = claims.map((row, index) => ({
     send_id: `s${index + 1}`,
     contact_id: `c${index + 1}`,
@@ -59,10 +60,14 @@ function ledger(
         ? { data: null, error: { message: options.bookingError } }
         : { data: 'booking-1', error: null }
     }
+    if (fn === 'expire_unsent_campaign_booking') {
+      expired.push(args.p_booking_id as string)
+      return { data: true, error: null }
+    }
     throw new Error(`unexpected rpc ${fn}`)
   })
 
-  return { db: { rpc } as never, rpc, outcomes, begun }
+  return { db: { rpc } as never, rpc, outcomes, begun, expired }
 }
 
 function provider(trigger: SendOutcome | ((email: string) => SendOutcome) = { ok: true, reference: 'ref' }) {
@@ -286,6 +291,55 @@ describe('executeCampaignSends', () => {
       expect(begun).toEqual([])
       expect(triggerSend).not.toHaveBeenCalled()
       expect(outcomes[0].status).toBe('pending')
+    })
+
+    describe('a booking whose email never left (audit B09)', () => {
+      const options = () => ({ bucket: fastBucket(), baseUrl: 'https://crm.example.com' })
+
+      it('is expired when the field write is rate limited', async () => {
+        const { db, expired } = ledger([{}])
+        const { fake, setContactFields } = provider()
+        setContactFields.mockResolvedValueOnce({ ok: false, retryable: true, error: 'slow down' })
+
+        await executeCampaignSends(db, fake, campaign, options())
+
+        expect(expired).toEqual(['booking-1'])
+      })
+
+      it.each(['skipped', 'lost'] as const)('is expired when dispatch answers %s', async (answer) => {
+        const { db, expired } = ledger([{}], { begin: () => answer })
+        const { fake, triggerSend } = provider()
+
+        await executeCampaignSends(db, fake, campaign, options())
+
+        expect(triggerSend).not.toHaveBeenCalled()
+        expect(expired).toEqual(['booking-1'])
+      })
+
+      it('is expired when the provider refuses or rate limits the queue call', async () => {
+        const { db, expired } = ledger([{}, {}])
+        const { fake } = provider((email) =>
+          email.startsWith('c1')
+            ? { ok: false, retryable: false, error: '422' }
+            : { ok: false, retryable: true, error: '429' }
+        )
+
+        await executeCampaignSends(db, fake, campaign, options())
+
+        expect(expired).toEqual(['booking-1', 'booking-1'])
+      })
+
+      it.each([
+        ['sent', { ok: true, reference: 'r' }],
+        ['uncertain', { ok: false, retryable: false, ambiguous: true, error: 'timeout' }],
+      ] as const)('is kept when the outcome is %s — the email may carry it', async (_label, outcome) => {
+        const { db, expired } = ledger([{}])
+        const { fake } = provider(outcome as SendOutcome)
+
+        await executeCampaignSends(db, fake, campaign, options())
+
+        expect(expired).toEqual([])
+      })
     })
   })
   describe('call-to-action modes (Content Studio emails)', () => {

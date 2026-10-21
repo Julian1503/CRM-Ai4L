@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 
 import { NextResponse, type NextRequest } from 'next/server'
 
-import { findBookingByToken, markCheckoutStarted } from '@/lib/booking/repository'
+import { findBookingByToken, markCheckoutStarted, replaceExpiredCheckout } from '@/lib/booking/repository'
 import { isBookingUsable } from '@/lib/booking/token'
 import { createConsultationCheckout } from '@/lib/stripe/checkout'
 import { getStripeClient, getStripeConfig } from '@/lib/stripe/client'
@@ -96,6 +96,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           { url: `${origin}/book/${token}/scheduled?session=${existing.id}`, resumed: true },
           { headers: NO_STORE }
         )
+      }
+
+      // Stripe expires an unfinished checkout after a day. The lead never redeemed the
+      // offer, so the link (still within its own expiry, checked above) opens a fresh
+      // checkout rather than dead-ending for the rest of its life (audit B11).
+      if (existing.status === 'expired') {
+        const replacement = await createConsultationCheckout(stripe, {
+          priceId: stripeConfig.priceId,
+          couponId: stripeConfig.couponId,
+          bookingId: booking.id,
+          email: booking.contact.email,
+          successUrl: `${origin}/book/${token}/scheduled?session={CHECKOUT_SESSION_ID}`,
+          cancelUrl: `${origin}/book/${token}`,
+          replacesSessionId: existing.id,
+        })
+        await replaceExpiredCheckout(db, booking.id, existing.id, replacement.sessionId)
+
+        return NextResponse.json({ url: replacement.url }, { headers: NO_STORE })
       }
 
       return NextResponse.json(
