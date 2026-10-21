@@ -117,7 +117,7 @@ export default function BriefForm({ onCreated }: BriefFormProps) {
         topic: next.topic,
         title: fromIdea(previous.title, idea?.title) ? next.title : previous.title,
         notes: next.angle && fromIdea(previous.notes, earlierNotes) ? `Angle: ${next.angle}` : previous.notes,
-        channels: next.channels,
+        // Channels stay the member's choice: an idea's channels are only a hint on its chip.
       }
     })
     setIdea(next)

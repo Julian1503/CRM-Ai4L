@@ -230,8 +230,10 @@ describe('BriefForm', () => {
     expect(screen.getByLabelText(/^Topic/)).toHaveValue('Five quick AI tips for small teams.')
     expect(screen.getByLabelText(/^Title/)).toHaveValue('Five quick AI tips')
     expect(screen.getByLabelText('Notes')).toHaveValue('Angle: Easy wins this month.')
+    // The idea's channels never replace the ones ticked in the form.
+    expect(screen.getByRole('checkbox', { name: /^Facebook/ })).toBeChecked()
     expect(screen.getByRole('checkbox', { name: /^LinkedIn/ })).toBeChecked()
-    expect(screen.getByRole('checkbox', { name: /^Facebook/ })).not.toBeChecked()
+    expect(screen.getByRole('checkbox', { name: /^Email/ })).not.toBeChecked()
 
     // The member rewrites the title; switching ideas keeps it and replaces the rest.
     fireEvent.change(screen.getByLabelText(/^Title/), { target: { value: 'My title' } })
@@ -239,6 +241,7 @@ describe('BriefForm', () => {
     expect(screen.getByLabelText(/^Topic/)).toHaveValue('How one team saved a day a week.')
     expect(screen.getByLabelText(/^Title/)).toHaveValue('My title')
     expect(screen.getByLabelText('Notes')).toHaveValue('Angle: Proof it works.')
+    expect(screen.getByRole('checkbox', { name: /^Email/ })).not.toBeChecked()
 
     fireEvent.change(screen.getByLabelText(/^Topic/), { target: { value: 'Something of my own' } })
     expect(screen.queryByRole('button', { name: 'More ideas' })).not.toBeInTheDocument()
