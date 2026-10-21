@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { EmailRenderError, renderEmail } from '@/lib/content-studio/emailRenderer'
 import { EMAIL_LIMITS, type EmailDraftFields } from '@/lib/content-studio/toEmailCampaign'
-import { contentPublicPrefix, findContract, STUDIO_CONTRACTS, type CtaMode } from '@/lib/marketing/templateContracts'
+import { contentPublicPrefix, findContract, type CtaMode } from '@/lib/marketing/templateContracts'
 
 import Dialog from './Dialog'
 import previewStyles from './EmailPreview.module.css'
@@ -250,7 +250,9 @@ export default function CreateEmailDialog({ variantId, onClose, onCreated }: Cre
               </select>
               {templates.length === 0 && (
                 <span className={styles.fieldHint}>
-                  No Studio template is registered. Register one ({STUDIO_CONTRACTS.map((c) => c.id).join(' or ')}) in Email templates, or export the HTML.
+                  There is no email design set up for the Content Studio yet. Ask whoever manages
+                  EmailOctopus to add one under Integrations → Email templates. Until then, use
+                  Export HTML to get the email and paste it into EmailOctopus yourself.
                 </span>
               )}
             </label>
