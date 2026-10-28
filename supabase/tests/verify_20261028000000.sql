@@ -5,10 +5,11 @@
 --
 -- Run with:  npm run db:verify -- nolinkedin
 --
--- What this guards: no check on the Studio tables names LinkedIn any more; a LinkedIn
+-- What this guards: no social-account check names LinkedIn any more; a LinkedIn
 -- channel, platform, provider or author kind is refused on every table that stored one;
 -- the remaining channels (Facebook, Instagram, email) and the Meta/mock providers are
--- still accepted; the brand profile refuses channel rules for LinkedIn.
+-- still accepted; rows stored before the decision can still be archived, restored and
+-- edited; the brand profile refuses channel rules for LinkedIn.
 
 begin;
 
@@ -19,12 +20,11 @@ insert into public.crm_members (user_id, role, active) values
 
 do $$
 begin
-  raise notice '1. no check constraint on the Studio tables mentions LinkedIn';
+  raise notice '1. no check constraint on social accounts mentions LinkedIn';
   assert not exists (
     select 1 from pg_constraint
      where contype = 'c'
-       and conrelid in ('public.content_items'::regclass, 'public.content_variants'::regclass,
-                        'public.social_accounts'::regclass, 'public.social_oauth_states'::regclass)
+       and conrelid = 'public.social_accounts'::regclass
        and (pg_get_constraintdef(oid) ilike '%linkedin%'
             or pg_get_constraintdef(oid) ilike '%organization%'
             or pg_get_constraintdef(oid) ilike '%''member''%')
@@ -80,7 +80,28 @@ begin
     assert v_failed, format('a social account %s was stored', v_case);
   end loop;
 
-  raise notice '4. OAuth state: only Meta and mock';
+  raise notice '4. a pre-decision LinkedIn item and variant stay workable';
+  -- Stored as production holds them: written before the trigger existed.
+  set local session_replication_role = replica;
+  insert into public.content_items (brand_id, title, brief, channels)
+  values (v_brand, 'Legacy __nolinkedin', '{"topic":"t"}', array['linkedin', 'email'])
+  returning id into v_item;
+  insert into public.content_variants (item_id, channel) values (v_item, 'linkedin');
+  set local session_replication_role = origin;
+
+  update public.content_items set archived_at = now() where id = v_item;
+  update public.content_items set archived_at = null, title = 'Legacy edited __nolinkedin' where id = v_item;
+  update public.content_variants set archived_at = now() where item_id = v_item and channel = 'linkedin';
+  update public.content_items set channels = array['email'] where id = v_item;
+
+  v_failed := false;
+  begin
+    update public.content_items set channels = array['linkedin', 'email'] where id = v_item;
+  exception when check_violation then v_failed := true;
+  end;
+  assert v_failed, 'LinkedIn was written back onto an item';
+
+  raise notice '5. OAuth state: only Meta and mock';
   insert into public.social_oauth_states (state_hash, provider, actor_id, brand_id, expires_at)
   values ('meta__nolinkedin', 'meta', '00000000-0000-4000-8000-0000000d1a01', v_brand, now() + interval '10 minutes');
   v_failed := false;
@@ -98,7 +119,7 @@ declare
   v_failed boolean := false;
   v_hint   text;
 begin
-  raise notice '5. brand profile: channel rules for LinkedIn refused, the rest saved';
+  raise notice '6. brand profile: channel rules for LinkedIn refused, the rest saved';
   perform set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000d1a01","role":"authenticated"}', true);
   begin
     perform public.update_content_brand_profile('ai4l', '{"channelRules":{"linkedin":{"cta":"Book"}}}');

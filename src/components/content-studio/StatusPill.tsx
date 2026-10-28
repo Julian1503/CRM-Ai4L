@@ -22,5 +22,9 @@ const CHANNEL_CLASS: Record<ContentChannel, string> = {
 }
 
 export function ChannelTag({ channel }: { channel: ContentChannel }) {
-  return <span className={`${styles.channel} ${CHANNEL_CLASS[channel]}`}>{CHANNEL_LABELS[channel]}</span>
+  // Items stored before a channel was dropped (LinkedIn, 2026-10-28) still name it.
+  const label = CHANNEL_LABELS[channel] ?? `${channel} (retired)`
+  const toneClass = CHANNEL_CLASS[channel] ?? ''
+
+  return <span className={`${styles.channel} ${toneClass}`.trim()}>{label}</span>
 }

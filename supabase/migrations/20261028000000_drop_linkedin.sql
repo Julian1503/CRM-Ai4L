@@ -8,9 +8,12 @@
 -- No row is changed or removed (project rule: no physical deletes). Production holds
 -- some LinkedIn history from before the decision -- content items that listed it as a
 -- channel, their LinkedIn variants and expired OAuth states. Those rows are kept as
--- written: the checks on those three tables are added NOT VALID, which refuses every
--- new or updated row but leaves the existing ones alone. Social accounts have no
--- LinkedIn rows, so their checks are validated outright.
+-- written, and must stay archivable, restorable and editable. A CHECK cannot do that:
+-- even NOT VALID, Postgres re-checks it on every UPDATE of the row, so restoring an
+-- archived {linkedin,email} item would fail. Those three tables keep their original
+-- checks and gain a trigger instead, which refuses LinkedIn only when the channel or
+-- provider column itself is written. Social accounts have no LinkedIn rows, so their
+-- checks are narrowed outright.
 --
 -- A brand profile may still hold a 'linkedin' key in channel_rules from earlier edits.
 -- It is left as stored: the CRM ignores it when reading (src/lib/content-studio/mappers.ts)
@@ -45,16 +48,6 @@ end $$;
 -- 2. Narrow the checks. The constraints are dropped by name (no "if exists") so a
 --    renamed constraint fails here instead of leaving 'linkedin' accepted.
 -- ---------------------------------------------------------------------------
-alter table public.content_items drop constraint content_items_channels_valid;
-alter table public.content_items add constraint content_items_channels_valid check (
-  cardinality(channels) between 1 and 3
-  and channels <@ array['facebook', 'instagram', 'email']::text[]
-) not valid;
-
-alter table public.content_variants drop constraint content_variants_channel_check;
-alter table public.content_variants add constraint content_variants_channel_check
-  check (channel in ('facebook', 'instagram', 'email')) not valid;
-
 alter table public.social_accounts drop constraint social_accounts_platform_check;
 alter table public.social_accounts add constraint social_accounts_platform_check
   check (platform in ('facebook', 'instagram'));
@@ -68,9 +61,48 @@ alter table public.social_accounts drop constraint social_accounts_author_kind_c
 alter table public.social_accounts add constraint social_accounts_author_kind_check
   check (author_kind in ('page', 'instagram_business'));
 
-alter table public.social_oauth_states drop constraint social_oauth_states_provider_check;
-alter table public.social_oauth_states add constraint social_oauth_states_provider_check
-  check (provider in ('meta', 'mock')) not valid;
+/*
+ * Refuses LinkedIn wherever a channel or provider is written: a new row, or an UPDATE
+ * that sets the column. Updates that leave it out (archive, restore, a title edit, a
+ * new revision) never fire it, so pre-decision rows stay workable. Raised as
+ * check_violation so callers see the same error a CHECK would give.
+ */
+create or replace function public.refuse_linkedin()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare
+  v_linkedin boolean;
+begin
+  -- One branch per table: NEW only has the columns of the table that fired.
+  if tg_table_name = 'content_items' then
+    v_linkedin := 'linkedin' = any (new.channels);
+  elsif tg_table_name = 'content_variants' then
+    v_linkedin := new.channel = 'linkedin';
+  else
+    v_linkedin := new.provider = 'linkedin';
+  end if;
+
+  if v_linkedin then
+    raise exception 'LinkedIn is no longer supported (%).', tg_table_name
+      using errcode = 'check_violation';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger content_items_refuse_linkedin
+  before insert or update of channels on public.content_items
+  for each row execute function public.refuse_linkedin();
+
+create trigger content_variants_refuse_linkedin
+  before insert or update of channel on public.content_variants
+  for each row execute function public.refuse_linkedin();
+
+create trigger social_oauth_states_refuse_linkedin
+  before insert or update of provider on public.social_oauth_states
+  for each row execute function public.refuse_linkedin();
 
 comment on column public.social_oauth_states.options is
   'Unused since LinkedIn was dropped (2026-10-28); it held the LinkedIn author mode. Always {}.';
