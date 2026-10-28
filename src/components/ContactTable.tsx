@@ -121,10 +121,44 @@ export default function ContactTable({
 }: ContactTableProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const selectAllRef = useRef<HTMLInputElement>(null);
+  /** The row a Shift-click extends from: the last one ticked or unticked by hand. */
+  const anchorIdRef = useRef<string | null>(null);
 
   const isSelectable = typeof onToggleRow === 'function';
   const selection = selectedIds ?? EMPTY_SELECTION;
   const pageIds = contacts.map((contact) => contact.id);
+  const isSelecting = isSelectable && selection.size > 0;
+
+  const toggleRow = (id: string, selected: boolean) => {
+    anchorIdRef.current = id;
+    onToggleRow?.(id, selected);
+  };
+
+  /**
+   * A row click opens the contact — until something is ticked. From then on the list is
+   * in selection mode, as in a mail client: clicks add and remove rows, Shift-click ticks
+   * the run from the last row touched, and Open lives in the right-click menu. Ctrl/⌘-click
+   * selects without opening even before anything is ticked.
+   */
+  const handleRowClick = (event: React.MouseEvent, contact: TableContact) => {
+    const wantsSelection = isSelecting || event.ctrlKey || event.metaKey || event.shiftKey;
+    if (!isSelectable || !wantsSelection) {
+      onSelectContact(contact);
+      return;
+    }
+
+    const anchorIndex = anchorIdRef.current ? pageIds.indexOf(anchorIdRef.current) : -1;
+    if (event.shiftKey && anchorIndex !== -1) {
+      // Shift-click would otherwise also select the text between the two rows.
+      window.getSelection?.()?.removeAllRanges();
+      const index = pageIds.indexOf(contact.id);
+      const [start, end] = index < anchorIndex ? [index, anchorIndex] : [anchorIndex, index];
+      onTogglePage?.(pageIds.slice(start, end + 1), true);
+      return;
+    }
+
+    toggleRow(contact.id, !selection.has(contact.id));
+  };
   const selectedOnPage = pageIds.filter((id) => selection.has(id)).length;
   const isPageFullySelected = pageIds.length > 0 && selectedOnPage === pageIds.length;
   const isPagePartiallySelected = selectedOnPage > 0 && !isPageFullySelected;
@@ -307,9 +341,9 @@ export default function ContactTable({
               return (
               <tr 
                 key={contact.id} 
-                className={`${styles.tr} ${isRowSelected ? styles.trSelected : ''}`}
+                className={`${styles.tr} ${isRowSelected ? styles.trSelected : ''} ${isSelecting ? styles.trSelecting : ''}`}
                 data-selected={isRowSelected ? 'true' : undefined}
-                onClick={() => onSelectContact(contact)}
+                onClick={(event) => handleRowClick(event, contact)}
                 onContextMenu={
                   onRowContextMenu
                     ? (event) => {
@@ -326,11 +360,14 @@ export default function ContactTable({
                 }
               >
                 {isSelectable && (
-                  // Stops at the cell: ticking a row is a different intent from opening
-                  // it, and the row's own click handler opens the drawer.
+                  // The whole cell ticks, not just the 16px box, and the click stops here:
+                  // ticking a row must never also open it.
                   <td
                     className={`${styles.td} ${styles.checkboxCell}`}
-                    onClick={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (event.target === event.currentTarget) toggleRow(contact.id, !isRowSelected);
+                    }}
                   >
                     <input
                       type="checkbox"
@@ -338,7 +375,7 @@ export default function ContactTable({
                       data-testid={`select-contact-${contact.id}`}
                       aria-label={`Select ${contact.firstName} ${contact.lastName}`}
                       checked={isRowSelected}
-                      onChange={(event) => onToggleRow?.(contact.id, event.target.checked)}
+                      onChange={(event) => toggleRow(contact.id, event.target.checked)}
                     />
                   </td>
                 )}

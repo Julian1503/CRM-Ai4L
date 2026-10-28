@@ -49,6 +49,7 @@ const ALIASES = {
   auditfixes: 'verify_20261021000000.sql',
   nolinkedin: 'verify_20261028000000.sql',
   bulklife: 'verify_20261028010000.sql',
+  funnel: 'verify_20261029000000.sql',
 }
 
 function fail(message) {

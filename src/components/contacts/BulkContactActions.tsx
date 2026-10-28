@@ -31,6 +31,9 @@ export default function BulkContactActions({ selectedIds, onRequest, onClear, di
       <span className={styles.count} aria-live="polite">
         {count} {count === 1 ? 'contact' : 'contacts'} selected
         {isTooLarge && <span className={styles.limit}> — at most {MAX_SELECTED_IDS} at a time</span>}
+        <span className={styles.hint} data-testid="bulk-selection-hint">
+          Click rows to add or remove them, Shift-click for a range. Right-click › Open to view one.
+        </span>
       </span>
 
       <div className={styles.actions}>

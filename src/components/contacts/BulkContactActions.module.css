@@ -24,6 +24,15 @@
   color: var(--text-primary);
 }
 
+.hint {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--font-body);
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
 .limit {
   font-family: var(--font-body);
   font-weight: 500;

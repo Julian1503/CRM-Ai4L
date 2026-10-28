@@ -169,6 +169,75 @@ describe('ContactTable row selection', () => {
     expect(onSelectContact).not.toHaveBeenCalled();
   });
 
+  it('ticks the row when the checkbox cell around the box is clicked', () => {
+    const onSelectContact = jest.fn();
+    const { onToggleRow } = renderSelectable({ onSelectContact });
+
+    fireEvent.click(screen.getByTestId('select-contact-1').closest('td')!);
+
+    expect(onToggleRow).toHaveBeenCalledWith('1', true);
+    expect(onSelectContact).not.toHaveBeenCalled();
+  });
+
+  it('opens the contact on a row click while nothing is selected', () => {
+    const onSelectContact = jest.fn();
+    const { onToggleRow } = renderSelectable({ onSelectContact });
+
+    fireEvent.click(screen.getByText('John Doe').closest('tr')!);
+
+    expect(onSelectContact).toHaveBeenCalledWith(mockContacts[0]);
+    expect(onToggleRow).not.toHaveBeenCalled();
+  });
+
+  it('selects instead of opening once a row is ticked', () => {
+    const onSelectContact = jest.fn();
+    const { onToggleRow } = renderSelectable({ onSelectContact, selectedIds: new Set(['1']) });
+
+    fireEvent.click(screen.getByText('Alice Smith').closest('tr')!);
+    fireEvent.click(screen.getByText('John Doe').closest('tr')!);
+
+    expect(onSelectContact).not.toHaveBeenCalled();
+    expect(onToggleRow).toHaveBeenNthCalledWith(1, '2', true);
+    expect(onToggleRow).toHaveBeenNthCalledWith(2, '1', false);
+  });
+
+  it('selects without opening on Ctrl or Cmd click', () => {
+    const onSelectContact = jest.fn();
+    const { onToggleRow } = renderSelectable({ onSelectContact });
+
+    fireEvent.click(screen.getByText('John Doe').closest('tr')!, { ctrlKey: true });
+    fireEvent.click(screen.getByText('Alice Smith').closest('tr')!, { metaKey: true });
+
+    expect(onSelectContact).not.toHaveBeenCalled();
+    expect(onToggleRow).toHaveBeenCalledWith('1', true);
+    expect(onToggleRow).toHaveBeenCalledWith('2', true);
+  });
+
+  it('ticks the run of rows from the last one touched on Shift-click', () => {
+    const contacts = [
+      ...mockContacts,
+      { ...mockContacts[0], id: '3', firstName: 'Grace', lastName: 'Hopper', email: 'grace@example.com' },
+    ];
+    const { onToggleRow, onTogglePage } = renderSelectable({ contacts });
+
+    fireEvent.click(screen.getByTestId('select-contact-1'));
+    fireEvent.click(screen.getByText('Grace Hopper').closest('tr')!, { shiftKey: true });
+
+    expect(onToggleRow).toHaveBeenCalledWith('1', true);
+    expect(onTogglePage).toHaveBeenCalledWith(['1', '2', '3'], true);
+  });
+
+  it('keeps a plain row click opening the contact when selection is not offered', () => {
+    const onSelectContact = jest.fn();
+    render(
+      <ContactTable contacts={mockContacts} onSelectContact={onSelectContact} onSort={jest.fn()} sortKey="" sortDir="asc" />
+    );
+
+    fireEvent.click(screen.getByText('John Doe').closest('tr')!, { ctrlKey: true });
+
+    expect(onSelectContact).toHaveBeenCalledWith(mockContacts[0]);
+  });
+
   it('selects every row on the current page from the header', () => {
     const { onTogglePage } = renderSelectable();
 

@@ -92,6 +92,12 @@
   width: 1%;
   padding-right: 0;
   white-space: nowrap;
+  cursor: pointer;
+}
+
+/* Selection mode: a click ticks the row instead of opening it. */
+.trSelecting {
+  user-select: none;
 }
 
 .checkbox {

@@ -740,6 +740,18 @@ export interface Database {
           stall_reason: string | null
         }>
       }
+      campaign_booking_funnel: {
+        Args: { p_campaign_ids: string[] }
+        Returns: Array<{
+          campaign_id: string
+          started: number
+          paid: number
+          booked: number
+          cancelled: number
+          charged_cents: number
+          last_booking_at: string | null
+        }>
+      }
       is_crm_member: { Args: Record<string, never>; Returns: boolean }
       is_crm_admin: { Args: Record<string, never>; Returns: boolean }
       create_campaign_booking: {

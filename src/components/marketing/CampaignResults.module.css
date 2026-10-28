@@ -1,0 +1,267 @@
+.panel {
+  padding: var(--space-lg);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 12px);
+  box-shadow: var(--shadow-sm);
+}
+
+.header {
+  margin-bottom: var(--space-md);
+}
+
+.title {
+  margin: 0 0 0.25rem;
+  font-family: var(--font-heading);
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+
+.hint {
+  max-width: 62ch;
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+.error {
+  margin-bottom: var(--space-md);
+  padding: 0.75rem 0.875rem;
+  font-size: 0.85rem;
+  color: var(--danger);
+  background: var(--danger-bg);
+  border-radius: var(--radius-sm);
+}
+
+.retry {
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  text-decoration: underline;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.empty {
+  margin: 0;
+  padding: var(--space-lg) 0;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+.tableWrap {
+  overflow-x: auto;
+  margin: 0 calc(var(--space-lg) * -1);
+  padding: 0 var(--space-lg);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.table[aria-busy='true'] {
+  opacity: 0.6;
+}
+
+.table th {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-align: left;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border);
+}
+
+.table td {
+  padding: 0.875rem 0.75rem;
+  vertical-align: top;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border);
+}
+
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.table tbody tr:hover td {
+  background: var(--bg-hover, rgba(1, 117, 149, 0.04));
+}
+
+.table th.num,
+.table td.num {
+  text-align: right;
+}
+
+.name {
+  display: block;
+  font-weight: 600;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+  margin-top: 0.3rem;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.status {
+  padding: 0.125rem 0.45rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: 999px;
+}
+
+.status_sending {
+  color: #7a4405;
+  background: var(--warning-bg);
+}
+
+.status_sent {
+  color: #146c35;
+  background: var(--success-bg);
+}
+
+.status_failed {
+  color: #8a1c1c;
+  background: var(--danger-bg);
+}
+
+.date {
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* Figures line up digit for digit down a column. */
+.figure {
+  display: block;
+  font-family: var(--font-heading);
+  font-size: 1rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.figureStrong {
+  color: var(--success);
+}
+
+.subtle {
+  display: block;
+  margin-top: 0.125rem;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.actionCell {
+  text-align: right;
+}
+
+.open {
+  padding: 0.375rem 0.75rem;
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.open:hover {
+  border-color: var(--primary);
+}
+
+.open:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Phones: each campaign becomes a card, its figures a two-column grid with labels. */
+@media (max-width: 720px) {
+  .panel {
+    padding: var(--space-md);
+  }
+
+  .tableWrap {
+    overflow: visible;
+    margin: 0;
+    padding: 0;
+  }
+
+  .table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+
+  .table tbody tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem 1rem;
+    padding: var(--space-md) 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .table tbody tr:last-child {
+    border-bottom: none;
+  }
+
+  .table td {
+    padding: 0;
+    border: none;
+  }
+
+  .table td.num {
+    text-align: left;
+  }
+
+  .table td[data-label='Campaign'],
+  .table td[data-label='Sent'],
+  .actionCell {
+    grid-column: 1 / -1;
+  }
+
+  .table td[data-label]:not([data-label='Campaign'])::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+
+  .table tbody tr:hover td {
+    background: none;
+  }
+
+  .actionCell {
+    text-align: left;
+  }
+}

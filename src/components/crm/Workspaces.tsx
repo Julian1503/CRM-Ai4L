@@ -1,13 +1,12 @@
 'use client'
 
 import { useEffect } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 
 import ArchiveHub from '@/components/archive/ArchiveHub'
 import BookingsView from '@/components/bookings/BookingsView'
 import ContentStudioView from '@/components/content-studio/ContentStudioView'
-import MarketingView from '@/components/marketing/MarketingView'
-import NewsletterSchedules from '@/components/marketing/NewsletterSchedules'
+import CampaignsHub from '@/components/marketing/CampaignsHub'
 import SettingsView from '@/components/settings/SettingsView'
 import { contactHref } from '@/components/contacts/useContactDeepLink'
 import { VIEW_ROUTES } from '@/lib/navigation/routes'
@@ -31,10 +30,9 @@ export function ArchiveWorkspace() {
   )
 }
 
-/** `?campaign=<id>` opens that campaign (newsletter review emails link here). */
+/** `?tab=` picks the tab; `?campaign=<id>` opens that campaign (newsletter review emails link here). */
 export function CampaignsWorkspace() {
   const { jobTypes } = useCrm()
-  const campaignId = useSearchParams().get('campaign') ?? undefined
   return (
     <>
       <PageHeader
@@ -42,8 +40,7 @@ export function CampaignsWorkspace() {
         title="Segments and campaigns"
         subtitle="Build an audience from the database, then approve and send."
       />
-      <MarketingView jobTypes={jobTypes} initialCampaignId={campaignId} />
-      <NewsletterSchedules />
+      <CampaignsHub jobTypes={jobTypes} />
     </>
   )
 }

@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { ConsentStream } from '@/lib/db/types'
 import { CONSENT_STREAM_LABELS, parseConsentStream } from '@/lib/marketing/consentStream'
@@ -16,7 +16,6 @@ import AutomationConnectionField, {
 } from './AutomationConnectionField'
 import CampaignCopyEditor from './CampaignCopyEditor'
 import CampaignStreamField from './CampaignStreamField'
-import SegmentsPanel from './SegmentsPanel'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import { useToast } from '@/components/ui/Toast'
 
@@ -242,12 +241,13 @@ async function readError(response: Response): Promise<string> {
 }
 
 type MarketingViewProps = {
-  jobTypes: JobTypeOption[]
+  /** Changes when something this view reads elsewhere changed (a segment was saved); re-reads. */
+  refreshKey?: number
   /** A campaign to open for review on arrival, e.g. a draft just created from the Content Studio. */
   initialCampaignId?: string
 }
 
-export default function MarketingView({ jobTypes, initialCampaignId }: MarketingViewProps) {
+export default function MarketingView({ initialCampaignId, refreshKey = 0 }: MarketingViewProps) {
 
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [campaignsPage, setCampaignsPage] = useState(1)
@@ -481,6 +481,15 @@ export default function MarketingView({ jobTypes, initialCampaignId }: Marketing
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load()
   }, [load])
+
+  // Re-reads when told something it shows changed elsewhere. Skips the first render:
+  // the effect above has just loaded.
+  const loadedForKey = useRef(refreshKey)
+  useEffect(() => {
+    if (loadedForKey.current === refreshKey) return
+    loadedForKey.current = refreshKey
+    void load()
+  }, [load, refreshKey])
 
   // Reads the recipient list for whichever campaign is open, re-running when the pager
   // moves. Kept out of `load()` on purpose: the workspace refreshes for reasons that
@@ -872,17 +881,15 @@ export default function MarketingView({ jobTypes, initialCampaignId }: Marketing
         </div>
       )}
 
-      {/* The provider constraint is stated up front because it is genuinely
-          surprising: you cannot author the email here. */}
-      <div className={styles.constraint}>
-        <strong>How sending works.</strong> EmailOctopus does not allow campaigns to be
-        created through its API, so the email itself is authored in EmailOctopus as an
-        automation using the <em>Started via API</em> trigger. This screen selects who
-        receives it and when it goes. Sending is one request per recipient, so large
-        segments take time — the estimate below is real.
-      </div>
-
-      <SegmentsPanel jobTypes={jobTypes} onChanged={() => void load()} />
+      {/* The provider constraint is genuinely surprising — you cannot author the email
+          here — so it stays one click away rather than taking the top of the screen. */}
+      <details className={styles.constraint}>
+        <summary className={styles.constraintSummary}>How sending works</summary>
+        EmailOctopus does not allow campaigns to be created through its API, so the email
+        itself is authored in EmailOctopus as an automation using the <em>Started via API</em>{' '}
+        trigger. This screen selects who receives it and when it goes. Sending is one request
+        per recipient, so large segments take time — the estimate below is real.
+      </details>
 
       <section className={styles.panel} aria-labelledby="campaigns-heading">
         <h2 id="campaigns-heading" className={styles.panelTitle}>

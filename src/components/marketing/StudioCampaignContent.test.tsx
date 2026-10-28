@@ -63,7 +63,7 @@ describe('a Content Studio campaign in Campaigns', () => {
       return respond({})
     }) as unknown as typeof fetch
 
-    render(<MarketingView jobTypes={[]} initialCampaignId="camp-2" />)
+    render(<MarketingView initialCampaignId="camp-2" />)
 
     expect(await screen.findByTestId('studio-content-camp-2')).toBeInTheDocument()
     expect(await screen.findByText('No button')).toBeInTheDocument()

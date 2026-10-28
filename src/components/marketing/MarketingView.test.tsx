@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ToastProvider } from '@/components/ui/Toast'
 
 import MarketingView from './MarketingView'
+import SegmentsPanel from './SegmentsPanel'
 
 const mockFetch = jest.fn()
 global.fetch = mockFetch as unknown as typeof fetch
@@ -69,28 +70,41 @@ describe('MarketingView', () => {
   it('explains that the email is authored in EmailOctopus, not here', async () => {
     // The single most surprising constraint. Burying it would strand the user with a
     // campaign that can never send.
-    render(<MarketingView jobTypes={jobTypes} />)
+    render(<MarketingView />)
 
     expect(await screen.findByText(/Started via API/)).toBeInTheDocument()
   })
 
   it('warns that segments exclude archived and non-consenting contacts', async () => {
-    render(<MarketingView jobTypes={jobTypes} />)
+    render(<SegmentsPanel jobTypes={jobTypes} onChanged={jest.fn()} />)
 
     expect(
       await screen.findByText(/exclude archived contacts and anyone who has not agreed/i)
     ).toBeInTheDocument()
   })
 
-  it('lists existing segments and campaigns', async () => {
-    render(<MarketingView jobTypes={jobTypes} />)
+  it('lists existing campaigns and offers the segments to send them to', async () => {
+    render(<MarketingView />)
 
     expect(await screen.findByText('August offer')).toBeInTheDocument()
+    expect(await screen.findByRole('option', { name: 'NSW leads' })).toBeInTheDocument()
+  })
 
-    // The segment name appears twice by design: once in the segment list, once as an
-    // option in the campaign's segment picker.
-    await waitFor(() => expect(screen.getAllByText('NSW leads').length).toBeGreaterThan(1))
-    expect(screen.getByRole('option', { name: 'NSW leads' })).toBeInTheDocument()
+  it('re-reads campaigns and segments when told something changed elsewhere', async () => {
+    const { rerender } = render(<MarketingView />)
+    expect(await screen.findByText('August offer')).toBeInTheDocument()
+    const reads = () => mockFetch.mock.calls.filter(([url]) => String(url).startsWith('/api/segments?')).length
+    const before = reads()
+
+    rerender(<MarketingView refreshKey={1} />)
+
+    await waitFor(() => expect(reads()).toBeGreaterThan(before))
+  })
+
+  it('lists existing segments in the segments panel', async () => {
+    render(<SegmentsPanel jobTypes={jobTypes} onChanged={jest.fn()} />)
+
+    expect(await screen.findByText('NSW leads')).toBeInTheDocument()
   })
 
   it('counts each filter option next to its label', async () => {
@@ -111,7 +125,7 @@ describe('MarketingView', () => {
       }),
     })
 
-    render(<MarketingView jobTypes={jobTypes} />)
+    render(<SegmentsPanel jobTypes={jobTypes} onChanged={jest.fn()} />)
 
     expect(await screen.findByRole('option', { name: 'NSW (5)' })).toBeInTheDocument()
     expect(screen.getByRole('option', { name: 'Any state (9)' })).toBeInTheDocument()
@@ -125,14 +139,14 @@ describe('MarketingView', () => {
     // A zero rendered while the request is in flight reads as "empty segment".
     routeFetch({ ...defaultHandlers, 'POST /api/segments/preview': jsonResponse({}, false, 500) })
 
-    render(<MarketingView jobTypes={jobTypes} />)
+    render(<SegmentsPanel jobTypes={jobTypes} onChanged={jest.fn()} />)
 
     expect(await screen.findByRole('option', { name: 'Any state' })).toBeInTheDocument()
     expect(screen.getByRole('option', { name: 'Electrician' })).toBeInTheDocument()
   })
 
   it('shows the live audience count', async () => {
-    render(<MarketingView jobTypes={jobTypes} />)
+    render(<SegmentsPanel jobTypes={jobTypes} onChanged={jest.fn()} />)
 
     await waitFor(() => expect(screen.getByTestId('segment-preview')).toHaveTextContent('42'))
   })
@@ -148,7 +162,7 @@ describe('MarketingView', () => {
       }),
     })
 
-    render(<MarketingView jobTypes={jobTypes} />)
+    render(<SegmentsPanel jobTypes={jobTypes} onChanged={jest.fn()} />)
 
     expect(await screen.findByText(/Capped/i)).toBeInTheDocument()
   })
@@ -163,14 +177,14 @@ describe('MarketingView', () => {
       }),
     })
 
-    render(<MarketingView jobTypes={jobTypes} />)
+    render(<SegmentsPanel jobTypes={jobTypes} onChanged={jest.fn()} />)
 
     // ~16.5 minutes for 10k, which is the real consequence of a per-contact send.
     expect(await screen.findByText(/17 minutes|16 minutes/)).toBeInTheDocument()
   })
 
   it('re-counts when the definition changes', async () => {
-    render(<MarketingView jobTypes={jobTypes} />)
+    render(<SegmentsPanel jobTypes={jobTypes} onChanged={jest.fn()} />)
 
     await waitFor(() => expect(screen.getByTestId('segment-preview')).toHaveTextContent('42'))
     const before = mockFetch.mock.calls.filter(([url]) =>
@@ -188,7 +202,7 @@ describe('MarketingView', () => {
   })
 
   it('creates a segment with the current definition', async () => {
-    render(<MarketingView jobTypes={jobTypes} />)
+    render(<SegmentsPanel jobTypes={jobTypes} onChanged={jest.fn()} />)
 
     fireEvent.change(await screen.findByTestId('segment-name'), {
       target: { value: 'VIC electricians' },
@@ -210,13 +224,13 @@ describe('MarketingView', () => {
   })
 
   it('will not save a segment without a name', async () => {
-    render(<MarketingView jobTypes={jobTypes} />)
+    render(<SegmentsPanel jobTypes={jobTypes} onChanged={jest.fn()} />)
 
     expect(await screen.findByTestId('create-segment')).toBeDisabled()
   })
 
   it('approves through the dedicated endpoint', async () => {
-    render(<MarketingView jobTypes={jobTypes} />)
+    render(<MarketingView />)
 
     fireEvent.click(await screen.findByTestId('approve-camp-1'))
 
@@ -245,7 +259,7 @@ describe('MarketingView', () => {
         ],
       }),
     })
-    render(<MarketingView jobTypes={jobTypes} />)
+    render(<MarketingView />)
 
     fireEvent.click(await screen.findByTestId('approve-camp-1'))
 
@@ -283,7 +297,7 @@ describe('MarketingView', () => {
 
     it('says the outcome is unknown and offers both settlements, never an automatic retry', async () => {
       routeFetch(failedWithUncertain)
-      render(<MarketingView jobTypes={jobTypes} />)
+      render(<MarketingView />)
 
       expect(await screen.findByTestId('send-report-camp-1')).toHaveTextContent(/2 of 10 recipients have an unknown outcome/)
       expect(screen.getByTestId('send-report-camp-1')).toHaveTextContent(/1 skipped/)
@@ -293,7 +307,7 @@ describe('MarketingView', () => {
 
     it('settles them only after the operator confirms in the dialog', async () => {
       routeFetch(failedWithUncertain)
-      render(<MarketingView jobTypes={jobTypes} />)
+      render(<MarketingView />)
 
       fireEvent.click(await screen.findByTestId('reconcile-sent-camp-1'))
       expect(screen.getByTestId('confirm-dialog')).toHaveTextContent('EmailOctopus shows the automation queued them')
@@ -311,7 +325,7 @@ describe('MarketingView', () => {
 
     it('warns about duplicates before queuing again', async () => {
       routeFetch(failedWithUncertain)
-      render(<MarketingView jobTypes={jobTypes} />)
+      render(<MarketingView />)
 
       fireEvent.click(await screen.findByTestId('reconcile-retry-camp-1'))
       expect(screen.getByTestId('confirm-dialog')).toHaveTextContent('otherwise they get the email twice')
@@ -325,7 +339,7 @@ describe('MarketingView', () => {
 
   it('archives a campaign in review and reloads the list', async () => {
     routeFetch({ ...defaultHandlers, 'PATCH /api/campaigns/camp-1': jsonResponse({ campaign: {} }) })
-    render(<MarketingView jobTypes={jobTypes} />)
+    render(<MarketingView />)
 
     fireEvent.click(await screen.findByTestId('campaign-camp-1-archive'))
 
@@ -357,7 +371,7 @@ describe('MarketingView', () => {
       }),
     })
 
-    render(<MarketingView jobTypes={jobTypes} />)
+    render(<MarketingView />)
 
     expect(await screen.findByTestId('campaign-camp-1-archive')).toBeDisabled()
     expect(screen.getByTestId('campaign-camp-1-remove')).toBeDisabled()
@@ -383,7 +397,7 @@ describe('MarketingView', () => {
       'POST /api/campaigns/camp-1/send': jsonResponse({ hasMore: false, sent: 7, failed: 0 }),
     })
 
-    render(<MarketingView jobTypes={jobTypes} />)
+    render(<MarketingView />)
     fireEvent.click(await screen.findByTestId('send-camp-1'))
 
     await waitFor(() => expect(screen.getByTestId('send-confirm-dialog')).toHaveTextContent('7'))
@@ -411,7 +425,7 @@ describe('MarketingView', () => {
       ),
     })
 
-    render(<MarketingView jobTypes={jobTypes} />)
+    render(<MarketingView />)
     fireEvent.click(await screen.findByTestId('approve-camp-1'))
 
     expect(
@@ -451,7 +465,7 @@ describe('MarketingView', () => {
       return jsonResponse({})
     })
 
-    render(<MarketingView jobTypes={jobTypes} />)
+    render(<MarketingView />)
     fireEvent.click(await screen.findByTestId('send-camp-1'))
     const confirmButton = await screen.findByTestId('confirm-send')
     await waitFor(() => expect(confirmButton).not.toBeDisabled())
@@ -487,7 +501,7 @@ describe('MarketingView', () => {
         ...defaultHandlers,
       })
 
-      render(<MarketingView jobTypes={jobTypes} />)
+      render(<MarketingView />)
       fireEvent.click(await screen.findByTestId('audience-camp-1'))
 
       expect(await screen.findByText('ada@example.com')).toBeInTheDocument()
@@ -495,7 +509,7 @@ describe('MarketingView', () => {
     })
 
     it('closes without leaving the list behind', async () => {
-      render(<MarketingView jobTypes={jobTypes} />)
+      render(<MarketingView />)
 
       // Generous timeouts: this view issues several reads on mount and the full suite runs
       // in parallel, so the default 1 s made this test flaky under load.
@@ -515,7 +529,7 @@ describe('MarketingView', () => {
         ...defaultHandlers,
       })
 
-      render(<MarketingView jobTypes={jobTypes} />)
+      render(<MarketingView />)
       fireEvent.click(await screen.findByTestId('audience-camp-1'))
 
       expect(await screen.findByRole('alert')).toHaveTextContent(
@@ -545,7 +559,7 @@ describe('MarketingView', () => {
     it('re-opens the campaign after the operator confirms', async () => {
       routeFetch({ ...defaultHandlers, 'GET /api/campaigns': jsonResponse(sentCampaign) })
 
-      render(<MarketingView jobTypes={jobTypes} />)
+      render(<MarketingView />)
       fireEvent.click(await screen.findByTestId('reopen-camp-1'))
 
       // Naming the provider-side setting matters: without "Allow contacts to repeat"
@@ -568,7 +582,7 @@ describe('MarketingView', () => {
       // received this campaign once.
       routeFetch({ ...defaultHandlers, 'GET /api/campaigns': jsonResponse(sentCampaign) })
 
-      render(<MarketingView jobTypes={jobTypes} />)
+      render(<MarketingView />)
       fireEvent.click(await screen.findByTestId('reopen-camp-1'))
       fireEvent.keyDown(window, { key: 'Escape' })
       expect(screen.queryByTestId('confirm-dialog')).not.toBeInTheDocument()
@@ -588,7 +602,7 @@ describe('MarketingView', () => {
 
       render(
         <ToastProvider>
-          <MarketingView jobTypes={jobTypes} />
+          <MarketingView />
         </ToastProvider>
       )
       fireEvent.click(await screen.findByTestId('reopen-camp-1'))
@@ -608,7 +622,7 @@ describe('MarketingView', () => {
         'GET /api/campaigns': jsonResponse(sentCampaign),
       })
 
-      render(<MarketingView jobTypes={jobTypes} />)
+      render(<MarketingView />)
       fireEvent.click(await screen.findByTestId('reopen-camp-1'))
       fireEvent.click(screen.getByTestId('confirm-dialog-confirm'))
 
@@ -618,7 +632,7 @@ describe('MarketingView', () => {
     it('offers no re-send for a campaign that never finished', async () => {
       routeFetch(defaultHandlers)
 
-      render(<MarketingView jobTypes={jobTypes} />)
+      render(<MarketingView />)
 
       await screen.findByText('August offer')
       expect(screen.queryByTestId('reopen-camp-1')).not.toBeInTheDocument()
@@ -653,7 +667,7 @@ describe('MarketingView', () => {
       }),
     })
 
-    render(<MarketingView jobTypes={jobTypes} />)
+    render(<MarketingView />)
     fireEvent.click(await screen.findByTestId('send-camp-1'))
     const confirmButton = await screen.findByTestId('confirm-send')
     await waitFor(() => expect(confirmButton).not.toBeDisabled())
@@ -690,7 +704,7 @@ describe('MarketingView', () => {
       }),
     })
 
-    render(<MarketingView jobTypes={jobTypes} />)
+    render(<MarketingView />)
     fireEvent.click(await screen.findByTestId('send-camp-1'))
     const confirmButton = await screen.findByTestId('confirm-send')
     await waitFor(() => expect(confirmButton).not.toBeDisabled())
@@ -741,7 +755,7 @@ describe('MarketingView', () => {
       return jsonResponse({})
     })
 
-    render(<MarketingView jobTypes={jobTypes} />)
+    render(<MarketingView />)
     fireEvent.click(await screen.findByTestId('send-camp-1'))
     const confirmButton = await screen.findByTestId('confirm-send')
     await waitFor(() => expect(confirmButton).not.toBeDisabled())
@@ -786,7 +800,7 @@ describe('MarketingView', () => {
       }),
     })
 
-    render(<MarketingView jobTypes={jobTypes} />)
+    render(<MarketingView />)
 
     expect(await screen.findByTestId('send-report-camp-1')).toHaveTextContent(
       '40 of 40 recipients failed — Automation not found.'
@@ -815,7 +829,7 @@ describe('MarketingView', () => {
       ),
     })
 
-    render(<MarketingView jobTypes={jobTypes} />)
+    render(<MarketingView />)
     fireEvent.click(await screen.findByTestId('send-camp-1'))
     const confirmButton = await screen.findByTestId('confirm-send')
     await waitFor(() => expect(confirmButton).not.toBeDisabled())
@@ -826,13 +840,13 @@ describe('MarketingView', () => {
 
   describe('campaign creation', () => {
     it('will not save a campaign without a name', async () => {
-      render(<MarketingView jobTypes={jobTypes} />)
+      render(<MarketingView />)
 
       expect(await screen.findByTestId('create-campaign')).toBeDisabled()
     })
 
     it('posts the name, segment and automation id', async () => {
-      render(<MarketingView jobTypes={jobTypes} />)
+      render(<MarketingView />)
 
       fireEvent.change(await screen.findByTestId('campaign-name'), {
         target: { value: 'August offer' },
@@ -863,7 +877,7 @@ describe('MarketingView', () => {
     })
 
     it('asks for the stream when the automation is not a registered template', async () => {
-      render(<MarketingView jobTypes={jobTypes} />)
+      render(<MarketingView />)
 
       fireEvent.change(await screen.findByTestId('campaign-name'), {
         target: { value: 'August offer' },
@@ -895,7 +909,7 @@ describe('MarketingView', () => {
         }),
       })
 
-      render(<MarketingView jobTypes={jobTypes} />)
+      render(<MarketingView />)
 
       fireEvent.change(await screen.findByTestId('campaign-name'), {
         target: { value: 'September courses' },
@@ -930,7 +944,7 @@ describe('MarketingView', () => {
         'POST /api/campaigns': jsonResponse({ error: 'That name is taken.' }, false, 409),
       })
 
-      render(<MarketingView jobTypes={jobTypes} />)
+      render(<MarketingView />)
       fireEvent.change(await screen.findByTestId('campaign-name'), {
         target: { value: 'August offer' },
       })
@@ -945,13 +959,13 @@ describe('MarketingView', () => {
 
   describe('streams in the campaign list', () => {
     it('labels each campaign with the stream it spends', async () => {
-      render(<MarketingView jobTypes={jobTypes} />)
+      render(<MarketingView />)
 
       expect(await screen.findByTestId('campaign-stream-camp-1')).toHaveTextContent('Newsletter')
     })
 
     it('narrows the list to one stream, starting again from the first page', async () => {
-      render(<MarketingView jobTypes={jobTypes} />)
+      render(<MarketingView />)
 
       fireEvent.change(await screen.findByTestId('campaign-stream-filter'), {
         target: { value: 'programs' },
@@ -972,7 +986,7 @@ describe('MarketingView', () => {
 
   describe('awaiting approval', () => {
     it('narrows the list to campaigns waiting for approval', async () => {
-      render(<MarketingView jobTypes={jobTypes} />)
+      render(<MarketingView />)
 
       fireEvent.change(await screen.findByTestId('campaign-status-filter'), {
         target: { value: 'in_review' },
@@ -1007,7 +1021,7 @@ describe('MarketingView', () => {
         }),
       })
 
-      render(<MarketingView jobTypes={jobTypes} />)
+      render(<MarketingView />)
       fireEvent.click(await screen.findByText('Send for review'))
 
       await waitFor(() => {
@@ -1019,7 +1033,7 @@ describe('MarketingView', () => {
     })
 
     it('returns a campaign under review to draft for corrections', async () => {
-      render(<MarketingView jobTypes={jobTypes} />)
+      render(<MarketingView />)
 
       fireEvent.click(await screen.findByTestId('draft-camp-1'))
 
@@ -1054,7 +1068,7 @@ describe('MarketingView', () => {
         }),
       })
 
-      render(<MarketingView jobTypes={jobTypes} />)
+      render(<MarketingView />)
       fireEvent.click(await screen.findByTestId('retry-camp-1'))
 
       // A retry sends email, so it goes through the same confirmation as a first send.
@@ -1093,7 +1107,7 @@ describe('MarketingView', () => {
         'PATCH /api/campaigns/camp-1': jsonResponse({ campaign: {} }),
       })
 
-      render(<MarketingView jobTypes={jobTypes} />)
+      render(<MarketingView />)
       fireEvent.change(await screen.findByTestId('edit-automation-camp-1'), {
         target: { value: 'auto-9' },
       })
@@ -1122,7 +1136,7 @@ describe('MarketingView', () => {
         }),
       })
 
-      render(<MarketingView jobTypes={jobTypes} />)
+      render(<SegmentsPanel jobTypes={jobTypes} onChanged={jest.fn()} />)
 
       expect(await screen.findByTestId('segment-preview-empty')).toHaveTextContent(
         /cannot\s+generate copy or send/i
@@ -1152,7 +1166,7 @@ describe('MarketingView', () => {
         }),
       })
 
-      render(<MarketingView jobTypes={jobTypes} />)
+      render(<MarketingView />)
 
       fireEvent.click(await screen.findByTestId('review-copy-camp-1'))
 
@@ -1190,7 +1204,7 @@ describe('MarketingView', () => {
       // so the label has to say so or the feature is undiscoverable.
       it('offers to write the copy when a draft has none', async () => {
         withCampaign({ status: 'draft', merge_fields: {} })
-        render(<MarketingView jobTypes={jobTypes} />)
+        render(<MarketingView />)
 
         expect(await screen.findByTestId('review-copy-camp-1')).toHaveTextContent(
           'Write copy with AI'
@@ -1199,7 +1213,7 @@ describe('MarketingView', () => {
 
       it('offers to edit once a draft has copy', async () => {
         withCampaign({ status: 'draft', merge_fields: { subject: 'Book a review' } })
-        render(<MarketingView jobTypes={jobTypes} />)
+        render(<MarketingView />)
 
         expect(await screen.findByTestId('review-copy-camp-1')).toHaveTextContent(
           'Edit copy'
@@ -1208,7 +1222,7 @@ describe('MarketingView', () => {
 
       it('offers to view copy that is past review and locked', async () => {
         withCampaign({ status: 'approved', merge_fields: { subject: 'Book a review' } })
-        render(<MarketingView jobTypes={jobTypes} />)
+        render(<MarketingView />)
 
         expect(await screen.findByTestId('review-copy-camp-1')).toHaveTextContent(
           'View copy'
@@ -1217,7 +1231,7 @@ describe('MarketingView', () => {
 
       it('says hide while the panel is open', async () => {
         withCampaign({ status: 'draft', merge_fields: {} })
-        render(<MarketingView jobTypes={jobTypes} />)
+        render(<MarketingView />)
 
         fireEvent.click(await screen.findByTestId('review-copy-camp-1'))
 
@@ -1226,7 +1240,7 @@ describe('MarketingView', () => {
 
       it('ignores blank merge fields when deciding the label', async () => {
         withCampaign({ status: 'draft', merge_fields: { subject: '   ' } })
-        render(<MarketingView jobTypes={jobTypes} />)
+        render(<MarketingView />)
 
         expect(await screen.findByTestId('review-copy-camp-1')).toHaveTextContent(
           'Write copy with AI'
@@ -1235,14 +1249,14 @@ describe('MarketingView', () => {
     })
 
     it('stays closed until asked for', async () => {
-      render(<MarketingView jobTypes={jobTypes} />)
+      render(<MarketingView />)
 
       await screen.findByTestId('review-copy-camp-1')
       expect(screen.queryByTestId('campaign-copy-editor')).toBeNull()
     })
 
     it('opens and closes on the same control', async () => {
-      render(<MarketingView jobTypes={jobTypes} />)
+      render(<MarketingView />)
 
       const toggle = await screen.findByTestId('review-copy-camp-1')
       fireEvent.click(toggle)
@@ -1253,7 +1267,7 @@ describe('MarketingView', () => {
     })
 
     it('reports its expanded state to assistive technology', async () => {
-      render(<MarketingView jobTypes={jobTypes} />)
+      render(<MarketingView />)
 
       const toggle = await screen.findByTestId('review-copy-camp-1')
       expect(toggle).toHaveAttribute('aria-expanded', 'false')
@@ -1268,7 +1282,7 @@ describe('MarketingView', () => {
     it('locks the copy of a campaign already under review', async () => {
       // The default fixture campaign is in_review, so its copy must not be editable --
       // rewriting it would leave the approval attributed to text nobody read.
-      render(<MarketingView jobTypes={jobTypes} />)
+      render(<MarketingView />)
 
       fireEvent.click(await screen.findByTestId('review-copy-camp-1'))
 
@@ -1293,7 +1307,7 @@ describe('MarketingView', () => {
         }),
       })
 
-      render(<MarketingView jobTypes={jobTypes} />)
+      render(<MarketingView />)
       fireEvent.click(await screen.findByTestId('review-copy-camp-1'))
 
       expect(screen.queryByTestId('copy-locked')).toBeNull()
@@ -1315,7 +1329,7 @@ describe('MarketingView', () => {
       // from the registry.
       routeFetch({ ...defaultHandlers, 'GET /api/templates': jsonResponse({ templates }) })
 
-      render(<MarketingView jobTypes={jobTypes} />)
+      render(<MarketingView />)
 
       expect(
         await screen.findByRole('option', { name: 'August free courses' })
@@ -1325,7 +1339,7 @@ describe('MarketingView', () => {
     it('names the automation on a campaign row instead of showing a bare id', async () => {
       routeFetch({ ...defaultHandlers, 'GET /api/templates': jsonResponse({ templates }) })
 
-      render(<MarketingView jobTypes={jobTypes} />)
+      render(<MarketingView />)
 
       // Once on the campaign's meta line, and once as an option in each picker — the
       // meta line is the one that replaces a bare UUID with something readable.
@@ -1337,7 +1351,7 @@ describe('MarketingView', () => {
     })
 
     it('checks the automation ids of the whole page at once', async () => {
-      render(<MarketingView jobTypes={jobTypes} />)
+      render(<MarketingView />)
 
       await waitFor(() => {
         const call = mockFetch.mock.calls.find(
@@ -1357,7 +1371,7 @@ describe('MarketingView', () => {
         }),
       })
 
-      render(<MarketingView jobTypes={jobTypes} />)
+      render(<MarketingView />)
 
       expect(await screen.findByTestId('automation-warning-camp-1')).toHaveTextContent(
         /Every recipient would fail/i
@@ -1374,7 +1388,7 @@ describe('MarketingView', () => {
         }),
       })
 
-      render(<MarketingView jobTypes={jobTypes} />)
+      render(<MarketingView />)
 
       await screen.findByText('August offer')
       expect(screen.queryByTestId('automation-warning-camp-1')).toBeNull()
@@ -1388,7 +1402,7 @@ describe('MarketingView', () => {
         'GET /api/campaigns': jsonResponse({ error: 'boom' }, false, 500),
       })
 
-      render(<MarketingView jobTypes={jobTypes} />)
+      render(<MarketingView />)
 
       const banner = await screen.findByTestId('marketing-load-error')
       expect(banner).toHaveTextContent(/campaigns/i)
@@ -1401,7 +1415,7 @@ describe('MarketingView', () => {
         'GET /api/templates': jsonResponse({ error: 'boom' }, false, 503),
       })
 
-      render(<MarketingView jobTypes={jobTypes} />)
+      render(<MarketingView />)
 
       const banner = await screen.findByTestId('marketing-load-error')
       expect(banner).toHaveTextContent(/templates \(503\)/i)
