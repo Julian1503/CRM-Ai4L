@@ -909,3 +909,67 @@ describe('routes and URL state (UX plan P1.1, P5.1)', () => {
     expect(await screen.findByTestId('toast-error')).toHaveTextContent('may have been archived');
   });
 });
+
+describe('bulk archive and remove from the selection and the row menu', () => {
+  const { __resetSupabaseMock } = jest.requireMock('@/lib/supabaseClient');
+
+  const row = (id: string, firstName: string) => ({ id, first_name: firstName, last_name: 'Tester', email: `${id}@example.com` });
+  const A = '33333333-3333-4333-8333-333333333331';
+  const B = '33333333-3333-4333-8333-333333333332';
+
+  const lifecycleCalls = () =>
+    mockFetch.mock.calls
+      .filter((call) => String(call[0]) === '/api/contacts/lifecycle')
+      .map((call) => JSON.parse(String((call[1] as RequestInit).body)));
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    __resetSupabaseMock();
+    routeFetch({
+      '/api/contacts/lifecycle': jsonResponse({ updated: 1, action: 'archive' }),
+      '/api/contacts?': jsonResponse({ contacts: [row(A, 'Ada'), row(B, 'Bea')], total: 2, page: 1, pageSize: 50, hasMore: false }),
+    });
+  });
+
+  it('archives one contact from its right-click menu after confirming', async () => {
+    renderApp();
+    const ada = (await screen.findByText(/Ada Tester/)).closest('tr')!;
+
+    fireEvent.contextMenu(ada, { clientX: 120, clientY: 200 });
+    const menu = screen.getByRole('menu', { name: 'Ada Tester' });
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Archive' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Archive 1 contact' }));
+
+    await waitFor(() => expect(lifecycleCalls()).toEqual([{ contactIds: [A], action: 'archive' }]));
+    expect(await screen.findByTestId('toast-success')).toHaveTextContent('Archived 1 contact.');
+  });
+
+  it('removes every ticked contact from the pinned toolbar and clears the selection', async () => {
+    renderApp();
+    await screen.findByText(/Ada Tester/);
+
+    fireEvent.click(screen.getByTestId(`select-contact-${A}`));
+    fireEvent.click(screen.getByTestId(`select-contact-${B}`));
+    const toolbar = screen.getByRole('toolbar', { name: 'Selected contacts' });
+    expect(toolbar).toHaveTextContent('2 contacts selected');
+
+    fireEvent.click(within(toolbar).getByRole('button', { name: 'Remove…' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove 2 contacts' }));
+
+    await waitFor(() => expect(lifecycleCalls()).toEqual([{ contactIds: [A, B], action: 'remove' }]));
+    await waitFor(() => expect(screen.queryByRole('toolbar', { name: 'Selected contacts' })).toBeNull());
+  });
+
+  it('acts on the whole selection when the right-clicked row is part of it', async () => {
+    renderApp();
+    await screen.findByText(/Ada Tester/);
+
+    fireEvent.click(screen.getByTestId(`select-contact-${A}`));
+    fireEvent.click(screen.getByTestId(`select-contact-${B}`));
+    fireEvent.contextMenu(screen.getByText(/Bea Tester/).closest('tr')!, { clientX: 10, clientY: 10 });
+
+    const menu = screen.getByRole('menu', { name: '2 selected contacts' });
+    expect(within(menu).getByRole('menuitem', { name: 'Archive 2 selected' })).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitem', { name: 'Deselect' })).toBeInTheDocument();
+  });
+});

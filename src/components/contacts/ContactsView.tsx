@@ -6,6 +6,7 @@ import styles from '@/app/page.module.css'
 import ContactDrawer from '@/components/ContactDrawer'
 import ContactTable, { type TableContact } from '@/components/ContactTable'
 import DashboardStats from '@/components/DashboardStats'
+import BulkContactActions from '@/components/contacts/BulkContactActions'
 import BulkTagActions from '@/components/contacts/BulkTagActions'
 import FilterBar, { type StatusFilter } from '@/components/contacts/FilterBar'
 import type { OrganisationOption } from '@/components/contacts/OrganisationPicker'
@@ -21,6 +22,7 @@ import { hasSupabaseConfig } from '@/lib/supabaseClient'
 import { useContactDeepLink } from './useContactDeepLink'
 import { useContactList, useContactStats } from './useContactList'
 import { useContactListUrl } from './useContactListUrl'
+import { useContactQuickActions } from './useContactQuickActions'
 import { useFilterLabels } from './useFilterLabels'
 
 type ContactSavePayload = Partial<TableContact> & { organisationName?: string }
@@ -191,6 +193,19 @@ export default function ContactsView() {
     await refresh()
   }
 
+  const closeDrawer = useCallback(() => {
+    setSelectedContact(null)
+    closeDeepLink()
+  }, [closeDeepLink])
+
+  const quick = useContactQuickActions({
+    selection,
+    onOpen: setSelectedContact,
+    refresh,
+    openContactId: selectedContact?.id || null,
+    onCloseContact: closeDrawer,
+  })
+
   const handleSort = (key: string) => {
     const dir = state.sort === key && state.dir === 'asc' ? 'desc' : 'asc'
     navigate({ sort: key as ContactListState['sort'], dir, page: 1 })
@@ -256,6 +271,12 @@ export default function ContactsView() {
         onIndustryFilterChange={(industry) => navigate({ industry })}
       />
 
+      <BulkContactActions
+        selectedIds={selection.list}
+        onRequest={quick.requestForSelection}
+        onClear={selection.clear}
+      />
+
       {/* The selection is kept after tagging: the user may add a second set of tags to the
           same people, and clearing it is one click away. */}
       <BulkTagActions selectedIds={selection.list} onApplied={() => void refresh()} />
@@ -272,7 +293,11 @@ export default function ContactsView() {
         onTogglePage={selection.togglePage}
         loadError={list.error}
         onRetry={() => void list.reload()}
+        onRowContextMenu={quick.openMenu}
       />
+
+      {quick.menuElement}
+      {quick.dialogElement}
 
       <Pagination
         page={state.page}
@@ -288,10 +313,7 @@ export default function ContactsView() {
 
       <ContactDrawer
         contact={selectedContact}
-        onClose={() => {
-          setSelectedContact(null)
-          closeDeepLink()
-        }}
+        onClose={closeDrawer}
         onSave={saveContact}
         onDelete={archiveContact}
         onRemove={removeContact}

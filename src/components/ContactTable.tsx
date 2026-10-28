@@ -98,6 +98,11 @@ interface ContactTableProps {
    */
   loadError?: string | null;
   onRetry?: () => void;
+  /**
+   * Right-click (or the keyboard's context-menu key) on a row. When supplied the browser
+   * menu is replaced by the page's own quick actions.
+   */
+  onRowContextMenu?: (contact: TableContact, position: { x: number; y: number }) => void;
 }
 
 export default function ContactTable({
@@ -112,6 +117,7 @@ export default function ContactTable({
   onTogglePage,
   loadError = null,
   onRetry,
+  onRowContextMenu,
 }: ContactTableProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const selectAllRef = useRef<HTMLInputElement>(null);
@@ -304,6 +310,20 @@ export default function ContactTable({
                 className={`${styles.tr} ${isRowSelected ? styles.trSelected : ''}`}
                 data-selected={isRowSelected ? 'true' : undefined}
                 onClick={() => onSelectContact(contact)}
+                onContextMenu={
+                  onRowContextMenu
+                    ? (event) => {
+                        event.preventDefault();
+                        // The keyboard's menu key reports 0,0; open beside the row instead.
+                        const box = event.currentTarget.getBoundingClientRect();
+                        const fromKeyboard = event.clientX === 0 && event.clientY === 0;
+                        onRowContextMenu(contact, {
+                          x: fromKeyboard ? box.left + 24 : event.clientX,
+                          y: fromKeyboard ? box.bottom : event.clientY,
+                        });
+                      }
+                    : undefined
+                }
               >
                 {isSelectable && (
                   // Stops at the cell: ticking a row is a different intent from opening

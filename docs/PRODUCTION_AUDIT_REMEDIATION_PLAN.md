@@ -651,7 +651,7 @@ All items start pending. Mark an item complete only with merged implementation, 
 | M2 | Failures presented as empty/stale data | 9.2 | Done: contacts keep the last page with a retry banner (c275659); Campaigns names each failed request and offers Try again (2026-10-28) |
 | M3 | Organisation ordering and unstable pagination | 9.3 | Done: ordered by `organisation(name)` with an `id` tie-breaker (`src/lib/contacts/query.ts`) |
 | M4 | Calendly rescheduling/event ordering | 8.3 | Implemented; locally verified after fix 20261008020000 (unrelated appointment could take over a booked booking; parked reschedule cancels lost their flag). Evidence: `db:verify -- durable` §5; integration: create→cancel, cancel→create + retry, reschedule both orders, all-parked reschedule, unrelated appointment. Deploy: runJobs must replay `rescheduled` |
-| M5 | Insufficient contrast | 9.4 | Pending client sign-off on the AA palette — docs/ACCESSIBILITY.md §3 |
+| M5 | Insufficient contrast | 9.4 | Done (2026-10-28): AA palette applied through the existing tokens, brand colours kept for decoration only, contrast enforced in CI — docs/ACCESSIBILITY.md §3 |
 | M6 | Spreadsheet parser in initial bundle | 10.1 | Done: per-workspace routes keep it off the dashboard; SheetJS now lives in server-only `excelWorkbook.ts`, so `/imports` ships only the pure row mapping (2026-10-28) |
 | M7 | Incomplete readiness checks | 5.4 | Implemented: feature-aware preflight + online access/contract checks; `npm run test:scripts` |
 | L1 | Unnamed Notes field | 9.4 | Done: `ContactDrawer` labels `contact-notes` |
