@@ -165,7 +165,7 @@ export default function DashboardStats({
   };
 
   return (
-    <div ref={containerRef} className={styles.statsGrid}>
+    <div ref={containerRef} className={styles.statsGrid} data-allow-overflow>
       <div className={styles.cardShell}>
         <div className={styles.cardInner}>
           <div className={styles.header}>

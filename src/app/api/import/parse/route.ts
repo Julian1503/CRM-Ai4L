@@ -3,9 +3,9 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { getSession } from '@/lib/auth/dal'
 import {
   isSupportedSpreadsheetName,
-  parseExcelBuffer,
   SUPPORTED_SPREADSHEET_EXTENSIONS,
 } from '@/lib/excelParser'
+import { parseExcelBuffer } from '@/lib/excelWorkbook'
 
 export const runtime = 'nodejs'
 

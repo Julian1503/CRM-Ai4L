@@ -1380,4 +1380,38 @@ describe('MarketingView', () => {
       expect(screen.queryByTestId('automation-warning-camp-1')).toBeNull()
     })
   })
+
+  describe('a failed load (audit M2)', () => {
+    it('says the campaigns could not load instead of showing an empty list', async () => {
+      routeFetch({
+        ...defaultHandlers,
+        'GET /api/campaigns': jsonResponse({ error: 'boom' }, false, 500),
+      })
+
+      render(<MarketingView jobTypes={jobTypes} />)
+
+      const banner = await screen.findByTestId('marketing-load-error')
+      expect(banner).toHaveTextContent(/campaigns/i)
+      expect(banner).toHaveTextContent(/500/)
+    })
+
+    it('names only what failed, keeps what loaded, and clears once a retry succeeds', async () => {
+      routeFetch({
+        ...defaultHandlers,
+        'GET /api/templates': jsonResponse({ error: 'boom' }, false, 503),
+      })
+
+      render(<MarketingView jobTypes={jobTypes} />)
+
+      const banner = await screen.findByTestId('marketing-load-error')
+      expect(banner).toHaveTextContent(/templates \(503\)/i)
+      expect(banner).not.toHaveTextContent(/campaigns/i)
+      expect(await screen.findByText('August offer')).toBeInTheDocument()
+
+      routeFetch(defaultHandlers)
+      fireEvent.click(screen.getByRole('button', { name: /try again/i }))
+
+      await waitFor(() => expect(screen.queryByTestId('marketing-load-error')).toBeNull())
+    })
+  })
 })

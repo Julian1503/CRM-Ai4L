@@ -69,4 +69,19 @@ test.describe('responsive layout', () => {
       expect(navBox!.x + navBox!.width).toBeLessThanOrEqual(width + TOLERANCE_PX)
     })
   }
+
+  // Audit P1: on a phone the counts must not push the list's controls off the first
+  // screen. 390x844 is a common phone viewport; 320 is the narrowest we support.
+  for (const viewport of [{ width: 320, height: 640 }, { width: 390, height: 844 }]) {
+    test(`contacts search is on the first screen at ${viewport.width}x${viewport.height}`, async ({ page }) => {
+      await page.setViewportSize(viewport)
+      await openDashboard(page)
+
+      const search = page.getByLabel('Search contacts')
+      await expect(search).toBeVisible()
+      const box = await search.boundingBox()
+      expect(box, 'search box has no layout box').not.toBeNull()
+      expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.height)
+    })
+  }
 })

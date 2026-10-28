@@ -7,8 +7,7 @@ const mockParseExcelBuffer = jest.fn()
 jest.mock('@/lib/auth/dal', () => ({ getSession: () => mockGetSession() }))
 // Only the parse itself is doubled; the format allowlist is the real one, so these
 // tests fail if the route and the parser ever disagree about what can be uploaded.
-jest.mock('@/lib/excelParser', () => ({
-  ...jest.requireActual('@/lib/excelParser'),
+jest.mock('@/lib/excelWorkbook', () => ({
   parseExcelBuffer: (buffer: Buffer) => mockParseExcelBuffer(buffer),
 }))
 
