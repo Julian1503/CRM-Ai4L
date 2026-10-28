@@ -79,14 +79,9 @@ the platform, anonymous requests refused with 401 rather than 200, unsigned webh
 refused with 401 rather than a retryable 5xx, and no server secret readable in anything
 the host serves.
 
-**The region is wrong for this client.** Supabase is in `ap-northeast-1` (Tokyo) and
-Vercel functions default to `iad1` (Washington DC). `vercel.json` pins functions to `hnd1`
-so they sit with the database — but the underlying question is for the client: an
-Australian business's contact database, 5,202 people with names, emails, phone numbers and
-employers, is stored in Japan. APP 8 governs cross-border disclosure of personal
-information. Supabase cannot change a project's region in place, so moving to
-`ap-southeast-2` means a new project and a migration. Cost and downtime, not a technical
-call.
+**The region was wrong for this client** — resolved 2026-10-28. The database moved from
+`ap-northeast-1` (Tokyo) to a new `ap-southeast-2` (Sydney) project and functions from
+`hnd1` to `syd1`; see `docs/DEPLOYMENT.md` §2.
 
 **Two documentation defects, both of the kind that only bite at deploy time:**
 

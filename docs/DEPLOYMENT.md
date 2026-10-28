@@ -26,22 +26,23 @@ matter how complete the code is.
 
 ## 2. Region
 
-The Supabase project is in **`ap-northeast-1` (Tokyo)**. Vercel functions default to
-`iad1` (Washington DC), which would put the Pacific *and* the Atlantic between a request
-handler and its database on every query.
-
-`vercel.json` pins functions to `hnd1` (Tokyo) to sit alongside the database.
+The Supabase project is **`CRM-AU` (`cgsktvyfzburacvzwneu`) in `ap-southeast-2`
+(Sydney)**, so an Australian business's contact data stays in Australia (APP 8). Vercel
+functions default to `iad1` (Washington DC); `vercel.json` pins them to `syd1` to sit
+alongside the database.
 
 **If the database region changes, change `vercel.json` in the same commit.** The pin is
 only correct relative to where Postgres actually is.
 
-> **Worth raising with the client, not decided here.** This is an Australian business
-> whose contact database — 5,202 people, with names, emails, phone numbers and employers
-> — is stored in Japan. Australian Privacy Principle 8 imposes accountability obligations
-> on cross-border disclosure of personal information. Moving the project to
-> `ap-southeast-2` (Sydney) would address both residency and latency, but Supabase cannot
-> change a project's region in place: it means a new project and a data migration. That
-> is a cost-and-downtime decision for the client, not a technical one.
+History: until 2026-10-28 the project was `hlbabfhmdqkigxwhzeqc` in `ap-northeast-1`
+(Tokyo) with functions on `hnd1`. Supabase cannot move a project between regions, so the
+move was a new project: migrations replayed, data restored from a dump (auth users
+included), storage objects copied through the Storage API, auth settings re-applied,
+then the three Supabase variables swapped on Vercel. The Tokyo project is kept paused as
+the rollback; the dump is in `CRM-Ai4L-backups/prod-2026-10-28-pre-au-migration`.
+
+The content engine on Railway does not talk to Supabase, only to the CRM, so it did not
+move. Railway has no Australian region; Singapore is the nearest.
 
 ---
 

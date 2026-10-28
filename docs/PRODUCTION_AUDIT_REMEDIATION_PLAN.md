@@ -647,21 +647,21 @@ All items start pending. Mark an item complete only with merged implementation, 
 | H10 | Payment return/webhook race | 8.2 | Implemented; locally verified: single `apply_checkout_payment` for return page and webhook (checkout id, $0 AUD, never backwards, mismatch refused), one `notification_outbox` email per booking with backoff. Evidence: `db:verify -- durable` §3–4; `webhooks.integration.test.ts` (browser-first, webhook-first, simultaneous, different checkout) — docs/WEBHOOKS.md |
 | H11 | Webhook claim lost after process failure | 8.1 | Implemented; locally verified: ledger outcomes + 120 s leases, owner-only completion, business change and completion in one transaction, legacy rows flagged. Evidence: `db:verify -- durable` §1–2; integration: killed-after-claim redelivery, DB failure before completion, 6 concurrent duplicates → 1 processed — docs/WEBHOOKS.md (legacy reconciliation) |
 | H12 | Schedule advances before durable work | 8.4 | Implemented: durable occurrences recorded atomically with the advance, leased drafting with retry/backoff, catch-up = most recent only (older skipped with reason, 14.4 default), failed/skipped shown with Retry; `db:verify -- occurrences`, integration test — docs/CAMPAIGN_DELIVERY.md. Deploy: run the data-review query |
-| M1 | Stale search responses | 9.1 | Pending |
-| M2 | Failures presented as empty/stale data | 9.2 | Pending |
-| M3 | Organisation ordering and unstable pagination | 9.3 | Pending |
+| M1 | Stale search responses | 9.1 | Done (761927b/c275659): only the newest request answers (`useContactList.ts` `createLatestRequest`), debounced URL state |
+| M2 | Failures presented as empty/stale data | 9.2 | Done: contacts keep the last page with a retry banner (c275659); Campaigns names each failed request and offers Try again (2026-10-28) |
+| M3 | Organisation ordering and unstable pagination | 9.3 | Done: ordered by `organisation(name)` with an `id` tie-breaker (`src/lib/contacts/query.ts`) |
 | M4 | Calendly rescheduling/event ordering | 8.3 | Implemented; locally verified after fix 20261008020000 (unrelated appointment could take over a booked booking; parked reschedule cancels lost their flag). Evidence: `db:verify -- durable` §5; integration: create→cancel, cancel→create + retry, reschedule both orders, all-parked reschedule, unrelated appointment. Deploy: runJobs must replay `rescheduled` |
-| M5 | Insufficient contrast | 9.4 | Pending |
-| M6 | Spreadsheet parser in initial bundle | 10.1 | Pending |
+| M5 | Insufficient contrast | 9.4 | Pending client sign-off on the AA palette — docs/ACCESSIBILITY.md §3 |
+| M6 | Spreadsheet parser in initial bundle | 10.1 | Done: per-workspace routes keep it off the dashboard; SheetJS now lives in server-only `excelWorkbook.ts`, so `/imports` ships only the pure row mapping (2026-10-28) |
 | M7 | Incomplete readiness checks | 5.4 | Implemented: feature-aware preflight + online access/contract checks; `npm run test:scripts` |
-| L1 | Unnamed Notes field | 9.4 | Pending |
-| P1 | Mobile task controls below statistics | 9.5 | Pending |
-| P2 | Workspace/filter state lost on refresh | 9.6 | Pending |
+| L1 | Unnamed Notes field | 9.4 | Done: `ContactDrawer` labels `contact-notes` |
+| P1 | Mobile task controls below statistics | 9.5 | Done: under 640 px the counts are one compact, sideways-scrolling row; E2E checks search is on the first screen at 320 and 390 px (2026-10-28) |
+| P2 | Workspace/filter state lost on refresh | 9.6 | Done (c275659): a route per workspace; contacts search, filters, sort and page in the URL |
 | P3 | Import change preview | 7.3 | Implemented: database-computed change preview, rejected-rows CSV, token-checked commit |
-| A1 | Business writes in oversized client shell | 10.2 | Pending |
+| A1 | Business writes in oversized client shell | 10.2 | Done: `src/app/page.tsx` is a redirect, `CrmShell` per route, writes go through API routes and `save_contact` |
 | A2 | Per-campaign report requests | 10.3 | Implemented: SQL batch summaries in the list response + bounded batch endpoint |
 | T1 | Authenticated CI and obsolete smoke tests | 4.1 | Implemented: CI `integration` job on local Supabase; seeded identities; smoke specs updated |
-| T2 | Missing concurrency/integration protection | 4.2 and phase acceptance tests | In progress: migration replay, guarded `db:verify`, membership + delivery suites, Postgres integration tests (race, row cap, fault injection) |
+| T2 | Missing concurrency/integration protection | 4.2 and phase acceptance tests | Done: CI `integration` job runs `supabase start`, `db:verify` and `test:integration` (race, row cap, fault injection) |
 
 ### Definition of done
 

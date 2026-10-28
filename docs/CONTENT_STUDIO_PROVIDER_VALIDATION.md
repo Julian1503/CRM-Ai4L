@@ -24,7 +24,7 @@ Estado inicial (30-09-2026): todas pendientes. El código se entregó y probó s
 
 | # | Red | Comprobación | Estado |
 | --- | --- | --- | --- |
-| SO-1 | Meta | Versión Graph vigente (WRCC usaba `v23.0`) y permisos `pages_manage_posts`, `pages_read_engagement`, `instagram_content_publish`, `business_management` aprobados para la app. | Pendiente |
+| SO-1 | Meta | Versión Graph vigente (WRCC usaba `v23.0`) y permisos `pages_manage_posts`, `pages_read_engagement`, `instagram_content_publish`, `business_management` concedidos. | Versión: `v25.0` (28-10-2026). Sin App Review: la app queda en modo desarrollo y las personas que administran las páginas del cliente se agregan como administradoras de la app, lo que alcanza para publicar en sus propias cuentas. Pendiente: probar SO-2/SO-3/SO-5 con esas cuentas. |
 | SO-2 | Facebook | Post de texto, 1 foto y multi-foto en página de pruebas; un 5xx simulado en la llamada pública queda `uncertain` y no duplica. | Pendiente |
 | SO-3 | Instagram | Imagen y carrusel desde URL pública de `content-public`; relación de aspecto 0.8–1.91 y ancho ≥ 320 validados en preflight. | Pendiente |
 | SO-4 | LinkedIn | ~~Versión `LinkedIn-Version` vigente; organización frente a miembro; multiimagen.~~ | Descartado — fuera de alcance por decisión del cliente (2026-10-28) |
@@ -36,8 +36,8 @@ Una red se añade a `CONTENT_SOCIAL_PLATFORMS` solo cuando sus filas estén supe
 
 | # | Comprobación | Estado |
 | --- | --- | --- |
-| GEN-1 | Proveedor de texto real (Gemini u OpenAI) con límites de uso para el equipo de prueba; se registran modelo, versión de prompt y uso. | Pendiente |
-| GEN-2 | Generación de imágenes real (OpenAI) con presupuesto por entorno. | Pendiente |
+| GEN-1 | Proveedor de texto real (Gemini u OpenAI) con límites de uso para el equipo de prueba; se registran modelo, versión de prompt y uso. | En producción desde 10-2026 con OpenAI (`PROMPT_VERSION ai4l-2026-10-v1`). Un fallo `llm_invalid` del 18-10 (preheader > 120) quedó corregido ese día: los campos largos se recortan (761a821). Falta fijar el límite de gasto mensual en OpenAI. |
+| GEN-2 | Generación de imágenes real (OpenAI) con presupuesto por entorno. | En producción desde 10-2026 (OpenAI). Falta el presupuesto mensual. |
 
 ## 4. Procedencia del código extraído
 
