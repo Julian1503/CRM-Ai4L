@@ -150,3 +150,46 @@
 .trendNeutral {
   color: var(--text-secondary);
 }
+
+/* Phones (audit P1): five stacked cards pushed the search and filters a full screen
+   down. Here the counts become one compact row that scrolls sideways inside itself,
+   so the controls the list is worked with stay above the fold. */
+@media (max-width: 640px) {
+  .statsGrid {
+    display: flex;
+    gap: var(--space-sm);
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    padding-bottom: 4px;
+    margin-bottom: var(--space-md);
+  }
+
+  .cardShell {
+    flex: 0 0 148px;
+    padding: 4px;
+    scroll-snap-align: start;
+  }
+
+  .cardInner {
+    min-height: 0;
+    padding: 10px 12px;
+  }
+
+  .header {
+    margin-bottom: 6px;
+  }
+
+  .iconWrapper {
+    width: 26px;
+    height: 26px;
+  }
+
+  .value {
+    font-size: 1.5rem;
+    margin-bottom: 0;
+  }
+
+  .trend {
+    display: none;
+  }
+}

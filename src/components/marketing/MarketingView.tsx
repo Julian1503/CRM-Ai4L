@@ -261,6 +261,9 @@ export default function MarketingView({ jobTypes, initialCampaignId }: Marketing
   const [pickableTruncated, setPickableTruncated] = useState(false)
 
   const [error, setError] = useState<string | null>(null)
+  // Kept apart from `error` so a successful reload clears it without wiping the
+  // outcome of an action the reload followed.
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
 
   // Per-campaign send reports, so a failure outlives the click that caused it.
@@ -427,6 +430,17 @@ export default function MarketingView({ jobTypes, initialCampaignId }: Marketing
           fetch('/api/templates'),
         ])
 
+      // A refused or failed request must not read as "no campaigns" (audit M2). What
+      // did load is applied; what did not keeps its last value and is named here.
+      const failed = [
+        ['campaigns', campaignsResponse],
+        ['segments', pickerResponse],
+        ['templates', templatesResponse],
+      ]
+        .filter(([, response]) => !(response as Response).ok)
+        .map(([name, response]) => `${name} (${(response as Response).status})`)
+      setLoadError(failed.length > 0 ? `Could not load ${failed.join(', ')}.` : null)
+
       if (campaignsResponse.ok) {
         const body = await campaignsResponse.json()
         const loaded: Campaign[] = body.campaigns ?? []
@@ -452,15 +466,14 @@ export default function MarketingView({ jobTypes, initialCampaignId }: Marketing
         const body = await templatesResponse.json()
         setTemplates(body.templates ?? [])
       }
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : 'Could not load marketing data.')
+    } catch (thrown) {
+      setLoadError(thrown instanceof Error ? thrown.message : 'Could not load marketing data.')
     }
   }, [
     campaignsPage,
     campaignsPageSize,
     campaignStreamFilter,
     awaitingOnly,
-    loadSendReports,
     checkAutomations,
   ])
 
@@ -845,6 +858,14 @@ export default function MarketingView({ jobTypes, initialCampaignId }: Marketing
 
   return (
     <div className={styles.layout}>
+      {loadError && (
+        <div className={styles.error} role="alert" data-testid="marketing-load-error">
+          {loadError} What is shown may be out of date.{' '}
+          <button type="button" className={`${styles.linkBtn} ${styles.inlineRetry}`} onClick={() => void load()}>
+            Try again
+          </button>
+        </div>
+      )}
       {error && (
         <div className={styles.error} role="alert">
           {error}

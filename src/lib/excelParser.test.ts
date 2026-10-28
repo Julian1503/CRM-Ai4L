@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
+import { parseExcelBuffer } from './excelWorkbook';
 import {
-  parseExcelBuffer,
   mapAndValidateRows,
   isSupportedSpreadsheetName,
   SUPPORTED_SPREADSHEET_EXTENSIONS,

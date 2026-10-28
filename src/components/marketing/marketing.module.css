@@ -1188,6 +1188,12 @@
   cursor: pointer;
 }
 
+.inlineRetry {
+  margin-bottom: 0;
+  color: inherit;
+  text-decoration: underline;
+}
+
 .linkBtn:hover {
   text-decoration: underline;
 }
