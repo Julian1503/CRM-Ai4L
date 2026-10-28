@@ -135,7 +135,7 @@
   height: 6px;
   border-radius: 50%;
   background-color: var(--accent);
-  box-shadow: 0 0 8px var(--accent);
+  box-shadow: 0 0 8px var(--brand-orange);
   animation: pulseDot 2s infinite alternate;
 }
 
@@ -508,7 +508,7 @@
   border-radius: 50%;
   background-color: var(--primary);
   border: 2px solid var(--bg-card);
-  box-shadow: 0 0 6px var(--primary);
+  box-shadow: 0 0 6px var(--brand-cyan);
   top: 5px;
 }
 

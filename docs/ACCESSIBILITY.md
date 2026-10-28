@@ -65,12 +65,11 @@ inline error red #B42318 (6.57 on white).
 and `color: var(--primary)` in about 70: links, active tabs, link-style buttons. Both
 fail AA on every background in the app.
 
-## 3. Proposed AA palette (needs client sign-off)
+## 3. AA palette (applied 2026-10-28)
 
 Same hues, darkened just enough to reach 4.5:1 on the darkest background each token
 appears on (`--bg-surface` #DEF1F7). The bright brand cyan stays as a fill and accent
-colour; text and focus use the darker variants. **Not applied**: changing the brand
-colours needs the client's approval.
+colour; text and focus use the darker variants. Approved and applied on 2026-10-28.
 
 | New / changed token | Value | On white | On #DEF1F7 | White text on it |
 | --- | --- | --- | --- | --- |
@@ -92,10 +91,15 @@ Lower-churn alternative: keep the cyan button fills and switch their label to
 `--text-primary` (5.74:1 on #01ACDB). That keeps the brand look but gives dark-on-cyan
 buttons, which is a visible style change of its own.
 
-Migration once approved: define the new tokens in `globals.css`, then replace
-`color: var(--primary)` with `var(--primary-text)` and the button backgrounds with
-`--primary-strong` / `--accent-strong` / `--danger-strong`, and set
-`A11Y_ENFORCE_CONTRAST=true` in CI so the gap cannot reopen.
+How it was applied: rather than add `--primary-text` / `--primary-strong` and rewrite
+~130 call sites, the existing tokens took the AA values (`--primary` #017595,
+`--primary-hover` #015F79, `--accent` and `--warning` #A35904, `--success` #157C3B,
+`--danger` #D71212 with `--danger-hover` #B10F0F, `--info` and `--border-focus` #017595,
+and the two greys above). Every text, outline and filled button that used them is AA
+with no per-file change. The bright originals live on as `--brand-cyan` #01ACDB and
+`--brand-orange` #F98908, used only for marks that carry no text: the logo dot, the
+active-nav dot, glows and the suggestion gradient. `A11Y_ENFORCE_CONTRAST=true` is set
+in the CI integration job, so a contrast regression fails the build.
 
 ## 4. Changes this round (Tanda 3)
 

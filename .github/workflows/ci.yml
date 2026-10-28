@@ -85,6 +85,8 @@ jobs:
       E2E_UNAPPROVED_EMAIL: e2e-unapproved@example.test
       E2E_DISABLED_EMAIL: e2e-disabled@example.test
       NEXT_PUBLIC_APP_URL: http://127.0.0.1:3100
+      # The AA palette is in (audit M5): a colour-contrast violation now fails the run.
+      A11Y_ENFORCE_CONTRAST: "true"
 
     steps:
       - uses: actions/checkout@v4

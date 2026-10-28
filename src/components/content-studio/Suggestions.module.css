@@ -32,7 +32,7 @@
   width: 0.5rem;
   height: 0.5rem;
   border-radius: 2px;
-  background: linear-gradient(135deg, var(--accent) 0 50%, var(--primary) 50% 100%);
+  background: linear-gradient(135deg, var(--brand-orange) 0 50%, var(--brand-cyan) 50% 100%);
   transform: rotate(45deg);
 }
 

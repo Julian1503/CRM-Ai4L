@@ -5,43 +5,51 @@
   --font-heading: var(--font-outfit), -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-body: var(--font-plus-jakarta-sans), -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 
-  /* HSL Colors - Celeste Light Corporate Palette */
-  --primary: #01ACDB;
-  --primary-hover: #0098c3;
+  /* Celeste light corporate palette, WCAG AA (audit M5, docs/ACCESSIBILITY.md §3).
+     The brand's bright cyan and orange read at 2.4-2.7:1 as text, so every token that
+     colours text, outlines or filled buttons uses the same hue darkened to 4.5:1 on
+     the darkest surface (#DEF1F7). The bright originals stay as --brand-* for marks
+     that carry no text: glows, dots, gradients. */
+  --brand-cyan: #01ACDB;
+  --brand-orange: #F98908;
+
+  --primary: #017595;
+  --primary-hover: #015F79;
   --primary-muted: #DEF1F7;
-  
-  --accent: #F98908;
+
+  --accent: #A35904;
   --accent-muted: #F0CAA1;
-  
+
   --bg-app: #EFF7F9;
   --bg-surface: #DEF1F7;
   --bg-card: #FFFFFF;
   --bg-highlight: #CBEBFC;
   --bg-cream: #F6EEE4;
-  
+
   --border: #CCD3DA;
-  --border-focus: #82D6ED;
+  --border-focus: #017595;
 
   --text-primary: #22262B;
-  --text-secondary: #717D8A;
-  --text-muted: #8FA0B0;
+  --text-secondary: #636D79;
+  --text-muted: #5B6E80;
   --text-on-primary: #FFFFFF;
 
   /* Status Colors */
-  --success: #22c55e;
+  --success: #157C3B;
   --success-bg: rgba(34, 197, 94, 0.08);
-  --warning: #F98908;
+  --warning: #A35904;
   --warning-bg: rgba(249, 137, 8, 0.08);
-  --danger: #ef4444;
+  --danger: #D71212;
+  --danger-hover: #B10F0F;
   --danger-bg: rgba(239, 68, 68, 0.08);
-  --info: #01ACDB;
+  --info: #017595;
   --info-bg: rgba(1, 172, 219, 0.08);
 
   /* Glassmorphism & Shadow Tokens */
   --glass-bg: rgba(255, 255, 255, 0.75);
   --glass-border: rgba(130, 214, 237, 0.4);
   --glass-blur: 16px;
-  
+
   --shadow-sm: 0 2px 8px -2px rgba(34, 38, 43, 0.04);
   --shadow-md: 0 8px 24px -4px rgba(34, 38, 43, 0.06);
   --shadow-lg: 0 16px 40px -8px rgba(34, 38, 43, 0.08);

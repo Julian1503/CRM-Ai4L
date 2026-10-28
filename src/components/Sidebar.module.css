@@ -66,8 +66,8 @@
 }
 
 .dot {
-  color: var(--accent);
-  text-shadow: 0 0 12px var(--accent);
+  color: var(--brand-orange);
+  text-shadow: 0 0 12px var(--brand-orange);
   font-weight: 900;
 }
 
@@ -154,9 +154,9 @@
   right: 16px;
   width: 6px;
   height: 6px;
-  background-color: var(--accent);
+  background-color: var(--brand-orange);
   border-radius: 50%;
-  box-shadow: 0 0 10px var(--accent);
+  box-shadow: 0 0 10px var(--brand-orange);
   animation: pulseDot 1.5s infinite alternate;
   transition: opacity var(--transition-normal), transform var(--transition-normal);
   opacity: 1;
