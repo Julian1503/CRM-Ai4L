@@ -5,10 +5,12 @@
 -- and an OAuth provider, with the LinkedIn-only author kinds 'organization' and
 -- 'member'. This narrows those checks so none of them can be stored again.
 --
--- No row is changed or removed (project rule: no physical deletes). If any row still
--- uses LinkedIn the migration stops with the counts, so an operator decides what to do
--- with that data; production is expected to have none (its social accounts are Facebook
--- and Instagram only, and it has no publications).
+-- No row is changed or removed (project rule: no physical deletes). Production holds
+-- some LinkedIn history from before the decision -- content items that listed it as a
+-- channel, their LinkedIn variants and expired OAuth states. Those rows are kept as
+-- written: the checks on those three tables are added NOT VALID, which refuses every
+-- new or updated row but leaves the existing ones alone. Social accounts have no
+-- LinkedIn rows, so their checks are validated outright.
 --
 -- A brand profile may still hold a 'linkedin' key in channel_rules from earlier edits.
 -- It is left as stored: the CRM ignores it when reading (src/lib/content-studio/mappers.ts)
@@ -16,33 +18,25 @@
 
 
 -- ---------------------------------------------------------------------------
--- 1. Refuse to run while anything still uses LinkedIn.
+-- 1. Refuse to run while a LinkedIn account exists or a LinkedIn generation is in
+--    flight. Both would break once the engine no longer knows the platform.
 -- ---------------------------------------------------------------------------
 do $$
 declare
-  v_items     bigint;
-  v_variants  bigint;
   v_accounts  bigint;
-  v_states    bigint;
   v_jobs      bigint;
 begin
-  select count(*) into v_items from public.content_items where 'linkedin' = any (channels);
-  select count(*) into v_variants from public.content_variants where channel = 'linkedin';
   select count(*) into v_accounts from public.social_accounts
    where platform = 'linkedin' or provider = 'linkedin' or author_kind in ('organization', 'member');
-  select count(*) into v_states from public.social_oauth_states where provider = 'linkedin';
-  -- A queued or running generation for LinkedIn would fail in the engine, which no
-  -- longer knows the channel. Finished jobs keep their input as history.
   select count(*) into v_jobs from public.content_jobs
    where status in ('queued', 'running')
      and jsonb_typeof(input -> 'channels') = 'array' and (input -> 'channels') ? 'linkedin';
 
-  if v_items + v_variants + v_accounts + v_states + v_jobs > 0 then
-    raise exception 'LinkedIn data still present; nothing was changed.'
+  if v_accounts + v_jobs > 0 then
+    raise exception 'LinkedIn accounts or generations still active; nothing was changed.'
       using errcode = 'P0001',
-            detail = format('content_items: %s, content_variants: %s, social_accounts: %s, social_oauth_states: %s, active content_jobs: %s',
-                            v_items, v_variants, v_accounts, v_states, v_jobs),
-            hint = 'Review these rows and decide how to retire them before applying 20261028000000_drop_linkedin.sql. Do not delete them.';
+            detail = format('social_accounts: %s, active content_jobs: %s', v_accounts, v_jobs),
+            hint = 'Disconnect the accounts and let the jobs finish before applying 20261028000000_drop_linkedin.sql. Do not delete them.';
   end if;
 end $$;
 
@@ -55,11 +49,11 @@ alter table public.content_items drop constraint content_items_channels_valid;
 alter table public.content_items add constraint content_items_channels_valid check (
   cardinality(channels) between 1 and 3
   and channels <@ array['facebook', 'instagram', 'email']::text[]
-);
+) not valid;
 
 alter table public.content_variants drop constraint content_variants_channel_check;
 alter table public.content_variants add constraint content_variants_channel_check
-  check (channel in ('facebook', 'instagram', 'email'));
+  check (channel in ('facebook', 'instagram', 'email')) not valid;
 
 alter table public.social_accounts drop constraint social_accounts_platform_check;
 alter table public.social_accounts add constraint social_accounts_platform_check
@@ -76,7 +70,7 @@ alter table public.social_accounts add constraint social_accounts_author_kind_ch
 
 alter table public.social_oauth_states drop constraint social_oauth_states_provider_check;
 alter table public.social_oauth_states add constraint social_oauth_states_provider_check
-  check (provider in ('meta', 'mock'));
+  check (provider in ('meta', 'mock')) not valid;
 
 comment on column public.social_oauth_states.options is
   'Unused since LinkedIn was dropped (2026-10-28); it held the LinkedIn author mode. Always {}.';
