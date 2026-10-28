@@ -10,9 +10,9 @@ export const runtime = 'nodejs'
  * Archives or removes an explicit selection of contacts: `{ contactIds, action:
  * 'archive' | 'remove' }`. Both are soft deletes; nothing is ever physically deleted.
  *
- * All or nothing, in one transaction (set_contacts_lifecycle). A selection that went
- * stale, or a contact an archive rule protects, is refused as a whole with 409 naming
- * the reason, so the user refreshes rather than getting a partial change.
+ * One transaction (set_contacts_lifecycle). Contacts already archived or removed meanwhile
+ * are skipped and counted; a contact an archive rule protects refuses the whole request
+ * with 409 naming the reason.
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const guard = await requireSessionOr401()
@@ -32,7 +32,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (result.kind === 'conflict') return conflict(result.message)
     if (result.kind === 'forbidden') return forbidden()
 
-    return ok({ updated: result.updated, action: parsed.input.action })
+    return ok({ updated: result.updated, skipped: result.skipped, action: parsed.input.action })
   } catch (error) {
     return serverError(error, `Could not ${parsed.input.action} the contacts. Nothing was changed.`)
   }

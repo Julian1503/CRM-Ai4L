@@ -19,7 +19,7 @@ export type BulkLifecycleAction = 'archive' | 'remove'
 export type BulkLifecycleInput = { contactIds: string[]; action: BulkLifecycleAction }
 
 export type BulkLifecycleResult =
-  | { kind: 'applied'; updated: number }
+  | { kind: 'applied'; updated: number; skipped: number }
   | { kind: 'invalid'; message: string }
   | { kind: 'conflict'; message: string }
   | { kind: 'forbidden' }
@@ -50,9 +50,9 @@ export function parseBulkLifecycleInput(
 }
 
 /**
- * `conflict` covers a selection that went stale (CRM06: a contact archived or removed
- * meanwhile) and an archive rule a trigger raised (CRM01). Either way nothing changed and
- * the message says why, so both become one 409.
+ * Contacts already archived or removed by the time the request runs are skipped and
+ * counted (`skipped`). `conflict` is an archive rule a trigger raised (CRM01): nothing
+ * changed and the message says why.
  */
 export async function applyBulkLifecycle(
   db: SupabaseClient<Database>,
@@ -64,13 +64,17 @@ export async function applyBulkLifecycle(
     p_action: input.action,
   })
 
-  if (error?.code === 'CRM06' || error?.code === ARCHIVE_RULE_SQLSTATE) {
+  if (error?.code === ARCHIVE_RULE_SQLSTATE) {
     return { kind: 'conflict', message: error.message }
   }
   if (error?.code === 'CRM07') return { kind: 'invalid', message: error.message }
   if (error?.code === '42501') return { kind: 'forbidden' }
   if (error) throw new Error(`Could not ${input.action} contacts: ${error.message}`)
 
-  const updated = (data as { updated?: unknown } | null)?.updated
-  return { kind: 'applied', updated: typeof updated === 'number' ? updated : 0 }
+  const body = (data ?? {}) as { updated?: unknown; skipped?: unknown }
+  return {
+    kind: 'applied',
+    updated: typeof body.updated === 'number' ? body.updated : 0,
+    skipped: typeof body.skipped === 'number' ? body.skipped : 0,
+  }
 }

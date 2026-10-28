@@ -51,7 +51,7 @@ export function useContactQuickActions({ selection, onOpen, refresh, openContact
     [selection.list]
   )
 
-  const done = ({ action, updated }: { action: BulkLifecycleAction; updated: number }) => {
+  const done = ({ action, updated, skipped }: { action: BulkLifecycleAction; updated: number; skipped: number }) => {
     const affected = request?.contactIds ?? []
     const wasSelection = affected.length > 0 && affected.every((id) => selection.selected.has(id)) && affected.length === selection.list.length
 
@@ -60,7 +60,8 @@ export function useContactQuickActions({ selection, onOpen, refresh, openContact
     if (openContactId && affected.includes(openContactId)) onCloseContact?.()
 
     setRequest(null)
-    notify({ tone: 'success', message: `${describeBulkLifecycle(action, updated, 'done')}.` })
+    const alreadyGone = skipped > 0 ? ` ${skipped} ${skipped === 1 ? 'was' : 'were'} already archived or removed.` : ''
+    notify({ tone: 'success', message: `${describeBulkLifecycle(action, updated, 'done')}.${alreadyGone}` })
     void refresh()
   }
 

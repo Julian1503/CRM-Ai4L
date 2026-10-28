@@ -59,7 +59,7 @@ describe('POST /api/contacts/lifecycle', () => {
     const response = await post({ contactIds: [C1, C2, C1.toUpperCase()], action: 'archive' })
 
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ updated: 2, action: 'archive' })
+    expect(await response.json()).toEqual({ updated: 2, skipped: 0, action: 'archive' })
     expect(db.rpc).toHaveBeenCalledTimes(1)
     expect(db.rpc).toHaveBeenCalledWith('set_contacts_lifecycle', {
       p_contact_ids: [C1, C2],
@@ -93,13 +93,13 @@ describe('POST /api/contacts/lifecycle', () => {
     expect(db.rpc).not.toHaveBeenCalled()
   })
 
-  it('answers 409 when a selected contact was archived or removed meanwhile', async () => {
-    setup({ data: null, error: { code: 'CRM06', message: 'Some selected contacts were archived or no longer exist.' } })
+  it('reports contacts that were already archived or removed as skipped, not as a failure', async () => {
+    setup({ data: { updated: 1, skipped: 1, action: 'archive' }, error: null })
 
-    const response = await post({ contactIds: [C1], action: 'archive' })
+    const response = await post({ contactIds: [C1, C2], action: 'archive' })
 
-    expect(response.status).toBe(409)
-    expect((await response.json()).error).toMatch(/archived or no longer exist/)
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ updated: 1, skipped: 1, action: 'archive' })
   })
 
   it('answers 409 with the rule when an archive rule refuses a contact', async () => {

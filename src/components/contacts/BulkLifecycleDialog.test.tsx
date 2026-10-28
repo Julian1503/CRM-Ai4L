@@ -30,7 +30,7 @@ describe('BulkLifecycleDialog', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Archive 2 contacts' }))
 
-    await waitFor(() => expect(onDone).toHaveBeenCalledWith({ action: 'archive', updated: 2 }))
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith({ action: 'archive', updated: 2, skipped: 0 }))
     expect(mockFetch).toHaveBeenCalledWith('/api/contacts/lifecycle', expect.objectContaining({ method: 'POST' }))
     expect(JSON.parse(mockFetch.mock.calls[0][1].body)).toEqual({ contactIds: ['a', 'b'], action: 'archive' })
   })
@@ -50,13 +50,13 @@ describe('BulkLifecycleDialog', () => {
   })
 
   it('keeps the dialog open with the reason when the server refuses', async () => {
-    mockFetch.mockResolvedValue(jsonResponse({ error: 'Some selected contacts were archived or no longer exist.' }, false, 409))
+    mockFetch.mockResolvedValue(jsonResponse({ error: 'Contact is in a campaign that is sending.' }, false, 409))
     const onDone = jest.fn()
     render(<BulkLifecycleDialog request={{ action: 'remove', contactIds: ['a'] }} onClose={jest.fn()} onDone={onDone} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Remove 1 contact' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(/archived or no longer exist/)
+    expect(await screen.findByRole('alert')).toHaveTextContent(/campaign that is sending/)
     expect(onDone).not.toHaveBeenCalled()
   })
 })

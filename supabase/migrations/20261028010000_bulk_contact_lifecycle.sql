@@ -6,9 +6,11 @@
 -- the single-contact PATCH does. The status trigger moves the status to 'archived' and
 -- remembers the one before (20261021000000), so a restore brings a customer back as one.
 --
--- All or nothing, like apply_contact_tags: a selection where any contact was archived or
--- removed meanwhile is refused as a whole (CRM06) so the user refreshes instead of getting
--- a partial change, and an archive rule raised by a trigger (CRM01) rolls back every row.
+-- A selection survives paging, so by the time it is acted on a contact in it may already
+-- have been archived or removed by someone else. Those are skipped and counted rather than
+-- failing the whole request: refusing would leave a selection that can never succeed,
+-- with the stale contact on a page the user cannot see. Everything else is all or
+-- nothing: an archive rule raised by a trigger (CRM01) rolls back every row.
 
 create or replace function public.set_contacts_lifecycle(
   p_contact_ids uuid[],
@@ -21,7 +23,7 @@ set search_path = public
 as $$
 declare
   v_contacts uuid[];
-  v_locked   integer;
+  v_active   uuid[];
   v_updated  integer;
   v_now      timestamptz := now();
 begin
@@ -45,33 +47,33 @@ begin
     raise exception 'Select at most 2000 contacts.' using errcode = 'CRM07';
   end if;
 
-  perform 1
-     from public.contacts
-    where id = any (v_contacts)
-      and deleted_at is null
-      and removed_at is null
-    order by id
-      for update;
-  get diagnostics v_locked = row_count;
-
-  if v_locked <> cardinality(v_contacts) then
-    raise exception 'Some selected contacts were archived or no longer exist. Refresh the selection and try again.'
-      using errcode = 'CRM06';
-  end if;
+  -- Locked in id order so two overlapping bulk requests cannot deadlock.
+  select coalesce(array_agg(id), '{}') into v_active
+    from (
+      select id from public.contacts
+       where id = any (v_contacts)
+         and deleted_at is null
+         and removed_at is null
+       order by id
+         for update
+    ) live;
 
   update public.contacts
      set deleted_at = v_now,
          removed_at = case when p_action = 'remove' then v_now else removed_at end,
          removed_by = case when p_action = 'remove' then auth.uid() else removed_by end
-   where id = any (v_contacts);
+   where id = any (v_active);
   get diagnostics v_updated = row_count;
 
-  return jsonb_build_object('updated', v_updated, 'action', p_action);
+  return jsonb_build_object(
+    'updated', v_updated,
+    'skipped', cardinality(v_contacts) - v_updated,
+    'action', p_action);
 end;
 $$;
 
 comment on function public.set_contacts_lifecycle(uuid[], text) is
-  'Archives or removes (soft) an explicit selection of active contacts, all or nothing.';
+  'Archives or removes (soft) the still-active contacts of a selection; the rest are skipped and counted.';
 
 revoke all on function public.set_contacts_lifecycle(uuid[], text) from public, anon;
 grant execute on function public.set_contacts_lifecycle(uuid[], text) to authenticated, service_role;

@@ -7,7 +7,7 @@
 --
 -- What this guards: a member archives or removes a selection in one call; both stay soft
 -- deletes (the rows are still there); the status trigger records the status before
--- archive; a stale selection changes nothing; a non-member is refused.
+-- archive; contacts already archived are skipped and counted; a non-member is refused.
 
 begin;
 
@@ -41,21 +41,15 @@ begin
   assert (select status_before_archive from public.contacts where id = '00000000-0000-4000-8000-0000000c1f01') = 'customer',
     'the status before archive was not recorded';
 
-  raise notice '2. a stale selection (an already archived contact) changes nothing';
-  v_failed := false;
-  begin
-    perform public.set_contacts_lifecycle(
-      array['00000000-0000-4000-8000-0000000c1f02', '00000000-0000-4000-8000-0000000c1f03']::uuid[], 'remove');
-  exception when sqlstate 'CRM06' then v_failed := true;
-  end;
-  assert v_failed, 'a stale selection was accepted';
-  assert (select removed_at from public.contacts where id = '00000000-0000-4000-8000-0000000c1f03') is null
-     and (select deleted_at from public.contacts where id = '00000000-0000-4000-8000-0000000c1f03') is null,
-    'the stale request changed a contact';
+  raise notice '2. an already archived contact in the selection is skipped, not fatal';
+  v_result := public.set_contacts_lifecycle(
+    array['00000000-0000-4000-8000-0000000c1f02', '00000000-0000-4000-8000-0000000c1f03']::uuid[], 'remove');
+  assert (v_result ->> 'updated')::int = 1 and (v_result ->> 'skipped')::int = 1,
+    format('expected 1 removed and 1 skipped, got %s', v_result);
+  assert (select removed_at from public.contacts where id = '00000000-0000-4000-8000-0000000c1f02') is null,
+    'the skipped, archived contact was removed';
 
   raise notice '3. remove is a soft delete that names who removed';
-  v_result := public.set_contacts_lifecycle(array['00000000-0000-4000-8000-0000000c1f03']::uuid[], 'remove');
-  assert (v_result ->> 'updated')::int = 1, 'remove did not report one contact';
   assert exists (select 1 from public.contacts
                   where id = '00000000-0000-4000-8000-0000000c1f03'
                     and removed_at is not null and deleted_at is not null

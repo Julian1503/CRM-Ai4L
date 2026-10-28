@@ -18,7 +18,7 @@ export interface BulkLifecycleDialogProps {
   request: BulkLifecycleRequest | null
   onClose: () => void
   /** Called after the server applied the change; the page refetches and clears. */
-  onDone: (result: { action: BulkLifecycleAction; updated: number }) => void
+  onDone: (result: { action: BulkLifecycleAction; updated: number; skipped: number }) => void
 }
 
 const plural = (count: number) => `${count} ${count === 1 ? 'contact' : 'contacts'}`
@@ -33,8 +33,8 @@ export function describeBulkLifecycle(action: BulkLifecycleAction, count: number
  *
  * Archive is undone from the Archive view; remove hides the contact everywhere and only
  * an administrator can bring it back, so only remove is styled as destructive. A refusal
- * (a selection gone stale, a contact an archive rule protects) is shown in the dialog
- * and nothing changes, so the user can close it, refresh and try again.
+ * (a contact an archive rule protects) is shown in the dialog
+ * and nothing changes. Contacts someone else archived meanwhile are skipped and counted.
  */
 export default function BulkLifecycleDialog({ request, onClose, onDone }: BulkLifecycleDialogProps) {
   const [busy, setBusy] = useState(false)
@@ -66,8 +66,12 @@ export default function BulkLifecycleDialog({ request, onClose, onDone }: BulkLi
         throw new Error(await readErrorMessage(response, `Could not ${request.action} the contacts`))
       }
 
-      const body = (await response.json().catch(() => ({}))) as { updated?: unknown }
-      onDone({ action: request.action, updated: typeof body.updated === 'number' ? body.updated : count })
+      const body = (await response.json().catch(() => ({}))) as { updated?: unknown; skipped?: unknown }
+      onDone({
+        action: request.action,
+        updated: typeof body.updated === 'number' ? body.updated : count,
+        skipped: typeof body.skipped === 'number' ? body.skipped : 0,
+      })
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : `Could not ${request.action} the contacts.`)
     } finally {

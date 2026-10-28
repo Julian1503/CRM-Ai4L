@@ -46,14 +46,15 @@ describe('ContactContextMenu', () => {
     expect(items[0].onSelect).not.toHaveBeenCalled()
   })
 
-  it('closes on Escape, on a click elsewhere and on scroll', () => {
+  it('closes on Escape, Tab, a click elsewhere and on scroll', () => {
     const { onClose } = setup()
 
     fireEvent.keyDown(window, { key: 'Escape' })
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Tab' })
     fireEvent.mouseDown(document.body)
     fireEvent.scroll(window)
 
-    expect(onClose).toHaveBeenCalledTimes(3)
+    expect(onClose).toHaveBeenCalledTimes(4)
   })
 
   it('does not close on a click inside itself', () => {

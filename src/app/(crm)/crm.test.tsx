@@ -944,6 +944,22 @@ describe('bulk archive and remove from the selection and the row menu', () => {
     expect(await screen.findByTestId('toast-success')).toHaveTextContent('Archived 1 contact.');
   });
 
+  it('says when part of the selection had already been archived by someone else', async () => {
+    routeFetch({
+      '/api/contacts/lifecycle': jsonResponse({ updated: 1, skipped: 1, action: 'archive' }),
+      '/api/contacts?': jsonResponse({ contacts: [row(A, 'Ada'), row(B, 'Bea')], total: 2, page: 1, pageSize: 50, hasMore: false }),
+    });
+    renderApp();
+    await screen.findByText(/Ada Tester/);
+
+    fireEvent.click(screen.getByTestId(`select-contact-${A}`));
+    fireEvent.click(screen.getByTestId(`select-contact-${B}`));
+    fireEvent.click(within(screen.getByRole('toolbar', { name: 'Selected contacts' })).getByRole('button', { name: 'Archive' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Archive 2 contacts' }));
+
+    expect(await screen.findByTestId('toast-success')).toHaveTextContent('Archived 1 contact. 1 was already archived or removed.');
+  });
+
   it('removes every ticked contact from the pinned toolbar and clears the selection', async () => {
     renderApp();
     await screen.findByText(/Ada Tester/);

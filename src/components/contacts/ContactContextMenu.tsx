@@ -33,7 +33,7 @@ const EDGE_GAP_PX = 8
  * selection when the row is part of it.
  *
  * Behaves like a native menu: focus starts on the first item, arrows move, Enter or a
- * click picks, and Escape, a click elsewhere, scrolling or resizing close it. Focus goes
+ * click picks, and Escape, Tab, a click elsewhere, scrolling or resizing close it. Focus goes
  * back to where it was. Placed at the pointer and nudged inside the viewport.
  */
 export default function ContactContextMenu({ x, y, label, items, onClose }: ContactContextMenuProps) {
@@ -80,17 +80,22 @@ export default function ContactContextMenu({ x, y, label, items, onClose }: Cont
   }, [onClose])
 
   const moveFocus = (event: ReactKeyboardEvent) => {
+    // Like a native menu, Tab leaves it rather than cycling through the items.
+    if (event.key === 'Tab') {
+      onClose()
+      return
+    }
     const keys: Record<string, number> = { ArrowDown: 1, ArrowUp: -1 }
     if (event.key === 'Home' || event.key === 'End') {
       event.preventDefault()
       itemRefs.current[event.key === 'Home' ? 0 : items.length - 1]?.focus()
       return
     }
-    if (!(event.key in keys) && event.key !== 'Tab') return
+    if (!(event.key in keys)) return
 
     event.preventDefault()
     const current = itemRefs.current.findIndex((item) => item === document.activeElement)
-    const step = event.key === 'Tab' ? (event.shiftKey ? -1 : 1) : keys[event.key]
+    const step = keys[event.key]
     const next = (current + step + items.length) % items.length
     itemRefs.current[next]?.focus()
   }
@@ -102,6 +107,7 @@ export default function ContactContextMenu({ x, y, label, items, onClose }: Cont
         className={styles.menu}
         role="menu"
         aria-label={label}
+        aria-orientation="vertical"
         style={{ left: position.left, top: position.top }}
         onKeyDown={moveFocus}
         onContextMenu={(event) => event.preventDefault()}
