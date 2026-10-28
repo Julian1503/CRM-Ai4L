@@ -9,7 +9,6 @@ minted from a long-lived user token carry no expiry. Graph version from META_GRA
 from __future__ import annotations
 
 import urllib.parse
-from typing import Any
 
 import httpx
 
@@ -42,7 +41,7 @@ class MetaOAuthProvider:
             transport=self._transport,
         )
 
-    def authorize_url(self, *, state: str, redirect_uri: str, options: dict[str, Any]) -> str:
+    def authorize_url(self, *, state: str, redirect_uri: str) -> str:
         """With a Login for Business ``config_id`` the scope must be omitted (else "Invalid Scopes")."""
         params = {
             "client_id": self._settings.meta_app_id,
@@ -57,9 +56,7 @@ class MetaOAuthProvider:
         version = self._settings.meta_graph_version
         return f"https://www.facebook.com/{version}/dialog/oauth?{urllib.parse.urlencode(params)}"
 
-    async def exchange(
-        self, code: str, *, redirect_uri: str, options: dict[str, Any]
-    ) -> list[ConnectedAccount]:
+    async def exchange(self, code: str, *, redirect_uri: str) -> list[ConnectedAccount]:
         client = self._graph()
         try:
             short_lived = await self._token(client, {"redirect_uri": redirect_uri, "code": code})

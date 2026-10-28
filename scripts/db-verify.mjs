@@ -47,6 +47,7 @@ const ALIASES = {
   cronruns: 'verify_20261012000000.sql',
   suggestions: 'verify_20261017000000.sql',
   auditfixes: 'verify_20261021000000.sql',
+  nolinkedin: 'verify_20261028000000.sql',
 }
 
 function fail(message) {

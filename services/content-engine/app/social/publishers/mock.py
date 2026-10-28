@@ -11,7 +11,6 @@ from app.social.publishers.base import PublishRequest, PublishResult, prepared_p
 _PERMALINKS: dict[SocialPlatform, str] = {
     "facebook": "https://www.facebook.com/{post_id}",
     "instagram": "https://www.instagram.com/p/{post_id}/",
-    "linkedin": "https://www.linkedin.com/feed/update/{post_id}",
 }
 
 

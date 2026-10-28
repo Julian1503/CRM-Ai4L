@@ -20,7 +20,7 @@ def _image(width: int = 1080, height: int = 1080, mime: str = "image/jpeg") -> P
     return PublishImage(url="https://cdn.test/a.jpg", alt="", mime_type=mime, width=width, height=height)
 
 
-@pytest.mark.parametrize("platform", ["facebook", "instagram", "linkedin"])
+@pytest.mark.parametrize("platform", ["facebook", "instagram"])
 def test_text_at_the_limit_is_allowed_and_one_over_blocks(platform: str) -> None:
     limit = LIMITS[platform].max_chars  # type: ignore[index]
     images = [_image()]
@@ -40,14 +40,13 @@ def test_instagram_requires_a_jpeg_image_in_its_accepted_shape() -> None:
     assert dispatch_blockers("instagram", "hi", [_image(1080, 1350)]) == []
 
 
-@pytest.mark.parametrize("platform", ["facebook", "linkedin"])
-def test_image_is_optional_off_instagram(platform: str) -> None:
-    assert dispatch_blockers(platform, "hi", []) == []  # type: ignore[arg-type]
+def test_image_is_optional_off_instagram() -> None:
+    assert dispatch_blockers("facebook", "hi", []) == []
 
 
 def test_too_many_images_block() -> None:
     assert dispatch_blockers("facebook", "hi", [_image()] * 11)
-    assert dispatch_blockers("linkedin", "hi", [_image()] * 20) == []
+    assert dispatch_blockers("facebook", "hi", [_image()] * 10) == []
 
 
 PREFLIGHT_CASES = load_fixture("preflight-cases.json")["cases"]

@@ -18,7 +18,6 @@ export function StatusPill({ tone, children }: { tone: Tone; children: string })
 const CHANNEL_CLASS: Record<ContentChannel, string> = {
   facebook: styles.channelFacebook,
   instagram: styles.channelInstagram,
-  linkedin: styles.channelLinkedin,
   email: styles.channelEmail,
 }
 

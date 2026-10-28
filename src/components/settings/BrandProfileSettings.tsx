@@ -18,7 +18,6 @@ import brandStyles from './BrandProfileSettings.module.css'
 const CHANNEL_NAMES: Record<ContentChannel, string> = {
   facebook: 'Facebook',
   instagram: 'Instagram',
-  linkedin: 'LinkedIn',
   email: 'Email',
 }
 

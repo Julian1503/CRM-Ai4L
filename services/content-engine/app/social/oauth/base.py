@@ -1,4 +1,4 @@
-"""The OAuth seam for the Meta and LinkedIn connect flows. Ported from WRCC ``oauth/base.py``.
+"""The OAuth seam for the Meta connect flow. Ported from WRCC ``oauth/base.py``.
 
 Changes: the redirect URI is supplied per call by the CRM (its callback route), state is
 created and checked by the CRM (single use), and the author kind of every discovered
@@ -51,11 +51,9 @@ class ConnectedAccount:
 
 
 class OAuthProvider(Protocol):
-    def authorize_url(self, *, state: str, redirect_uri: str, options: dict[str, Any]) -> str: ...
+    def authorize_url(self, *, state: str, redirect_uri: str) -> str: ...
 
-    async def exchange(
-        self, code: str, *, redirect_uri: str, options: dict[str, Any]
-    ) -> list[ConnectedAccount]: ...
+    async def exchange(self, code: str, *, redirect_uri: str) -> list[ConnectedAccount]: ...
 
 
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}

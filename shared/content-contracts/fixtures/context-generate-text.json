@@ -15,7 +15,7 @@
       }
     ],
     "channelRules": {
-      "linkedin": {
+      "instagram": {
         "cta": "Book a call.",
         "structure": "hook + insight + call to action"
       },
@@ -35,7 +35,7 @@
   "input": {
     "itemId": "33333333-3333-4333-8333-333333333333",
     "channels": [
-      "linkedin",
+      "instagram",
       "email",
       "facebook"
     ],
@@ -79,12 +79,6 @@
       "maxHashtags": 30,
       "maxImages": 10,
       "requiresImage": true
-    },
-    "linkedin": {
-      "maxChars": 3000,
-      "maxHashtags": 100,
-      "maxImages": 20,
-      "requiresImage": false
     },
     "email": {
       "maxChars": 1200,

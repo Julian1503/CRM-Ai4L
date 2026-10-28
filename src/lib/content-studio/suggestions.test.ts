@@ -10,7 +10,7 @@ import { toBrandProfile } from './mappers'
 const SECRET = 's'.repeat(40)
 const ENV = { CONTENT_ENGINE_URL: 'https://engine.test/', CONTENT_ENGINE_SECRET: SECRET }
 const BRAND = toBrandProfile(brandRow())
-const COMPLETION = { title: 'Workshops that fit your week', factIds: ['f1'], channels: ['linkedin'] }
+const COMPLETION = { title: 'Workshops that fit your week', factIds: ['f1'], channels: ['facebook'] }
 const BRIEF_REQUEST = { kind: 'brief_completion' as const, topic: 'Online workshops', draft: { audience: 'Teams' }, fresh: false }
 
 const fetchMock = jest.fn()
@@ -193,7 +193,7 @@ describe('parseEngineResult', () => {
       'content_ideas',
       {
         suggestions: [
-          { title: 'Five tips', topic: 'Tips for teams.', angle: 'Quick wins', channels: ['linkedin'] },
+          { title: 'Five tips', topic: 'Tips for teams.', angle: 'Quick wins', channels: ['facebook'] },
           { title: 'No channel', topic: 'x', channels: ['tiktok'] },
           { title: '', topic: 'x', channels: ['email'] },
         ],
@@ -201,7 +201,7 @@ describe('parseEngineResult', () => {
       BRAND
     )
 
-    expect(result).toEqual({ suggestions: [{ title: 'Five tips', topic: 'Tips for teams.', angle: 'Quick wins', channels: ['linkedin'] }] })
+    expect(result).toEqual({ suggestions: [{ title: 'Five tips', topic: 'Tips for teams.', angle: 'Quick wins', channels: ['facebook'] }] })
   })
 
   it('returns null when nothing is left', () => {

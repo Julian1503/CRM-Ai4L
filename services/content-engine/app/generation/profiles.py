@@ -52,7 +52,6 @@ class ChannelProfile:
 
 # (min_length, max_length, hashtags_min, hashtags_max, default structure)
 _DEFAULTS: dict[str, tuple[int, int, int, int, str]] = {
-    "linkedin": (600, 1300, 3, 5, "hook + value + proof point + call to action"),
     "facebook": (250, 600, 2, 5, "hook + benefit + practical detail + call to action"),
     "instagram": (125, 400, 8, 15, "short hook + a few emojis + call to action + hashtags"),
     "email": (200, EMAIL_FIELD_LIMITS["body"], 0, 0, "headline + short intro + body + one call to action"),

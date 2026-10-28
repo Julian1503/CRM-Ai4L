@@ -27,7 +27,7 @@ describe('rewrite_instructions', () => {
     const context = await buildSuggestionContext(db as never, rewrite)
 
     expect(context).toEqual({
-      channel: 'linkedin',
+      channel: 'facebook',
       body: 'Hello world.',
       hashtags: ['AI4L'],
       callToAction: 'Book now.',
@@ -124,7 +124,7 @@ describe('brief_completion and content_ideas', () => {
 
     const context = await buildSuggestionContext(db as never, { kind: 'brief_completion', topic: 'Workshops', draft: { title: 'T' } })
 
-    expect(context).toEqual({ topic: 'Workshops', title: 'T', channels: ['facebook', 'instagram', 'linkedin', 'email'] })
+    expect(context).toEqual({ topic: 'Workshops', title: 'T', channels: ['facebook', 'instagram', 'email'] })
     expect(db.from).not.toHaveBeenCalled()
   })
 
@@ -139,7 +139,7 @@ describe('brief_completion and content_ideas', () => {
     expect(context).toEqual({
       recentTitles: ['Monthly workshop'],
       plannedTopics: [{ title: 'Spring programme', details: null }],
-      channels: ['facebook', 'instagram', 'linkedin', 'email'],
+      channels: ['facebook', 'instagram', 'email'],
     })
     expect(builder('newsletter_topics').allFor('is').map((call) => call.args)).toEqual([
       ['used_at', null],

@@ -20,10 +20,13 @@ describe('content studio flags', () => {
 
   it('enables only named, known social platforms', () => {
     expect(enabledSocialPlatforms({})).toEqual([])
-    expect(enabledSocialPlatforms({ CONTENT_SOCIAL_PLATFORMS: ' LinkedIn, facebook ,tiktok' })).toEqual([
+    expect(enabledSocialPlatforms({ CONTENT_SOCIAL_PLATFORMS: ' Instagram, facebook ,tiktok' })).toEqual([
       'facebook',
-      'linkedin',
+      'instagram',
     ])
+    // LinkedIn is not supported: a deployment still naming it simply does not enable it.
+    expect(enabledSocialPlatforms({ CONTENT_SOCIAL_PLATFORMS: 'linkedin,facebook' })).toEqual(['facebook'])
+    expect(isSocialPlatformEnabled('linkedin', { CONTENT_SOCIAL_PLATFORMS: 'linkedin' })).toBe(false)
     expect(isSocialPlatformEnabled('instagram', { CONTENT_SOCIAL_PLATFORMS: 'facebook' })).toBe(false)
     expect(isSocialPlatformEnabled('facebook', { CONTENT_SOCIAL_PLATFORMS: 'facebook' })).toBe(true)
   })

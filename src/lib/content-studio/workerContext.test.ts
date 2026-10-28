@@ -33,7 +33,7 @@ const ORIGINAL_ENV = process.env
 beforeEach(() => {
   resetContentBucketsCache()
   mockLoadAccessToken.mockReset()
-  process.env = { ...ORIGINAL_ENV, CONTENT_SOCIAL_PLATFORMS: 'linkedin' }
+  process.env = { ...ORIGINAL_ENV, CONTENT_SOCIAL_PLATFORMS: 'facebook' }
 })
 
 afterAll(() => {
@@ -77,10 +77,10 @@ describe('generate_text', () => {
     expect(context).toMatchObject({
       kind: 'generate_text',
       brand: { slug: 'ai4l', approvedFacts: [{ id: 'f1' }] },
-      input: { itemId: IDS.item, channels: ['linkedin'] },
+      input: { itemId: IDS.item, channels: ['facebook'] },
       baseRevision: { body: 'Hello world.', hashtags: ['AI4L'], assets: [{ assetId: IDS.asset }] },
     })
-    expect(Object.keys((context as { platformLimits: object }).platformLimits)).toEqual(['facebook', 'instagram', 'linkedin', 'email'])
+    expect(Object.keys((context as { platformLimits: object }).platformLimits)).toEqual(['facebook', 'instagram', 'email'])
   })
 
   it('has no base revision for a fresh generation, and refuses a vanished item', async () => {
@@ -192,12 +192,12 @@ describe('publish_social', () => {
     expect(context).toEqual({
       kind: 'publish_social',
       publicationId: IDS.publication,
-      platform: 'linkedin',
+      platform: 'facebook',
       account: {
         id: IDS.account,
-        provider: 'linkedin',
-        externalId: 'urn:li:organization:1',
-        authorKind: 'organization',
+        provider: 'meta',
+        externalId: 'page-1',
+        authorKind: 'page',
         displayName: 'AI4L',
         accessToken: 'decrypted-token',
       },

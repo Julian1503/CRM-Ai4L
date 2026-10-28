@@ -24,7 +24,6 @@ class PublisherConfig:
     retry_base_delay: float
     instagram_poll_attempts: int
     instagram_poll_delay: float
-    linkedin_api_version: str
     max_image_bytes: int
 
     @classmethod
@@ -36,7 +35,6 @@ class PublisherConfig:
             retry_base_delay=settings.publish_retry_base_delay_seconds,
             instagram_poll_attempts=settings.instagram_container_poll_attempts,
             instagram_poll_delay=settings.instagram_container_poll_delay_seconds,
-            linkedin_api_version=settings.linkedin_api_version,
             max_image_bytes=settings.media_max_source_bytes,
         )
 

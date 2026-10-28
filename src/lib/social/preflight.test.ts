@@ -14,7 +14,7 @@ const NOW = new Date('2026-10-07T10:00:00.000Z')
 function facts(overrides: Partial<PreflightFacts> = {}): PreflightFacts {
   return {
     revision: revisionRow({ link_url: null }),
-    variant: variantRow({ channel: 'linkedin', current_revision_id: IDS.revision }),
+    variant: variantRow({ channel: 'facebook', current_revision_id: IDS.revision }),
     account: accountRow(),
     approved: true,
     assets: [assetRow()],
@@ -29,7 +29,7 @@ const codes = (result: ReturnType<typeof evaluatePreflight>, blocking = true) =>
 
 beforeEach(() => {
   jest.clearAllMocks()
-  process.env = { ...ORIGINAL_ENV, CONTENT_SOCIAL_PLATFORMS: 'facebook,instagram,linkedin' }
+  process.env = { ...ORIGINAL_ENV, CONTENT_SOCIAL_PLATFORMS: 'facebook,instagram' }
 })
 
 afterAll(() => {
@@ -39,16 +39,16 @@ afterAll(() => {
 describe('evaluatePreflight', () => {
   it('passes an approved current revision on a connected, enabled account', () => {
     const result = evaluatePreflight(facts())
-    expect(result).toMatchObject({ ok: true, platform: 'linkedin', composedText: 'Hello world.\n\nBook now.\n\n#AI4L' })
-    expect(result.limits.maxChars).toBe(3000)
+    expect(result).toMatchObject({ ok: true, platform: 'facebook', composedText: 'Hello world.\n\nBook now.\n\n#AI4L' })
+    expect(result.limits.maxChars).toBe(63_206)
     expect(result.issues).toEqual([])
   })
 
   it.each<[string, Partial<PreflightFacts>, string]>([
-    ['a superseded revision', { variant: variantRow({ channel: 'linkedin', current_revision_id: IDS.revision2 }) }, 'stale_revision'],
+    ['a superseded revision', { variant: variantRow({ channel: 'facebook', current_revision_id: IDS.revision2 }) }, 'stale_revision'],
     ['an unapproved revision', { approved: false }, 'not_approved'],
     ['a disconnected account', { account: accountRow({ status: 'disconnected' }) }, 'account_not_connected'],
-    ['another platform', { variant: variantRow({ channel: 'facebook', current_revision_id: IDS.revision }) }, 'channel_mismatch'],
+    ['another platform', { variant: variantRow({ channel: 'instagram', current_revision_id: IDS.revision }) }, 'channel_mismatch'],
     ['no stored token', { token: { kind: 'missing' } }, 'token_missing'],
     ['an unreadable token', { token: { kind: 'unreadable' } }, 'token_unreadable'],
     ['an expired token', { token: { kind: 'present', tokens: { accessToken: 't', expiresAt: '2026-10-01T00:00:00Z' } } }, 'token_expired'],
@@ -56,7 +56,7 @@ describe('evaluatePreflight', () => {
     ['a removed image', { assets: [assetRow({ archived_at: 'x', removed_at: 'x' })] }, 'asset_missing'],
     ['an archived image', { assets: [assetRow({ archived_at: '2026-10-01T00:00:00Z' })] }, 'asset_archived'],
     ['an image still ingesting', { assets: [assetRow({ ingest_status: 'pending' })] }, 'asset_not_ready'],
-    ['text over the limit', { revision: revisionRow({ body: 'a'.repeat(3001), link_url: null }) }, 'text_too_long'],
+    ['text over the limit', { revision: revisionRow({ body: 'a'.repeat(63_207), link_url: null }) }, 'text_too_long'],
   ])('blocks %s', (_label, overrides, code) => {
     const result = evaluatePreflight(facts(overrides))
     expect(result.ok).toBe(false)
@@ -64,7 +64,7 @@ describe('evaluatePreflight', () => {
   })
 
   it('blocks a platform the flag does not enable', () => {
-    process.env = { ...ORIGINAL_ENV, CONTENT_SOCIAL_PLATFORMS: 'facebook' }
+    process.env = { ...ORIGINAL_ENV, CONTENT_SOCIAL_PLATFORMS: 'instagram' }
     expect(codes(evaluatePreflight(facts()))).toEqual(['platform_disabled'])
   })
 
@@ -110,7 +110,7 @@ describe('helpers', () => {
 function tables(overrides: Record<string, unknown> = {}) {
   const responses: Record<string, unknown> = {
     content_variant_revisions: { data: revisionRow(), error: null },
-    content_variants: { data: variantRow({ channel: 'linkedin', current_revision_id: IDS.revision }), error: null },
+    content_variants: { data: variantRow({ channel: 'facebook', current_revision_id: IDS.revision }), error: null },
     social_accounts: { data: accountRow(), error: null },
     content_assets: { data: [assetRow()], error: null },
     ...overrides,

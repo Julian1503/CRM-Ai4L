@@ -11,7 +11,7 @@ describe('brand profile', () => {
     await expect(getBrandProfile(db as never)).resolves.toMatchObject({
       slug: 'ai4l',
       approvedFacts: [{ id: 'f1', text: 'Founded 2020', source: 'site' }],
-      channelRules: { linkedin: { cta: 'Book a call' } },
+      channelRules: { facebook: { cta: 'Book a call' } },
       allowedLinkOrigins: ['https://ai4l.example'],
     })
   })

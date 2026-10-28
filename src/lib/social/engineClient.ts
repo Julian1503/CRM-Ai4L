@@ -3,14 +3,13 @@ import 'server-only'
 import type { SocialAuthorKind, SocialPlatform, SocialProvider } from '@/lib/content-studio/types'
 import { EngineError, postToEngine, type Env } from '@/lib/content-studio/engineHttp'
 
-import type { OAuthOptions } from './oauthState'
 
 /**
  * Server-to-server client for the content engine's OAuth endpoints
  * (services/content-engine/app/main.py), signed with CONTENT_ENGINE_SECRET by
  * src/lib/content-studio/engineHttp.ts.
  *
- * The engine holds the Meta/LinkedIn app secrets; the CRM only sends the state, the
+ * The engine holds the Meta app secret; the CRM only sends the state, the
  * redirect URI and the code. Tokens come back in the exchange response, go straight to
  * credentials.ts for encryption, and never appear in an error message or a log line.
  */
@@ -32,7 +31,7 @@ export type EngineAccount = {
 
 export async function requestAuthorizeUrl(
   provider: SocialProvider,
-  input: { state: string; redirectUri: string; options: OAuthOptions },
+  input: { state: string; redirectUri: string },
   env: Env = process.env
 ): Promise<string> {
   const data = await postToEngine(`/v1/oauth/${provider}/authorize-url`, input, env)
@@ -43,7 +42,6 @@ export async function requestAuthorizeUrl(
 const AUTHOR_KINDS: Readonly<Record<SocialPlatform, readonly SocialAuthorKind[]>> = {
   facebook: ['page'],
   instagram: ['instagram_business'],
-  linkedin: ['organization', 'member'],
 }
 
 function optionalString(value: unknown): string | null {
@@ -81,7 +79,7 @@ export function parseEngineAccount(value: unknown): EngineAccount | null {
 
 export async function exchangeCode(
   provider: SocialProvider,
-  input: { code: string; redirectUri: string; options: OAuthOptions },
+  input: { code: string; redirectUri: string },
   env: Env = process.env
 ): Promise<EngineAccount[]> {
   const data = await postToEngine(`/v1/oauth/${provider}/exchange`, input, env)

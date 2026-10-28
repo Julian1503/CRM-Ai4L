@@ -26,6 +26,7 @@ import type {
   SocialAccount,
   SocialPublication,
 } from './types'
+import { CONTENT_CHANNELS } from './types'
 
 /**
  * Database rows (snake_case) to API DTOs (camelCase, src/lib/content-studio/types.ts).
@@ -63,11 +64,19 @@ export function toBrandProfile(row: ContentBrandProfileRow): BrandProfile {
     audience: row.audience,
     region: row.region,
     approvedFacts: facts,
-    channelRules: (isObject(row.channel_rules) ? row.channel_rules : {}) as Partial<Record<ContentChannel, ChannelRule>>,
+    channelRules: channelRulesOf(row.channel_rules),
     hashtagSeeds: row.hashtag_seeds ?? [],
     imageDirection: row.image_direction,
     allowedLinkOrigins: row.allowed_link_origins ?? [],
   }
+}
+
+/** Rules for the channels the Studio offers; a stored key for a dropped channel is ignored. */
+function channelRulesOf(value: unknown): Partial<Record<ContentChannel, ChannelRule>> {
+  if (!isObject(value)) return {}
+  return Object.fromEntries(
+    Object.entries(value).filter(([channel]) => (CONTENT_CHANNELS as readonly string[]).includes(channel))
+  ) as Partial<Record<ContentChannel, ChannelRule>>
 }
 
 /** The latest review of each revision: newest created_at, ties broken by id (as SQL does). */

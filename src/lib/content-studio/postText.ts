@@ -11,14 +11,13 @@ import type { ContentChannel, PlatformLimits } from './types'
  */
 
 /**
- * Facebook and LinkedIn publish no hashtag ceiling of their own, so 100 is ours; Instagram's
- * 30 is a real API limit and it has no text-only feed post. Email carries no hashtags; its
+ * Facebook publishes no hashtag ceiling of its own, so 100 is ours; Instagram's 30 is a
+ * real API limit and it has no text-only feed post. Email carries no hashtags; its
  * body limit is the revision body limit in the database.
  */
 export const PLATFORM_LIMITS: Readonly<Record<ContentChannel, PlatformLimits>> = {
   facebook: { maxChars: 63_206, maxHashtags: 100, maxImages: 10, requiresImage: false },
   instagram: { maxChars: 2_200, maxHashtags: 30, maxImages: 10, requiresImage: true },
-  linkedin: { maxChars: 3_000, maxHashtags: 100, maxImages: 20, requiresImage: false },
   email: { maxChars: 10_000, maxHashtags: 0, maxImages: 10, requiresImage: false },
 }
 

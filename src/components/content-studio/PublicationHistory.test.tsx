@@ -8,8 +8,8 @@ const ACCOUNTS = '/api/social/accounts'
 const RESOLVE = '/api/content-studio/jobs/job-pub-2/resolve'
 
 const accounts = jsonResponse({
-  accounts: [makeAccount(), makeAccount({ id: 'acct-2', platform: 'linkedin', displayName: 'AI4L Company' })],
-  enabledPlatforms: ['facebook', 'linkedin'],
+  accounts: [makeAccount(), makeAccount({ id: 'acct-2', platform: 'instagram', displayName: 'AI4L Company' })],
+  enabledPlatforms: ['facebook', 'instagram'],
 })
 
 const uncertain = makePublication({ id: 'pub-2', accountId: 'acct-2', jobId: 'job-pub-2', status: 'uncertain', permalink: null, errorMessage: 'Timed out' })
@@ -27,7 +27,7 @@ describe('PublicationHistory', () => {
     expect(screen.getByText('Published')).toBeInTheDocument()
     expect(screen.getByText('Resolution: Checked by Ana')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'View the post ↗' })).toHaveAttribute('href', 'https://facebook.com/post/1')
-    expect(await screen.findByText('AI4L Company · LinkedIn')).toBeInTheDocument()
+    expect(await screen.findByText('AI4L Company · Instagram')).toBeInTheDocument()
     expect(screen.getByText('Timed out')).toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText('Account'), { target: { value: 'acct-2' } })
@@ -51,12 +51,12 @@ describe('PublicationHistory', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save outcome' }))
     expect(screen.getByRole('alert')).toHaveTextContent('https://')
 
-    fireEvent.change(screen.getByLabelText('Post ID (optional)'), { target: { value: 'li-1' } })
-    fireEvent.change(screen.getByLabelText('Post link (optional)'), { target: { value: 'https://linkedin.com/p/1' } })
+    fireEvent.change(screen.getByLabelText('Post ID (optional)'), { target: { value: 'ig-1' } })
+    fireEvent.change(screen.getByLabelText('Post link (optional)'), { target: { value: 'https://instagram.com/p/1' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save outcome' }))
 
     await waitFor(() =>
-      expect(bodyOf(mock, 'POST', RESOLVE)).toEqual({ resolution: 'succeeded', note: 'Found it live', externalId: 'li-1', permalink: 'https://linkedin.com/p/1' })
+      expect(bodyOf(mock, 'POST', RESOLVE)).toEqual({ resolution: 'succeeded', note: 'Found it live', externalId: 'ig-1', permalink: 'https://instagram.com/p/1' })
     )
     await waitFor(() => expect(mock.mock.calls.filter(([url]) => url === PUBLICATIONS)).toHaveLength(2))
   })

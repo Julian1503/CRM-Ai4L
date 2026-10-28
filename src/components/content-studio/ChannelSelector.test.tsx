@@ -23,16 +23,16 @@ const tile = (name: string) => screen.getByRole('checkbox', { name: new RegExp(`
 describe('ChannelSelector', () => {
   it('selects several channels and keeps them in the canonical order', async () => {
     routeFetch({ [`GET ${ACCOUNTS}`]: jsonResponse({ accounts: [], enabledPlatforms: [] }) })
-    render(<Harness initial={['linkedin']} />)
+    render(<Harness initial={['instagram']} />)
 
     fireEvent.click(tile('Email'))
     fireEvent.click(tile('Facebook'))
-    expect(screen.getByTestId('value')).toHaveTextContent('facebook,linkedin,email')
+    expect(screen.getByTestId('value')).toHaveTextContent('facebook,instagram,email')
 
-    fireEvent.click(tile('LinkedIn'))
+    fireEvent.click(tile('Instagram'))
     expect(screen.getByTestId('value')).toHaveTextContent('facebook,email')
     expect(tile('Facebook')).toBeChecked()
-    expect(tile('LinkedIn')).not.toBeChecked()
+    expect(tile('Instagram')).not.toBeChecked()
     await screen.findAllByText('Publishing unavailable')
   })
 
@@ -41,18 +41,17 @@ describe('ChannelSelector', () => {
       [`GET ${ACCOUNTS}`]: jsonResponse({
         accounts: [
           makeAccount({ platform: 'facebook', status: 'connected' }),
-          makeAccount({ id: 'a2', platform: 'linkedin', status: 'needs_reauth' }),
+          makeAccount({ id: 'a2', platform: 'instagram', status: 'needs_reauth' }),
         ],
-        enabledPlatforms: ['facebook', 'instagram', 'linkedin'],
+        enabledPlatforms: ['facebook', 'instagram'],
       }),
     })
     render(<Harness />)
 
-    expect(screen.getAllByText('Checking connection…')).toHaveLength(3)
+    expect(screen.getAllByText('Checking connection…')).toHaveLength(2)
     expect(await screen.findByText('Connected for publishing')).toBeInTheDocument()
     expect(tile('Facebook')).toHaveAccessibleName(/Connected for publishing/)
-    expect(tile('Instagram')).toHaveAccessibleName(/Connect before publishing/)
-    expect(tile('LinkedIn')).toHaveAccessibleName(/Reconnect before publishing/)
+    expect(tile('Instagram')).toHaveAccessibleName(/Reconnect before publishing/)
     expect(tile('Email')).toHaveAccessibleName(/Create an email draft/)
     // Not being connected never disables a channel: generating does not need an account.
     expect(tile('Instagram')).toBeEnabled()
@@ -61,7 +60,7 @@ describe('ChannelSelector', () => {
   it('says the status is unknown when accounts cannot be read, rather than disconnected', async () => {
     routeFetch({ [`GET ${ACCOUNTS}`]: errorResponse(500, 'down') })
     render(<Harness />)
-    expect(await screen.findAllByText('Connection status unavailable')).toHaveLength(3)
+    expect(await screen.findAllByText('Connection status unavailable')).toHaveLength(2)
   })
 
   it('shows its error and can be disabled as a whole', () => {

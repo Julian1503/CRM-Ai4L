@@ -17,16 +17,16 @@ from pydantic.alias_generators import to_camel
 
 WORKER_PROTOCOL_VERSION = "v1"
 
-ContentChannel = Literal["facebook", "instagram", "linkedin", "email"]
-SocialPlatform = Literal["facebook", "instagram", "linkedin"]
+ContentChannel = Literal["facebook", "instagram", "email"]
+SocialPlatform = Literal["facebook", "instagram"]
 JobKind = Literal["generate_text", "generate_image", "ingest_asset", "publish_social"]
-SocialProvider = Literal["meta", "linkedin", "mock"]
-SocialAuthorKind = Literal["page", "instagram_business", "organization", "member"]
+SocialProvider = Literal["meta", "mock"]
+SocialAuthorKind = Literal["page", "instagram_business"]
 FailOutcome = Literal["retry", "failed", "uncertain"]
 ImageMime = Literal["image/jpeg", "image/png", "image/webp"]
 RenditionPurpose = Literal["social", "email"]
 
-SOCIAL_PLATFORMS: tuple[SocialPlatform, ...] = ("facebook", "instagram", "linkedin")
+SOCIAL_PLATFORMS: tuple[SocialPlatform, ...] = ("facebook", "instagram")
 WORKER_OPS = ("claim", "heartbeat", "context", "checkpoint", "begin-dispatch", "complete", "fail")
 
 

@@ -105,11 +105,6 @@ class Settings(BaseSettings):
     meta_graph_version: str = "v23.0"
     meta_login_config_id: str = ""
 
-    # ── LinkedIn ──
-    linkedin_client_id: str = ""
-    linkedin_client_secret: str = Field(default="", repr=False)
-    linkedin_api_version: str = "202506"
-
     @field_validator("worker_kinds", mode="before")
     @classmethod
     def _split_kinds(cls, value: object) -> object:

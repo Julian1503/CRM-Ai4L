@@ -14,7 +14,7 @@ const COMPLETION = {
   objective: 'Book a seat',
   notes: 'Lead with the monthly cadence.',
   factIds: ['f1'],
-  channels: ['linkedin', 'email'],
+  channels: ['instagram', 'email'],
 }
 const EMPTY: Record<BriefField, string> = { title: '', audience: '', objective: '', notes: '' }
 
@@ -25,7 +25,7 @@ function renderAssist(props: Partial<Parameters<typeof BriefAssist>[0]> = {}) {
       topic="Monthly AI workshops"
       values={EMPTY}
       sourceFacts={[]}
-      channels={['facebook', 'linkedin']}
+      channels={['facebook', 'instagram']}
       approvedFacts={FACTS}
       {...handlers}
       {...props}
@@ -101,14 +101,14 @@ describe('BriefAssist', () => {
     expect(onAddFact).toHaveBeenCalledWith('Workshops run online every month.')
     expect(screen.queryByText('Founded in 2020.')).not.toBeInTheDocument()
 
-    expect(screen.getByText('LinkedIn, Email')).toBeInTheDocument()
+    expect(screen.getByText('Instagram, Email')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Use the suggested channels' }))
-    expect(onChannels).toHaveBeenCalledWith(['linkedin', 'email'])
+    expect(onChannels).toHaveBeenCalledWith(['instagram', 'email'])
   })
 
   it('marks a fact already in the brief, and hides channels that already match', async () => {
     answer()
-    renderAssist({ sourceFacts: ['Workshops run online every month.'], channels: ['linkedin', 'email'] })
+    renderAssist({ sourceFacts: ['Workshops run online every month.'], channels: ['instagram', 'email'] })
 
     fireEvent.click(screen.getByRole('button', { name: 'Complete with AI' }))
 

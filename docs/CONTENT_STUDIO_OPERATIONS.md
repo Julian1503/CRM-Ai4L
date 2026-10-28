@@ -24,7 +24,7 @@ El motor no tiene base de datos ni sesión propia. Si está caído, el CRM sigue
 7. Conectar cuentas sociales de prueba (admin, Settings → Social connections) y activar cada red en `CONTENT_SOCIAL_PLATFORMS` solo tras superar su fila en la matriz de validación.
 8. `CONTENT_EMAIL_BRIDGE_ENABLED=true` para export HTML y Automation estática. `CONTENT_EMAIL_DYNAMIC_ENABLED` sigue en `false` hasta EO-4/EO-5.
 
-Registrar en Meta y LinkedIn las URLs de callback `<NEXT_PUBLIC_APP_URL>/api/social/oauth/meta/callback` y `/linkedin/callback`.
+Registrar en Meta la URL de callback `<NEXT_PUBLIC_APP_URL>/api/social/oauth/meta/callback`. LinkedIn no está soportado (decisión del cliente, 2026-10-28).
 
 ## 3. Rollback
 
@@ -51,14 +51,15 @@ No borrar tablas, snapshots ni objetos de `content-public`: emails ya enviados s
 
 - `CONTENT_WORKER_SECRET` (motor → CRM) y `CONTENT_ENGINE_SECRET` (CRM → motor): valores distintos; rotar cada uno en el CRM y en el motor a la vez (ventana breve de 401/503; los jobs no se pierden).
 - `CONTENT_TOKEN_ENCRYPTION_KEY`: mover la clave actual a `CONTENT_TOKEN_ENCRYPTION_KEY_V<versión>`, poner la nueva y subir `CONTENT_TOKEN_ENCRYPTION_KEY_VERSION`. Los tokens antiguos siguen legibles; los nuevos usan la clave nueva. Retirar la antigua solo cuando todas las cuentas se hayan reconectado.
-- Secretos de apps Meta/LinkedIn y claves de LLM: solo en el entorno del motor.
+- Secreto de la app Meta y claves de LLM: solo en el entorno del motor.
 - Ninguna de estas variables lleva prefijo `NEXT_PUBLIC_` (lo comprueba `src/lib/supabase/secrets.test.ts`).
 
 ## 6. Límites conocidos
 
 - La API v2 de EmailOctopus no permite crear campañas HTML ni leer el HTML de Automations. El export queda registrado como exportación, no como envío.
 - Un email del Studio lleva como máximo una imagen principal.
-- Las versiones Meta `v23.0` y LinkedIn `202506` vienen de WRCC y deben revalidarse antes de producción.
+- La versión Graph de Meta `v23.0` viene de WRCC y debe revalidarse antes de producción.
+- Solo se publica en Facebook e Instagram. LinkedIn quedó fuera de alcance por decisión del cliente (2026-10-28): no hay conexión, generación ni publicación para esa red.
 - La generación desde catálogo, el calendario, la analítica y la bandeja de comentarios/DM no forman parte de esta entrega.
 - Exportar o crear un email copia su imagen a `content-public` en ese momento (el HTML necesita una URL pública estable), antes de que la campaña se apruebe. La URL no es adivinable ni listable, pero no debe usarse una imagen confidencial en un email.
 - El checksum que informa el worker al terminar la ingesta no se vuelve a calcular sobre los bytes guardados. La ruta de destino la fija el CRM y solo el titular del lease recibe URLs de subida.

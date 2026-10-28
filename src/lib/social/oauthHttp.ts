@@ -6,7 +6,7 @@ import type { SocialProvider } from '@/lib/content-studio/types'
 
 /**
  * URLs of the browser leg of the OAuth flow. The callback must match what is registered
- * with Meta/LinkedIn, so it is built from NEXT_PUBLIC_APP_URL when set (a proxy may show
+ * with Meta, so it is built from NEXT_PUBLIC_APP_URL when set (a proxy may show
  * the request under an internal host), falling back to the request origin.
  */
 

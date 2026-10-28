@@ -201,11 +201,11 @@ describeStorage('content storage end to end', () => {
         .from('social_accounts')
         .insert({
           brand_id: brand.id,
-          platform: 'linkedin',
+          platform: 'facebook',
           provider: 'mock',
           external_id: uniqueTag('urn'),
           display_name: 'IT account',
-          author_kind: 'organization',
+          author_kind: 'page',
         })
         .select('id')
         .single()

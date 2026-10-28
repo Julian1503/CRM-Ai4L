@@ -141,7 +141,7 @@ export function makeSummary(overrides: Partial<ContentItemSummary> = {}): Conten
   return {
     id: 'item-1',
     title: 'Spring workshop',
-    channels: ['facebook', 'linkedin'],
+    channels: ['facebook', 'instagram'],
     createdAt: NOW,
     updatedAt: NOW,
     archivedAt: null,

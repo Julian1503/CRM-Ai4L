@@ -7,7 +7,7 @@ import { useResource } from './hooks'
 import { CHANNEL_LABELS } from './labels'
 import styles from './ContentStudio.module.css'
 
-const MARKS: Record<ContentChannel, string> = { facebook: 'f', instagram: 'ig', linkedin: 'in', email: '@' }
+const MARKS: Record<ContentChannel, string> = { facebook: 'f', instagram: 'ig', email: '@' }
 
 export default function ChannelSelector({ value, onChange, disabled = false, error }: { value: ContentChannel[]; onChange: (value: ContentChannel[]) => void; disabled?: boolean; error?: string }) {
   const accounts = useResource(listAccounts)

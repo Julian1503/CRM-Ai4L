@@ -86,7 +86,7 @@ describe('requests', () => {
 
 describe('validateJobResult', () => {
   const variant = {
-    channel: 'linkedin',
+    channel: 'facebook',
     style: 'default',
     body: 'Hi',
     hashtags: ['AI4L'],

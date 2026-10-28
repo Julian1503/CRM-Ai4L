@@ -11,7 +11,6 @@ import { SOCIAL_PLATFORMS, TERMINAL_JOB_STATUSES } from '@/lib/content-studio/ty
 export const CHANNEL_LABELS: Record<ContentChannel, string> = {
   facebook: 'Facebook',
   instagram: 'Instagram',
-  linkedin: 'LinkedIn',
   email: 'Email',
 }
 

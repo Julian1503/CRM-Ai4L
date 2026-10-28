@@ -89,11 +89,11 @@ describe('parseBrief', () => {
 
 describe('items', () => {
   it('parseCreateItem accepts a complete request', () => {
-    expect(parseCreateItem({ title: ' Launch ', brief: { topic: 'AI' }, channels: ['linkedin'] })).toEqual({
+    expect(parseCreateItem({ title: ' Launch ', brief: { topic: 'AI' }, channels: ['facebook'] })).toEqual({
       ok: true,
-      value: { title: 'Launch', brief: { topic: 'AI' }, channels: ['linkedin'] },
+      value: { title: 'Launch', brief: { topic: 'AI' }, channels: ['facebook'] },
     })
-    expect(error(parseCreateItem({ brief: { topic: 'AI' }, channels: ['linkedin'] }))).toMatch(/title/)
+    expect(error(parseCreateItem({ brief: { topic: 'AI' }, channels: ['facebook'] }))).toMatch(/title/)
   })
 
   it('parseUpdateItem needs something to change', () => {
@@ -252,7 +252,7 @@ describe('parseBrandUpdate', () => {
         name: ' AI4L ',
         tone: 'Plain',
         approvedFacts: [{ id: ' f1 ', text: ' Fact ', source: ' ' }, { id: 'f2', text: 'Other', source: 'Site' }],
-        channelRules: { linkedin: { cta: ' Book ', structure: '' } },
+        channelRules: { facebook: { cta: ' Book ', structure: '' } },
         hashtagSeeds: ['AI4L'],
         allowedLinkOrigins: ['HTTPS://AI4L.example/', 'https://ai4l.example', 'https://book.ai4l.example:8443'],
       })
@@ -262,7 +262,7 @@ describe('parseBrandUpdate', () => {
         name: 'AI4L',
         tone: 'Plain',
         approvedFacts: [{ id: 'f1', text: 'Fact' }, { id: 'f2', text: 'Other', source: 'Site' }],
-        channelRules: { linkedin: { cta: 'Book' } },
+        channelRules: { facebook: { cta: 'Book' } },
         hashtagSeeds: ['AI4L'],
         allowedLinkOrigins: ['https://ai4l.example', 'https://book.ai4l.example:8443'],
       },

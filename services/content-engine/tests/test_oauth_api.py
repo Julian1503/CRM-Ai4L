@@ -11,7 +11,6 @@ import pytest
 from app import signing
 from app.main import create_app
 from app.social.oauth.base import OAuthError, validate_redirect_uri
-from app.social.oauth.linkedin import LinkedInOAuthProvider
 from app.social.oauth.meta import MetaOAuthProvider
 from tests.conftest import TEST_ENGINE_SECRET, TEST_SECRET, make_settings
 
@@ -24,8 +23,6 @@ def _live(**overrides):  # noqa: ANN202
         publish_mock=False,
         meta_app_id="app-id",
         meta_app_secret="app-secret-not-real",
-        linkedin_client_id="li-id",
-        linkedin_client_secret="li-secret-not-real",
         **overrides,
     )
 
@@ -92,7 +89,7 @@ async def test_unknown_provider_and_bad_redirect_are_refused() -> None:
 
 async def test_live_provider_without_credentials_is_503() -> None:
     app = create_app(make_settings(publish_mock=False))
-    response = await _call(app, "/v1/oauth/linkedin/authorize-url", {"state": STATE, "redirectUri": REDIRECT})
+    response = await _call(app, "/v1/oauth/meta/authorize-url", {"state": STATE, "redirectUri": REDIRECT})
     assert response.status_code == 503
 
 
@@ -105,11 +102,11 @@ def test_redirect_uri_rules() -> None:
 
 
 def test_meta_authorize_url_uses_the_configured_version_and_scopes() -> None:
-    url = MetaOAuthProvider(_live()).authorize_url(state=STATE, redirect_uri=REDIRECT, options={})
+    url = MetaOAuthProvider(_live()).authorize_url(state=STATE, redirect_uri=REDIRECT)
     assert url.startswith("https://www.facebook.com/v23.0/dialog/oauth?")
     assert "pages_manage_posts" in parse_qs(urlsplit(url).query)["scope"][0]
     with_config = MetaOAuthProvider(_live(meta_login_config_id="cfg")).authorize_url(
-        state=STATE, redirect_uri=REDIRECT, options={}
+        state=STATE, redirect_uri=REDIRECT
     )
     assert "scope=" not in with_config and "config_id=cfg" in with_config
 
@@ -126,7 +123,7 @@ async def test_meta_exchange_discovers_pages_and_linked_instagram() -> None:
         return httpx.Response(200, json={"instagram_business_account": {"id": "ig1", "username": "ai4l"}})
 
     accounts = await MetaOAuthProvider(_live(), transport=httpx.MockTransport(handler)).exchange(
-        "code", redirect_uri=REDIRECT, options={}
+        "code", redirect_uri=REDIRECT
     )
     assert [(a.platform, a.author_kind, a.external_id) for a in accounts] == [
         ("facebook", "page", "p1"),
@@ -142,43 +139,17 @@ async def test_meta_exchange_error_does_not_leak_the_app_secret() -> None:
         )
     )
     with pytest.raises(OAuthError) as caught:
-        await MetaOAuthProvider(_live(), transport=transport).exchange("c", redirect_uri=REDIRECT, options={})
+        await MetaOAuthProvider(_live(), transport=transport).exchange("c", redirect_uri=REDIRECT)
     assert "app-secret-not-real" not in str(caught.value)
 
 
-def test_linkedin_scopes_follow_the_explicit_author_kind() -> None:
-    provider = LinkedInOAuthProvider(_live())
-    org = provider.authorize_url(state=STATE, redirect_uri=REDIRECT, options={})
-    member = provider.authorize_url(state=STATE, redirect_uri=REDIRECT, options={"authorKind": "member"})
-    assert "w_organization_social" in org and "w_member_social" not in org
-    assert "w_member_social" in member
-    with pytest.raises(OAuthError):
-        provider.authorize_url(state=STATE, redirect_uri=REDIRECT, options={"authorKind": "page"})
-
-
-async def test_linkedin_member_exchange_uses_the_userinfo_subject() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path.endswith("/accessToken"):
-            return httpx.Response(200, json={"access_token": "tok", "expires_in": 3600})
-        return httpx.Response(200, json={"sub": "person-9", "name": "Ana"})
-
-    accounts = await LinkedInOAuthProvider(_live(), transport=httpx.MockTransport(handler)).exchange(
-        "code", redirect_uri=REDIRECT, options={"authorKind": "member"}
-    )
-    assert accounts[0].external_id == "person-9" and accounts[0].author_kind == "member"
-    assert accounts[0].expires_at is not None
-
-
-async def test_linkedin_organization_exchange_without_pages_is_an_error() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path.endswith("/accessToken"):
-            return httpx.Response(200, json={"access_token": "tok"})
-        return httpx.Response(200, json={"elements": []})
-
-    with pytest.raises(OAuthError):
-        await LinkedInOAuthProvider(_live(), transport=httpx.MockTransport(handler)).exchange(
-            "code", redirect_uri=REDIRECT, options={}
-        )
+async def test_linkedin_is_not_a_provider() -> None:
+    app = create_app(make_settings())
+    for op, payload in (
+        ("authorize-url", {"state": STATE, "redirectUri": REDIRECT}),
+        ("exchange", {"code": "mock-code", "redirectUri": REDIRECT}),
+    ):
+        assert (await _call(app, f"/v1/oauth/linkedin/{op}", payload)).status_code == 404
 
 
 async def test_the_worker_secret_does_not_authenticate_engine_calls() -> None:
@@ -191,7 +162,7 @@ async def test_the_worker_secret_does_not_authenticate_engine_calls() -> None:
 
 async def test_an_oversized_body_is_refused_before_verification() -> None:
     app = create_app(make_settings())
-    payload = {"state": STATE, "redirectUri": REDIRECT, "options": {"x": "a" * 300_000}}
+    payload = {"state": STATE, "redirectUri": REDIRECT, "padding": "a" * 300_000}
     assert (await _call(app, "/v1/oauth/mock/authorize-url", payload)).status_code == 413
 
 
@@ -209,7 +180,7 @@ def test_engine_and_worker_secrets_must_differ_and_production_needs_https() -> N
 
 async def test_mock_accounts_are_namespaced() -> None:
     app = create_app(make_settings())
-    response = await _call(app, "/v1/oauth/linkedin/exchange", {"code": "mock-code", "redirectUri": REDIRECT})
+    response = await _call(app, "/v1/oauth/meta/exchange", {"code": "mock-code", "redirectUri": REDIRECT})
     assert all(a["externalId"].startswith("mock:") for a in response.json()["accounts"])
 
 

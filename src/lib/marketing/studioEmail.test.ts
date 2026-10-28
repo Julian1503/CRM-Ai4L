@@ -22,7 +22,7 @@ import type { StudioEmailRequest } from './studioEmailRequest'
 const SUPABASE = 'https://proj.supabase.co'
 const PUBLIC_URL = `${SUPABASE}/storage/v1/object/public/content-public/p/pub-1/sum.jpg`
 
-const VARIANT = { id: 'var-1', item_id: 'item-1', channel: 'linkedin', current_revision_id: 'rev-1', archived_at: null }
+const VARIANT = { id: 'var-1', item_id: 'item-1', channel: 'facebook', current_revision_id: 'rev-1', archived_at: null }
 const REVISION = {
   id: 'rev-1',
   variant_id: 'var-1',

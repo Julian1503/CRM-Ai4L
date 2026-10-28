@@ -40,7 +40,7 @@ async function newItem(db: Db): Promise<ContentItemRow> {
   return must(
     db
       .from('content_items')
-      .insert({ brand_id: brand.id, title: uniqueTag('it-content'), brief: { topic: 'Integration' }, channels: ['linkedin', 'email'] })
+      .insert({ brand_id: brand.id, title: uniqueTag('it-content'), brief: { topic: 'Integration' }, channels: ['facebook', 'email'] })
       .select('*')
       .single()
   )
@@ -48,7 +48,7 @@ async function newItem(db: Db): Promise<ContentItemRow> {
 
 /** A variant with one revision, made through the member function (the service role may call it). */
 async function newVariant(db: Db, item: ContentItemRow) {
-  const variant = await must(db.from('content_variants').insert({ item_id: item.id, channel: 'linkedin' }).select('*').single())
+  const variant = await must(db.from('content_variants').insert({ item_id: item.id, channel: 'facebook' }).select('*').single())
   const revision = await saveRevision(db, variant.id, {
     idempotencyKey: uniqueTag('rev'),
     expectedRevisionId: null,
@@ -145,7 +145,7 @@ describeIntegration('content job protocol against Postgres', () => {
   it('makes a lease that expired after begin-dispatch uncertain, never retried', async () => {
     const db = serviceClient()
     const item = await newItem(db)
-    const job = await enqueueGeneration(db, item, { idempotencyKey: uniqueTag('gen'), channels: ['linkedin'] })
+    const job = await enqueueGeneration(db, item, { idempotencyKey: uniqueTag('gen'), channels: ['facebook'] })
     const token = await claimOwn(db, job.id, 'generate_text', 'worker-a')
 
     expect(await beginDispatch(db, { jobId: job.id, claimToken: token })).toEqual({ decision: 'go' })
@@ -161,7 +161,7 @@ describeIntegration('content job protocol against Postgres', () => {
     const { variantId, revisionId } = await newVariant(db, item)
     const job = await enqueueGeneration(db, item, {
       idempotencyKey: uniqueTag('regen'),
-      channels: ['linkedin'],
+      channels: ['facebook'],
       variantId,
       baseRevisionId: revisionId,
     })
@@ -176,7 +176,7 @@ describeIntegration('content job protocol against Postgres', () => {
     const token = await claimOwn(db, job.id, 'generate_text', 'worker-a')
     await beginDispatch(db, { jobId: job.id, claimToken: token })
     const result = {
-      variants: [{ channel: 'linkedin', style: 'default', body: 'Regenerated', hashtags: [], callToAction: null, violations: [] }],
+      variants: [{ channel: 'facebook', style: 'default', body: 'Regenerated', hashtags: [], callToAction: null, violations: [] }],
       failures: [],
       promptVersion: 'it-1',
       model: 'mock',

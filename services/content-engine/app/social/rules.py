@@ -12,11 +12,10 @@ from __future__ import annotations
 from app.contracts import PlatformLimits, PublishImage, SocialPlatform
 from app.media.publish_formats import instagram_problems
 
-# Facebook and LinkedIn publish no hashtag ceiling; 100 is ours. Instagram's 30 is real.
+# Facebook publishes no hashtag ceiling; 100 is ours. Instagram's 30 is real.
 LIMITS: dict[SocialPlatform, PlatformLimits] = {
     "facebook": PlatformLimits(max_chars=63_206, max_hashtags=100, max_images=10, requires_image=False),
     "instagram": PlatformLimits(max_chars=2_200, max_hashtags=30, max_images=10, requires_image=True),
-    "linkedin": PlatformLimits(max_chars=3_000, max_hashtags=100, max_images=20, requires_image=False),
 }
 
 MULTI_IMAGE_FROM = 2

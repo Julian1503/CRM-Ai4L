@@ -14,11 +14,11 @@ jest.mock('@/components/content-studio/api', () => ({
 
 const ACCOUNT: SocialAccount = {
   id: 'acc-1',
-  platform: 'linkedin',
-  provider: 'linkedin',
+  platform: 'facebook',
+  provider: 'meta',
   externalId: '42',
   displayName: 'AI4L',
-  authorKind: 'organization',
+  authorKind: 'page',
   scopes: [],
   status: 'connected',
   lastError: null,
@@ -27,7 +27,7 @@ const ACCOUNT: SocialAccount = {
 };
 
 function respond(data: Partial<ListAccountsResponse> = {}) {
-  mockListAccounts.mockResolvedValue({ accounts: [ACCOUNT], enabledPlatforms: ['facebook', 'linkedin'], ...data });
+  mockListAccounts.mockResolvedValue({ accounts: [ACCOUNT], enabledPlatforms: ['facebook', 'instagram'], ...data });
 }
 
 const fetchMock = jest.fn();
@@ -55,19 +55,18 @@ describe('SocialConnectionsSettings', () => {
 
     const row = await screen.findByTestId('social-account-acc-1');
     expect(within(row).getByText('AI4L')).toBeInTheDocument();
-    expect(within(row).getByText(/LinkedIn · Organisation page · Connected/)).toBeInTheDocument();
+    expect(within(row).getByText(/Facebook · Page · Connected/)).toBeInTheDocument();
   });
 
-  it('offers a connect form per enabled provider, with an explicit LinkedIn author choice', async () => {
+  it('offers one Meta connect form for Facebook and Instagram, and nothing for LinkedIn', async () => {
     respond();
     render(<SocialConnectionsSettings />);
 
     const meta = await screen.findByTestId('connect-meta');
     expect(meta).toHaveAttribute('action', '/api/social/oauth/meta/start');
     expect(meta).toHaveAttribute('method', 'post');
-    const linkedin = screen.getByTestId('connect-linkedin');
-    expect(within(linkedin).getByLabelText('Post as')).toHaveValue('organization');
-    expect(within(linkedin).getByRole('option', { name: 'My personal profile' })).toHaveValue('member');
+    expect(screen.getAllByRole('button', { name: /^Connect/ })).toHaveLength(1);
+    expect(screen.queryByTestId('connect-linkedin')).not.toBeInTheDocument();
     expect(screen.queryByTestId('connect-mock')).not.toBeInTheDocument();
   });
 

@@ -114,15 +114,15 @@ declare
 begin
   raise notice '3.1 item + idempotent enqueue';
   insert into public.content_items (brand_id, title, brief, channels, created_by)
-  select id, 'Launch __contentverify', '{"topic":"launch"}', array['facebook', 'linkedin'],
+  select id, 'Launch __contentverify', '{"topic":"launch"}', array['facebook', 'instagram'],
          '00000000-0000-4000-8000-0000000c0b01'
     from public.content_brand_profiles where slug = 'ai4l'
   returning id into v_item;
 
   v_job1 := public.enqueue_content_job('generate_text', 'gen__contentverify-1', v_item, null, null, null,
-              '{"channels":["facebook","linkedin"],"stylesPerChannel":1}');
+              '{"channels":["facebook","instagram"],"stylesPerChannel":1}');
   v_job2 := public.enqueue_content_job('generate_text', 'gen__contentverify-1', v_item, null, null, null,
-              '{"channels":["facebook","linkedin"],"stylesPerChannel":1}');
+              '{"channels":["facebook","instagram"],"stylesPerChannel":1}');
   assert v_job1.id = v_job2.id, 'a repeated enqueue created a second job';
   assert v_job1.status = 'queued', 'new job is not queued';
 end $$;
@@ -167,7 +167,7 @@ begin
   v_failed := false;
   begin
     perform public.complete_content_job(v_job, v_token,
-      '{"variants":[{"channel":"instagram","style":"a","body":"x","hashtags":[]}]}');
+      '{"variants":[{"channel":"email","style":"a","body":"x","hashtags":[]}]}');
   exception when invalid_parameter_value then v_failed := true;
   end;
   assert v_failed, 'a result for an unrequested channel was stored';
@@ -177,7 +177,7 @@ begin
     'variants', jsonb_build_array(
       jsonb_build_object('channel', 'facebook', 'style', 'a', 'body', 'Hello', 'hashtags', jsonb_build_array('#AI', 'news'),
                          'callToAction', 'Learn more', 'violations', '[]'::jsonb),
-      jsonb_build_object('channel', 'linkedin', 'style', 'a', 'body', 'Hello LI', 'hashtags', '[]'::jsonb,
+      jsonb_build_object('channel', 'instagram', 'style', 'a', 'body', 'Hello IG', 'hashtags', '[]'::jsonb,
                          'callToAction', null, 'violations', '[]'::jsonb)))), 'the owner could not complete';
   assert (select status from public.content_jobs where id = v_job) = 'succeeded', 'job not succeeded';
   assert not public.complete_content_job(v_job, v_token, '{"variants":[]}'), 'a finished job completed twice';
@@ -270,25 +270,25 @@ declare
   v_edit    public.content_variant_revisions;
 begin
   select v.* into v_variant from public.content_variants v join public.content_items i on i.id = v.item_id
-   where i.title = 'Launch __contentverify' and v.channel = 'linkedin';
+   where i.title = 'Launch __contentverify' and v.channel = 'instagram';
   v_base := v_variant.current_revision_id;
 
   perform set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000c0b01","role":"authenticated"}', true);
   v_job := public.enqueue_content_job('generate_text', 'regen__contentverify-1', v_variant.item_id, v_variant.id, v_base,
-             null, '{"channels":["linkedin"],"stylesPerChannel":1}');
-  v_edit := public.create_content_revision(v_variant.id, v_base, '{"body":"Operator edit"}', 'edit__contentverify-li');
+             null, '{"channels":["instagram"],"stylesPerChannel":1}');
+  v_edit := public.create_content_revision(v_variant.id, v_base, '{"body":"Operator edit"}', 'edit__contentverify-ig');
 
   perform set_config('request.jwt.claims', '{"role":"service_role"}', true);
   select c.claim_token into v_token from public.claim_content_jobs('worker-a', array['generate_text'], 20, 120) c
    where c.job_id = v_job.id;
   assert public.begin_content_dispatch(v_job.id, v_token) = 'go', 'regeneration refused';
   assert public.complete_content_job(v_job.id, v_token,
-    '{"promptVersion":"p1","variants":[{"channel":"linkedin","style":"a","body":"Late result","hashtags":[]}]}'),
+    '{"promptVersion":"p1","variants":[{"channel":"instagram","style":"a","body":"Late result","hashtags":[]}]}'),
     'regeneration could not complete';
 
   assert (select current_revision_id from public.content_variants where id = v_variant.id) = v_edit.id,
          'a late regeneration overwrote the newer edit';
-  assert exists (select 1 from public.content_variants where item_id = v_variant.item_id and channel = 'linkedin'
+  assert exists (select 1 from public.content_variants where item_id = v_variant.item_id and channel = 'instagram'
                   and conflict_of_revision_id = v_base), 'the late result was not kept as a conflict variant';
 end $$;
 
@@ -448,14 +448,14 @@ declare
 begin
   perform set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000c0b01","role":"authenticated"}', true);
   select v.* into v_variant from public.content_variants v join public.content_items i on i.id = v.item_id
-   where i.title = 'Launch __contentverify' and v.channel = 'linkedin' and v.conflict_of_revision_id is null;
+   where i.title = 'Launch __contentverify' and v.channel = 'instagram' and v.conflict_of_revision_id is null;
 
   raise notice '10.1 duplicate is idempotent and does not reuse an edit key';
   v_dup := public.duplicate_content_variant(v_variant.id, 'dup__contentverify-1');
   v_again := public.duplicate_content_variant(v_variant.id, 'dup__contentverify-1');
   assert v_dup.id = v_again.id and v_dup.id <> v_variant.id, 'duplicate is not idempotent';
   begin
-    perform public.duplicate_content_variant(v_variant.id, 'edit__contentverify-li');
+    perform public.duplicate_content_variant(v_variant.id, 'edit__contentverify-ig');
   exception when sqlstate 'CRM06' then v_failed := true;
   end;
   assert v_failed, 'an edit key was accepted as a duplicate';
@@ -473,7 +473,7 @@ begin
   v_failed := false;
   begin
     perform public.enqueue_content_job('generate_text', 'regen__contentverify-archived', v_dup.item_id, v_dup.id,
-      v_dup.current_revision_id, null, '{"channels":["linkedin"]}');
+      v_dup.current_revision_id, null, '{"channels":["instagram"]}');
   exception when sqlstate 'CRM07' then v_failed := true;
   end;
   assert v_failed, 'an archived variant was regenerated';

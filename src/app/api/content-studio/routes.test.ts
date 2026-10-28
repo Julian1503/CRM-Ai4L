@@ -170,7 +170,7 @@ describe('items', () => {
 
   it('creates an item as the session user (201) and validates the body', async () => {
     mockLib.createItem.mockResolvedValue({ id: IDS.item })
-    const body = { title: 'Launch', brief: { topic: 'AI' }, channels: ['linkedin'] }
+    const body = { title: 'Launch', brief: { topic: 'AI' }, channels: ['facebook'] }
 
     expect(await run(createItemRoute as AnyHandler, '/items', 'POST', body)).toEqual({ status: 201, body: { item: { id: IDS.item } } })
     expect(mockLib.createItem).toHaveBeenCalledWith(DB, IDS.user, body)
@@ -196,12 +196,12 @@ describe('items', () => {
     mockLib.enqueueGeneration.mockResolvedValue({ id: IDS.job })
     mockLib.enqueueImageGeneration.mockResolvedValue({ id: IDS.job })
 
-    expect(await run(generate, '/g', 'POST', { idempotencyKey: KEY, channels: ['linkedin'] })).toEqual({ status: 202, body: { job: { id: IDS.job } } })
-    expect(mockLib.enqueueGeneration).toHaveBeenCalledWith(DB, itemRow(), { idempotencyKey: KEY, channels: ['linkedin'], stylesPerChannel: 1 })
+    expect(await run(generate, '/g', 'POST', { idempotencyKey: KEY, channels: ['facebook'] })).toEqual({ status: 202, body: { job: { id: IDS.job } } })
+    expect(mockLib.enqueueGeneration).toHaveBeenCalledWith(DB, itemRow(), { idempotencyKey: KEY, channels: ['facebook'], stylesPerChannel: 1 })
     expect((await run(images, '/i', 'POST', { idempotencyKey: KEY, prompt: 'p', count: 1 })).status).toBe(202)
 
     mockLib.findItemRow.mockResolvedValue(null)
-    expect((await run(generate, '/g', 'POST', { idempotencyKey: KEY, channels: ['linkedin'] })).status).toBe(404)
+    expect((await run(generate, '/g', 'POST', { idempotencyKey: KEY, channels: ['facebook'] })).status).toBe(404)
     expect((await run(images, '/i', 'POST', { idempotencyKey: KEY, prompt: 'p', count: 1 })).status).toBe(404)
   })
 
@@ -209,7 +209,7 @@ describe('items', () => {
     mockLib.findItemRow.mockResolvedValue(itemRow())
     mockLib.enqueueGeneration.mockRejectedValue(new ContentDbError({ code: 'CRM06', message: 'Idempotency key reused for another job.' }))
 
-    expect(await run(generate, '/g', 'POST', { idempotencyKey: KEY, channels: ['linkedin'] })).toEqual({
+    expect(await run(generate, '/g', 'POST', { idempotencyKey: KEY, channels: ['facebook'] })).toEqual({
       status: 409,
       body: { error: 'Idempotency key reused for another job.' },
     })

@@ -55,10 +55,6 @@
   border-radius: var(--radius-full);
 }
 
-.frame[data-platform='linkedin'] .avatar {
-  border-radius: var(--radius-xs);
-}
-
 .author {
   font-size: 0.85rem;
   font-weight: 700;

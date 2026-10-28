@@ -31,7 +31,7 @@ def _session(crm: FakeCrm | None = None) -> JobSession:
 
 def test_prompts_carry_the_brand_and_nothing_from_wrcc() -> None:
     plans = plan_drafts(_context(), "Some reference text.")
-    assert {plan.ctx.channel for plan in plans} == {"linkedin", "email", "facebook"}
+    assert {plan.ctx.channel for plan in plans} == {"instagram", "email", "facebook"}
     for plan in plans:
         assert "AI4L" in plan.prompt
         assert "small-business owners" in plan.prompt or "accountants" in plan.prompt
@@ -97,9 +97,9 @@ def test_reference_text_is_fenced_as_untrusted_and_cannot_close_the_fence() -> N
 
 def test_brand_channel_rules_and_crm_limits_shape_the_profile() -> None:
     context = _context()
-    linkedin = profile_for("linkedin", context.brand, context.platform_limits["linkedin"])
-    assert linkedin.cta == "Book a call."
-    assert linkedin.structure == "hook + insight + call to action"
+    ruled = profile_for("instagram", context.brand, context.platform_limits["instagram"])
+    assert ruled.cta == "Book a call."
+    assert ruled.structure == "hook + insight + call to action"
     instagram = profile_for(
         "instagram",
         context.brand,
@@ -143,7 +143,7 @@ async def test_mock_variants_are_compliant_and_email_fields_respect_limits() -> 
 async def test_one_channel_failing_does_not_cancel_the_others() -> None:
     llm = ScriptedLLM(fail={"email": "transient"})
     outcome = await run_drafts(plan_drafts(_context(), None), llm, concurrency=2, deadline_seconds=5)
-    assert {v.channel for v in outcome.variants} == {"linkedin", "facebook"}
+    assert {v.channel for v in outcome.variants} == {"instagram", "facebook"}
     assert [(f.channel, f.error_code) for f in outcome.failures] == [("email", "llm_transient")]
 
 
@@ -173,9 +173,9 @@ async def test_handler_completes_with_partial_results_after_begin_dispatch() -> 
 @pytest.mark.parametrize(
     ("kinds", "outcome"),
     [
-        ({"linkedin": "transient", "email": "transient", "facebook": "transient"}, "retry"),
-        ({"linkedin": "transient", "email": "invalid", "facebook": "transient"}, "failed"),
-        ({"linkedin": "config", "email": "config", "facebook": "config"}, "failed"),
+        ({"instagram": "transient", "email": "transient", "facebook": "transient"}, "retry"),
+        ({"instagram": "transient", "email": "invalid", "facebook": "transient"}, "failed"),
+        ({"instagram": "config", "email": "config", "facebook": "config"}, "failed"),
     ],
 )
 async def test_all_channels_failing_uses_the_documented_fail_rule(kinds: dict, outcome: str) -> None:

@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from PIL import Image, UnidentifiedImageError
 
 JPEG_QUALITY = 88
-SOCIAL_MAX_WIDTH = 1440  # Instagram's largest rendered width; also fine for FB/LinkedIn.
+SOCIAL_MAX_WIDTH = 1440  # Instagram's largest rendered width; also fine for Facebook.
 EMAIL_MAX_WIDTH = 1200
 INSTAGRAM_MIN_WIDTH = 320
 INSTAGRAM_MIN_ASPECT = 0.8  # 4:5 portrait

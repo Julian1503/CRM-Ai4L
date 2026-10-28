@@ -15,10 +15,10 @@
 // Domain
 // ---------------------------------------------------------------------------
 
-export const CONTENT_CHANNELS = ['facebook', 'instagram', 'linkedin', 'email'] as const
+export const CONTENT_CHANNELS = ['facebook', 'instagram', 'email'] as const
 export type ContentChannel = (typeof CONTENT_CHANNELS)[number]
 
-export const SOCIAL_PLATFORMS = ['facebook', 'instagram', 'linkedin'] as const
+export const SOCIAL_PLATFORMS = ['facebook', 'instagram'] as const
 export type SocialPlatform = (typeof SOCIAL_PLATFORMS)[number]
 
 export const JOB_KINDS = ['generate_text', 'generate_image', 'ingest_asset', 'publish_social'] as const
@@ -40,8 +40,8 @@ export type AssetOrigin = 'upload' | 'generated'
 export type IngestStatus = 'pending' | 'ready' | 'rejected'
 export type RenditionPurpose = 'social' | 'email'
 
-export type SocialProvider = 'meta' | 'linkedin' | 'mock'
-export type SocialAuthorKind = 'page' | 'instagram_business' | 'organization' | 'member'
+export type SocialProvider = 'meta' | 'mock'
+export type SocialAuthorKind = 'page' | 'instagram_business'
 export type SocialAccountStatus = 'connected' | 'needs_reauth' | 'disconnected'
 export type PublicationStatus = 'queued' | 'dispatching' | 'published' | 'failed' | 'uncertain' | 'cancelled'
 

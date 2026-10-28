@@ -10,13 +10,11 @@ from app.social.publishers.base import Publisher
 from app.social.publishers.common import PublisherConfig
 from app.social.publishers.facebook import FacebookPublisher
 from app.social.publishers.instagram import InstagramPublisher
-from app.social.publishers.linkedin import LinkedInPublisher
 from app.social.publishers.mock import MockPublisher
 
-_LIVE: dict[str, type[FacebookPublisher | InstagramPublisher | LinkedInPublisher]] = {
+_LIVE: dict[str, type[FacebookPublisher | InstagramPublisher]] = {
     "facebook": FacebookPublisher,
     "instagram": InstagramPublisher,
-    "linkedin": LinkedInPublisher,
 }
 
 

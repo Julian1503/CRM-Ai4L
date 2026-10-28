@@ -15,11 +15,11 @@ describe('SocialPreview', () => {
   })
 
   it('folds long text behind the network’s more control', () => {
-    const text = `${'word '.repeat(60)}end`
-    render(<SocialPreview platform="linkedin" text={text} images={[]} />)
+    const text = `${'word '.repeat(100)}end`
+    render(<SocialPreview platform="facebook" text={text} images={[]} />)
 
     expect(screen.queryByText(/end$/)).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '…see more' }))
+    fireEvent.click(screen.getByRole('button', { name: 'See more' }))
     expect(screen.getByText(/end$/)).toBeInTheDocument()
     expect(screen.getByText('Your account')).toBeInTheDocument()
   })

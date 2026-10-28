@@ -18,7 +18,7 @@ import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { disconnectSocialAccount, listSocialAccounts, saveConnectedAccounts } from './accounts'
 import { EngineError, exchangeCode, requestAuthorizeUrl } from './engineClient'
 import { callbackUrl, isSameOrigin, settingsRedirect } from './oauthHttp'
-import { consumeOAuthState, createOAuthState, isProviderAllowed, parseOAuthOptions } from './oauthState'
+import { consumeOAuthState, createOAuthState, isProviderAllowed } from './oauthState'
 import { runPreflight } from './preflight'
 import { listPublications, requestPublication } from './publications'
 import { parsePublishRequest } from './validation'
@@ -63,20 +63,6 @@ export async function disconnectAccountResponse(session: Session, request: NextR
 
 // --- OAuth ----------------------------------------------------------------------------
 
-async function readConnectOptions(request: NextRequest): Promise<Record<string, unknown>> {
-  const type = request.headers.get('content-type') ?? ''
-  try {
-    if (type.includes('application/json')) {
-      const body = await readJsonBody(request)
-      return body ?? {}
-    }
-    if (type.includes('form')) return Object.fromEntries((await request.formData()).entries())
-  } catch {
-    return {}
-  }
-  return {}
-}
-
 function failureReason(error: unknown, fallback: string): string {
   const reason = error instanceof EngineError ? error.code : fallback
   console.error('Social connect failed:', reason)
@@ -88,13 +74,11 @@ export async function startConnectResponse(session: Session, request: NextReques
   if (!isAdmin(session)) return forbidden('Only an administrator can do that.')
   if (!isSameOrigin(request)) return settingsRedirect(request, 'error', { reason: 'cross_site' })
   if (!isProviderAllowed(provider)) return settingsRedirect(request, 'error', { reason: 'unknown_provider' })
-  const options = parseOAuthOptions(provider, await readConnectOptions(request))
-  if (!options) return settingsRedirect(request, 'error', { reason: 'invalid_options' })
 
   try {
     const brand = await getDefaultBrand(await createSupabaseServerClient())
-    const state = await createOAuthState(getAdminClient(), { provider, actorId: session.userId, brandId: brand.id, options })
-    const url = await requestAuthorizeUrl(provider, { state, redirectUri: callbackUrl(request, provider), options })
+    const state = await createOAuthState(getAdminClient(), { provider, actorId: session.userId, brandId: brand.id })
+    const url = await requestAuthorizeUrl(provider, { state, redirectUri: callbackUrl(request, provider) })
     const response = NextResponse.redirect(url, 303)
     response.headers.set('Cache-Control', 'private, no-store')
     return response
@@ -123,7 +107,7 @@ export async function connectCallbackResponse(session: Session, request: NextReq
     if (params.get('error')) return settingsRedirect(request, 'error', { reason: 'denied' })
     if (!code || code.length > MAX_CODE_LENGTH) return settingsRedirect(request, 'error', { reason: 'missing_code' })
 
-    const accounts = await exchangeCode(provider, { code, redirectUri: callbackUrl(request, provider), options: consumed.options })
+    const accounts = await exchangeCode(provider, { code, redirectUri: callbackUrl(request, provider) })
     if (accounts.length === 0) return settingsRedirect(request, 'error', { reason: 'no_accounts' })
 
     const saved = await saveConnectedAccounts(admin, { accounts, provider, brandId: consumed.brandId, actorId: session.userId })

@@ -47,7 +47,7 @@ export const EMPTY_BRIEF: BriefDraft = {
   referenceUrl: '',
   notes: '',
   sourceFacts: [],
-  channels: ['facebook', 'linkedin'],
+  channels: ['facebook', 'instagram'],
   stylesPerChannel: 1,
 }
 

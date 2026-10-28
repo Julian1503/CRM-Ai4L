@@ -5,8 +5,8 @@ that makes the post public in a retry helper, so a 5xx or code-1 answer *after* 
 was created could post it again. Here every publisher has:
 
 ``prepare(request, checkpoint) -> dict``
-    Private, repeatable scaffolding: unpublished Facebook photos, Instagram containers,
-    LinkedIn image URNs. Retried on ``rate_limited``/``transient``. Returns IDs the
+    Private, repeatable scaffolding: unpublished Facebook photos and Instagram
+    containers. Retried on ``rate_limited``/``transient``. Returns IDs the
     worker checkpoints, and accepts a previous checkpoint to resume from.
 
 ``dispatch(request, prepared) -> PublishResult``

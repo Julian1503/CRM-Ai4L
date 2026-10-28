@@ -102,7 +102,7 @@ describe('enqueueGeneration', () => {
   it('snapshots the brief into the job input', async () => {
     const db = dbWith({}, { data: jobRow({ status: 'queued' }), error: null })
 
-    const job = await enqueueGeneration(db as never, itemRow(), { idempotencyKey: KEY, channels: ['linkedin'], stylesPerChannel: 2 })
+    const job = await enqueueGeneration(db as never, itemRow(), { idempotencyKey: KEY, channels: ['facebook'], stylesPerChannel: 2 })
 
     expect(job.status).toBe('queued')
     expect(db.rpc).toHaveBeenCalledWith('enqueue_content_job', {
@@ -111,19 +111,19 @@ describe('enqueueGeneration', () => {
       p_item_id: IDS.item,
       p_variant_id: null,
       p_base_revision_id: null,
-      p_input: { itemId: IDS.item, channels: ['linkedin'], stylesPerChannel: 2, brief: { topic: 'AI adoption' } },
+      p_input: { itemId: IDS.item, channels: ['facebook'], stylesPerChannel: 2, brief: { topic: 'AI adoption' } },
     })
   })
 
   it('checks a regeneration target and carries the base revision and instruction', async () => {
     const db = dbWith(
-      { content_variants: { data: { id: IDS.variant, item_id: IDS.item, channel: 'linkedin', archived_at: null }, error: null } },
+      { content_variants: { data: { id: IDS.variant, item_id: IDS.item, channel: 'facebook', archived_at: null }, error: null } },
       { data: jobRow(), error: null }
     )
 
     await enqueueGeneration(db as never, itemRow(), {
       idempotencyKey: KEY,
-      channels: ['linkedin'],
+      channels: ['facebook'],
       variantId: IDS.variant,
       baseRevisionId: IDS.revision,
       instruction: 'shorter',
@@ -137,14 +137,14 @@ describe('enqueueGeneration', () => {
   })
 
   it.each([
-    ['another item', { id: IDS.variant, item_id: 'other', channel: 'linkedin', archived_at: null }, 404],
+    ['another item', { id: IDS.variant, item_id: 'other', channel: 'facebook', archived_at: null }, 404],
     ['missing', null, 404],
     ['another channel', { id: IDS.variant, item_id: IDS.item, channel: 'email', archived_at: null }, 422],
   ])('refuses a regeneration target in %s', async (_name, variant, status) => {
     const db = dbWith({ content_variants: { data: variant, error: null } })
 
     await expect(
-      enqueueGeneration(db as never, itemRow(), { idempotencyKey: KEY, channels: ['linkedin'], variantId: IDS.variant, baseRevisionId: IDS.revision })
+      enqueueGeneration(db as never, itemRow(), { idempotencyKey: KEY, channels: ['facebook'], variantId: IDS.variant, baseRevisionId: IDS.revision })
     ).rejects.toMatchObject({ status })
     expect(db.rpc).not.toHaveBeenCalled()
   })
@@ -152,7 +152,7 @@ describe('enqueueGeneration', () => {
   it('refuses archived items and channels the item does not plan', async () => {
     const db = dbWith({})
 
-    await expect(enqueueGeneration(db as never, itemRow({ archived_at: 'x' }), { idempotencyKey: KEY, channels: ['linkedin'] })).rejects.toMatchObject({
+    await expect(enqueueGeneration(db as never, itemRow({ archived_at: 'x' }), { idempotencyKey: KEY, channels: ['facebook'] })).rejects.toMatchObject({
       status: 409,
     })
     await expect(enqueueGeneration(db as never, itemRow(), { idempotencyKey: KEY, channels: ['instagram'] })).rejects.toMatchObject({

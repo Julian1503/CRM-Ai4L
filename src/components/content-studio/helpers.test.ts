@@ -39,7 +39,7 @@ describe('labels helpers', () => {
     expect(isTerminal('uncertain')).toBe(true)
     expect(isTerminal('running')).toBe(false)
     expect(isSocialChannel('email')).toBe(false)
-    expect(isSocialChannel('linkedin')).toBe(true)
+    expect(isSocialChannel('instagram')).toBe(true)
   })
 })
 
@@ -129,7 +129,7 @@ describe('generation job selection', () => {
 
   it('retries failed channels, or everything after an outright failure', () => {
     expect(retryChannels(makeJob({ status: 'succeeded', failures: [{ channel: 'email', errorCode: 'x', message: 'm' }, { channel: 'email', errorCode: 'y', message: 'n' }] }), ['facebook'])).toEqual(['email'])
-    expect(retryChannels(makeJob({ status: 'failed' }), ['facebook', 'linkedin'])).toEqual(['facebook', 'linkedin'])
+    expect(retryChannels(makeJob({ status: 'failed' }), ['facebook', 'instagram'])).toEqual(['facebook', 'instagram'])
     expect(retryChannels(makeJob({ status: 'uncertain' }), ['facebook'])).toEqual([])
     expect(retryChannels(makeJob({ kind: 'generate_image', status: 'failed' }), ['facebook'])).toEqual([])
   })

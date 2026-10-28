@@ -42,7 +42,7 @@ BRAND: dict[str, Any] = load_fixture("context-generate-text.json")["brand"]
 CONTEXTS: dict[str, dict[str, Any]] = {
     "rewrite_instructions": {
         "brand": BRAND,
-        "channel": "linkedin",
+        "channel": "instagram",
         "body": "Our monthly workshop is back. Join us to learn practical skills.",
         "hashtags": ["#Workshops"],
         "violations": ["Body is shorter than 150 characters"],
@@ -58,13 +58,13 @@ CONTEXTS: dict[str, dict[str, Any]] = {
     "brief_completion": {
         "brand": BRAND,
         "topic": "Online workshops for small teams",
-        "channels": ["facebook", "linkedin", "email"],
+        "channels": ["facebook", "instagram", "email"],
     },
     "content_ideas": {
         "brand": BRAND,
         "recentTitles": ["Monthly workshop"],
         "plannedTopics": [{"title": "Spring programme", "details": "New dates"}],
-        "channels": ["facebook", "linkedin"],
+        "channels": ["facebook", "instagram"],
     },
 }
 
@@ -227,7 +227,7 @@ def test_brief_prompt_lists_fact_ids_and_only_offered_channels() -> None:
     prompt = prompts.render_brief_completion(ctx)
 
     assert "- fact-1: Workshops run online every month." in prompt
-    assert "facebook, linkedin, email" in prompt
+    assert "facebook, instagram, email" in prompt
 
 
 def test_image_prompt_carries_art_direction_and_safety_rules() -> None:
@@ -293,7 +293,7 @@ def test_image_prompts_skip_used_prompts_and_fill_missing_labels() -> None:
 
 def test_brief_completion_keeps_only_real_fact_ids_and_offered_channels() -> None:
     ctx = BriefCompletionContext.model_validate(
-        {**CONTEXTS["brief_completion"], "channels": ["linkedin", "email"]}
+        {**CONTEXTS["brief_completion"], "channels": ["instagram", "email"]}
     )
     raw = RawBriefCompletion(
         title="Workshops that fit your week",
@@ -301,7 +301,7 @@ def test_brief_completion_keeps_only_real_fact_ids_and_offered_channels() -> Non
         objective="Book a seat",
         notes="See https://example.com",
         fact_ids=["fact-1", "invented", "fact-1"],
-        channels=["LinkedIn", "instagram", "email", "email"],
+        channels=["Instagram", "facebook", "linkedin", "email", "email"],
     )
 
     assert sanitize_brief_completion(raw, ctx) == {
@@ -309,7 +309,7 @@ def test_brief_completion_keeps_only_real_fact_ids_and_offered_channels() -> Non
             "title": "Workshops that fit your week",
             "objective": "Book a seat",
             "factIds": ["fact-1"],
-            "channels": ["linkedin", "email"],
+            "channels": ["instagram", "email"],
         }
     }
 

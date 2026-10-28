@@ -2,7 +2,7 @@
 
 Python service that holds the parts of Content Studio that are cheaper to keep than to
 rewrite: text and image generation, image ingest and renditions, OAuth code exchange and
-the Facebook / Instagram / LinkedIn publishers. The CRM (Next.js + Supabase) owns
+the Facebook / Instagram publishers. The CRM (Next.js + Supabase) owns
 identity, data, approvals, the job queue and Storage. This service holds no database and
 no Storage key; it only talks to the CRM's signed internal endpoints and to providers.
 
@@ -56,8 +56,8 @@ never called in CI or tests.
 * **Shutdown.** SIGTERM stops claiming. Jobs before begin-dispatch are abandoned and their
   lease expires (the CRM requeues them); jobs past it finish.
 * **Publishing never posts twice.** Every publisher is split into `prepare` (unpublished
-  Facebook photos, Instagram containers, LinkedIn image URNs — retried, checkpointed,
-  resumable) and `dispatch` (the one public call, never retried). On dispatch, a structured
+  Facebook photos, Instagram containers — retried, checkpointed, resumable) and `dispatch`
+  (the one public call, never retried). On dispatch, a structured
   4xx is `failed`; a 5xx, timeout, non-JSON body or success without an id is `uncertain`.
   This fixes the WRCC Facebook 0/1-image path, which retried the public call.
 * **Generation fail rule.** Channels fail independently; partial results complete with
@@ -88,7 +88,6 @@ never called in CI or tests.
 
 * `META_GRAPH_VERSION=v23.0` and the Meta scopes (`app/social/oauth/meta.py`, now
   including `business_management` for Business-Portfolio-owned Pages).
-* `LINKEDIN_API_VERSION=202506` (LinkedIn retires versions) and the `multiImage` payload.
 * Default models `gpt-5-mini`, `gemini-2.5-flash`, `gpt-image-1`.
 
 ## Provenance
@@ -105,8 +104,8 @@ imported from that repository at runtime.
 | `app/generation/prompts.py`, `profiles.py`, `orchestrate.py` | `app/agents/content_generator.py`, `validation.py`, `app/content/service.py` | Brand profile instead of WRCC copy/courses; email channel; partial results. |
 | `app/generation/reference.py` | `app/content/service.py::fetch_reference_excerpt` | Rewritten with SSRF limits. |
 | `app/social/meta_graph.py` | `app/publishing/meta_graph.py` | `structured` flag, wider redaction. |
-| `app/social/publishers/*` | `app/publishing/publishers/*` | Split into prepare/dispatch; explicit LinkedIn author kind. |
-| `app/social/oauth/*` | `app/publishing/oauth/*` | Redirect URI per call; state owned by the CRM; no member fallback. |
+| `app/social/publishers/*` | `app/publishing/publishers/*` | Split into prepare/dispatch; WRCC's LinkedIn publisher was not kept. |
+| `app/social/oauth/*` | `app/publishing/oauth/*` | Redirect URI per call; state owned by the CRM; Meta only. |
 | `app/social/rules.py` | `app/publishing/rules.py` | Pure parts only (compose, limits, dispatch blockers). |
 | `tests/test_media_ingest.py` | `tests/test_media_ingest.py` | Ported. Other tests rewritten for the new seams. |
 

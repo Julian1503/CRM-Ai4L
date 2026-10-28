@@ -56,7 +56,7 @@ CRM (`.env.local.example`):
 | Variable | Uso |
 | --- | --- |
 | `CONTENT_STUDIO_ENABLED` | `true` monta la pestaña y acepta nuevas solicitudes. |
-| `CONTENT_SOCIAL_PLATFORMS` | Lista de redes con publicación habilitada (`facebook,instagram,linkedin`). Vacía = ninguna. |
+| `CONTENT_SOCIAL_PLATFORMS` | Lista de redes con publicación habilitada (`facebook,instagram`). Vacía = ninguna; un nombre desconocido (p. ej. `linkedin`, ya no soportado) se ignora. |
 | `CONTENT_EMAIL_BRIDGE_ENABLED` | Habilita crear email draft / export desde el Studio. |
 | `CONTENT_EMAIL_DYNAMIC_ENABLED` | Automation dinámica por campos. `false` hasta validar proveedor. |
 | `CONTENT_WORKER_SECRET` | Firma del protocolo worker, motor → CRM (≥ 32 caracteres). |
@@ -64,9 +64,9 @@ CRM (`.env.local.example`):
 | `CONTENT_TOKEN_ENCRYPTION_KEY` | 32 bytes base64 para AES-256-GCM de tokens sociales. |
 | `CONTENT_TOKEN_ENCRYPTION_KEY_VERSION` | Entero; rotación. |
 | `CONTENT_ENGINE_URL` | URL del API del motor (intercambio OAuth servidor a servidor). |
-| `META_APP_ID`, `LINKEDIN_CLIENT_ID` | Identificadores públicos de apps OAuth (los secretos viven en el motor). |
+| `META_APP_ID` | Identificador público de la app OAuth de Meta (el secreto vive en el motor). |
 
-Motor (`services/content-engine/.env.example`): `CRM_BASE_URL`, `CONTENT_WORKER_SECRET`, `LLM_MOCK`, `LLM_PROVIDER`, `GEMINI_API_KEY`, `OPENAI_API_KEY`, modelos, `PUBLISH_MOCK`, `META_APP_ID`, `META_APP_SECRET`, `META_GRAPH_VERSION`, `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET`, `LINKEDIN_API_VERSION`, límites de concurrencia/lease.
+Motor (`services/content-engine/.env.example`): `CRM_BASE_URL`, `CONTENT_WORKER_SECRET`, `LLM_MOCK`, `LLM_PROVIDER`, `GEMINI_API_KEY`, `OPENAI_API_KEY`, modelos, `PUBLISH_MOCK`, `META_APP_ID`, `META_APP_SECRET`, `META_GRAPH_VERSION`, límites de concurrencia/lease.
 
 ## 6. Propiedad de archivos por frente
 

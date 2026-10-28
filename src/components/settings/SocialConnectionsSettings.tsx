@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useId, useMemo, useState, useSyncExternalStore } from 'react';
+import { useId, useMemo, useState, useSyncExternalStore } from 'react';
 
 import { errorMessage, listAccounts } from '@/components/content-studio/api';
 import { useResource } from '@/components/content-studio/hooks';
@@ -9,9 +9,8 @@ import type { SocialAccount, SocialPlatform } from '@/lib/content-studio/types';
 import styles from './CatalogSettings.module.css';
 
 /**
- * Social connections (Settings). Lists the connected Facebook Pages, Instagram Business
- * accounts and LinkedIn organisations/members, and lets an administrator connect or
- * disconnect them. Connecting is a form post to /api/social/oauth/<provider>/start: the
+ * Social connections (Settings). Lists the connected Facebook Pages and Instagram Business
+ * accounts, and lets an administrator connect or disconnect them. Connecting is a form post to /api/social/oauth/<provider>/start: the
  * browser goes to the provider's consent screen and comes back to Settings with
  * `?social=connected|error`. Tokens never reach this component.
  */
@@ -26,14 +25,11 @@ type Props = {
 const PLATFORM_LABELS: Record<SocialPlatform, string> = {
   facebook: 'Facebook',
   instagram: 'Instagram',
-  linkedin: 'LinkedIn',
 };
 
 const AUTHOR_LABELS: Record<SocialAccount['authorKind'], string> = {
   page: 'Page',
   instagram_business: 'Business account',
-  organization: 'Organisation page',
-  member: 'Personal profile',
 };
 
 const STATUS_LABELS: Record<SocialAccount['status'], string> = {
@@ -73,31 +69,13 @@ export function readConnectResult(search: string): Banner | null {
   return null;
 }
 
-function ConnectForm({ provider, label, children }: { provider: string; label: string; children?: React.ReactNode }) {
+function ConnectForm({ provider, label }: { provider: string; label: string }) {
   return (
     <form method="post" action={`/api/social/oauth/${provider}/start`} className={styles.toolbar} data-testid={`connect-${provider}`}>
-      {children}
       <button type="submit" className={styles.primaryBtn}>
         {label}
       </button>
     </form>
-  );
-}
-
-function LinkedInConnect() {
-  const id = useId();
-  return (
-    <ConnectForm provider="linkedin" label="Connect LinkedIn">
-      <span className={styles.fieldGroup}>
-        <label htmlFor={id} className={styles.label}>
-          Post as
-        </label>
-        <select id={id} name="authorKind" className={styles.input} defaultValue="organization">
-          <option value="organization">An organisation page I administer</option>
-          <option value="member">My personal profile</option>
-        </select>
-      </span>
-    </ConnectForm>
   );
 }
 
@@ -173,7 +151,6 @@ export default function SocialConnectionsSettings({ canManage = true, allowMock 
 
   const enabled = data?.enabledPlatforms ?? [];
   const metaEnabled = enabled.includes('facebook') || enabled.includes('instagram');
-  const linkedinEnabled = enabled.includes('linkedin');
   const accounts = data?.accounts ?? [];
 
   return (
@@ -212,9 +189,8 @@ export default function SocialConnectionsSettings({ canManage = true, allowMock 
         {canManage && data !== null && (
           <div style={{ marginTop: 'var(--space-md)' }}>
             {metaEnabled && <ConnectForm provider="meta" label="Connect Facebook / Instagram" />}
-            {linkedinEnabled && <LinkedInConnect />}
             {allowMock && <ConnectForm provider="mock" label="Connect test accounts (mock)" />}
-            {!metaEnabled && !linkedinEnabled && !allowMock && (
+            {!metaEnabled && !allowMock && (
               <p className={styles.intro}>No social network is enabled for publishing (CONTENT_SOCIAL_PLATFORMS).</p>
             )}
           </div>

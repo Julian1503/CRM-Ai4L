@@ -15,7 +15,7 @@ import { listPublications, requestPublication } from './publications'
 
 type AnyDb = Parameters<typeof listPublications>[0]
 const REQUEST = { revisionId: IDS.revision, accountId: IDS.account, idempotencyKey: 'pub-12345678' }
-const OK: PublishPreflight = { ok: true, platform: 'linkedin', composedText: 'x', limits: { maxChars: 3000, maxHashtags: 100, maxImages: 20, requiresImage: false }, issues: [] }
+const OK: PublishPreflight = { ok: true, platform: 'facebook', composedText: 'x', limits: { maxChars: 63206, maxHashtags: 100, maxImages: 10, requiresImage: false }, issues: [] }
 
 beforeEach(() => jest.clearAllMocks())
 

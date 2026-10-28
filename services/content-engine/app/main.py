@@ -1,8 +1,8 @@
 """Engine HTTP API — called only by the CRM server, never by a browser.
 
 * ``GET /health`` — liveness and mode flags; no secrets, no configuration values.
-* ``POST /v1/oauth/{provider}/authorize-url`` ``{state, redirectUri, options}`` → ``{url}``
-* ``POST /v1/oauth/{provider}/exchange`` ``{code, redirectUri, options}`` → ``{accounts}``
+* ``POST /v1/oauth/{provider}/authorize-url`` ``{state, redirectUri}`` → ``{url}``
+* ``POST /v1/oauth/{provider}/exchange`` ``{code, redirectUri}`` → ``{accounts}``
 * ``POST /v1/suggest/{kind}`` ``{brand, avoid, ...context}`` → ``{suggestions | completion,
   model, promptVersion, usage}`` (app/suggestions; errors carry a ``code``)
 
@@ -38,14 +38,13 @@ from app.suggestions.service import SuggestionError, parse_context, suggest
 
 logger = logging.getLogger(__name__)
 
-_PROVIDERS: tuple[SocialProvider, ...] = ("meta", "linkedin", "mock")
+_PROVIDERS: tuple[SocialProvider, ...] = ("meta", "mock")
 
 
 class _Body(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
     redirect_uri: str = Field(alias="redirectUri", min_length=1, max_length=2000)
-    options: dict[str, Any] = Field(default_factory=dict)
 
 
 class AuthorizeUrlBody(_Body):
@@ -137,9 +136,7 @@ def create_app(settings: Settings | None = None, *, llm: LLMClient | None = None
         body: AuthorizeUrlBody = _parse(AuthorizeUrlBody, await _authenticated_body(request, config))
         try:
             redirect = validate_redirect_uri(body.redirect_uri, allow_local_http=allow_local_http)
-            url = get_oauth_provider(name, config).authorize_url(
-                state=body.state, redirect_uri=redirect, options=body.options
-            )
+            url = get_oauth_provider(name, config).authorize_url(state=body.state, redirect_uri=redirect)
         except OAuthNotConfigured as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from None
         except OAuthError as exc:
@@ -152,9 +149,7 @@ def create_app(settings: Settings | None = None, *, llm: LLMClient | None = None
         body: ExchangeBody = _parse(ExchangeBody, await _authenticated_body(request, config))
         try:
             redirect = validate_redirect_uri(body.redirect_uri, allow_local_http=allow_local_http)
-            accounts = await get_oauth_provider(name, config).exchange(
-                body.code, redirect_uri=redirect, options=body.options
-            )
+            accounts = await get_oauth_provider(name, config).exchange(body.code, redirect_uri=redirect)
         except OAuthNotConfigured as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from None
         except OAuthError as exc:

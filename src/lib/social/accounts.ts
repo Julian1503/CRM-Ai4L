@@ -52,7 +52,7 @@ async function audit(admin: Db, actorId: string, action: string, accountId: stri
  * preflight reports token_unreadable and no worker context can carry a token. A later
  * reconnect upserts fresh encrypted tokens over this row.
  *
- * Provider-side revocation (Meta/LinkedIn token revoke endpoints) is out of scope: the
+ * Provider-side revocation (Meta's token revoke endpoint) is out of scope: the
  * token stays valid at the provider until it expires or the admin removes the app there.
  */
 async function wipeAccountSecrets(admin: Db, accountId: string): Promise<void> {

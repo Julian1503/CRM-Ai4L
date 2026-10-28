@@ -26,7 +26,6 @@ from app.social.publishers.base import (
 from app.social.publishers.common import PublisherConfig
 from app.social.publishers.facebook import FacebookPublisher
 from app.social.publishers.instagram import InstagramPublisher
-from app.social.publishers.linkedin import LinkedInPublisher, author_urn, escape_commentary
 
 CONFIG = PublisherConfig(
     graph_base_url="https://graph.test/v23.0",
@@ -35,7 +34,6 @@ CONFIG = PublisherConfig(
     retry_base_delay=0,
     instagram_poll_attempts=3,
     instagram_poll_delay=0,
-    linkedin_api_version="202506",
     max_image_bytes=1_000_000,
 )
 TOKEN = "PAGE-TOKEN-not-real"
@@ -238,82 +236,3 @@ async def test_instagram_requires_an_image() -> None:
     publisher, _calls = instagram([])
     with pytest.raises(PublishError):
         await publisher.prepare(_request("instagram"), {})
-
-
-# ── LinkedIn ──
-
-
-def linkedin(post: list[httpx.Response], uploads: list[httpx.Response] | None = None):  # noqa: ANN201
-    calls: list[httpx.Request] = []
-    post_queue = list(post)
-    upload_queue = list(uploads or [])
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        calls.append(request)
-        if request.url.host == "cdn.test":
-            return httpx.Response(200, content=b"\xff\xd8\xffjpeg")
-        if "initializeUpload" in str(request.url):
-            if upload_queue:
-                return upload_queue.pop(0)
-            n = len(calls)
-            return httpx.Response(
-                200, json={"value": {"uploadUrl": f"https://up.test/{n}", "image": f"urn:li:image:{n}"}}
-            )
-        if request.url.host == "up.test":
-            return httpx.Response(201)
-        return post_queue.pop(0)
-
-    return LinkedInPublisher(CONFIG, transport=httpx.MockTransport(handler)), calls
-
-
-def test_author_is_explicit_per_connection() -> None:
-    assert author_urn("organization", "42") == "urn:li:organization:42"
-    assert author_urn("member", "abc") == "urn:li:person:abc"
-    with pytest.raises(PublishError):
-        author_urn("page", "42")
-
-
-def test_commentary_escaping() -> None:
-    assert escape_commentary("Hi (you) #tag") == "Hi \\(you\\) \\#tag"
-
-
-async def test_linkedin_multi_image_post_is_created_once_with_versioned_headers() -> None:
-    publisher, calls = linkedin([httpx.Response(201, headers={"x-restli-id": "urn:li:share:1"})])
-    request = _request("linkedin", images=2, author_kind="organization")
-    prepared = await publisher.prepare(request, {})
-    result = await publisher.dispatch(request, prepared)
-    post = [c for c in calls if c.url.path == "/rest/posts"][0]
-    body = json.loads(post.content)
-    assert body["author"] == "urn:li:organization:page-1"
-    assert [i["id"] for i in body["content"]["multiImage"]["images"]] == prepared["imageUrns"]
-    assert post.headers["LinkedIn-Version"] == "202506"
-    assert result.external_id == "urn:li:share:1"
-
-
-async def test_linkedin_retries_an_upload_but_posts_once() -> None:
-    publisher, calls = linkedin(
-        [httpx.Response(201, headers={"x-restli-id": "urn:li:share:2"})],
-        uploads=[httpx.Response(429, json={})],
-    )
-    request = _request("linkedin", images=1, author_kind="member")
-    await publisher.dispatch(request, await publisher.prepare(request, {}))
-    assert len([c for c in calls if "initializeUpload" in str(c.url)]) == 2
-    assert len([c for c in calls if c.url.path == "/rest/posts"]) == 1
-
-
-@pytest.mark.parametrize(
-    ("response", "expected"),
-    [
-        (httpx.Response(201), DispatchUncertain),  # no id header
-        (httpx.Response(503, json={}), DispatchUncertain),
-        (httpx.Response(429, json={}), DispatchRejected),
-        (httpx.Response(422, json={"message": "bad"}), DispatchRejected),
-        (httpx.Response(401, json={}), DispatchRejected),
-    ],
-)
-async def test_linkedin_post_outcomes(response: httpx.Response, expected: type) -> None:
-    publisher, calls = linkedin([response, httpx.Response(201, headers={"x-restli-id": "x"})])
-    request = _request("linkedin", author_kind="organization")
-    with pytest.raises(expected):
-        await publisher.dispatch(request, await publisher.prepare(request, {}))
-    assert len([c for c in calls if c.url.path == "/rest/posts"]) == 1

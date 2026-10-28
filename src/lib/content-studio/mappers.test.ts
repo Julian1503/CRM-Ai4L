@@ -35,7 +35,9 @@ describe('toBrandProfile', () => {
       { id: 'f1', text: 'A', source: 's' },
       { id: 'fact-2', text: 'B' },
     ])
-    expect(brand.channelRules).toEqual({ linkedin: { cta: 'Book a call' } })
+    expect(brand.channelRules).toEqual({ facebook: { cta: 'Book a call' } })
+    // A rule stored for a channel the Studio no longer offers never reaches the engine.
+    expect(toBrandProfile(brandRow({ channel_rules: { linkedin: { cta: 'x' }, email: { cta: 'y' } } })).channelRules).toEqual({ email: { cta: 'y' } })
     expect(brand.hashtagSeeds).toEqual(['AI4L'])
   })
 
@@ -87,7 +89,7 @@ describe('reviews and revisions', () => {
 
   it('toVariant embeds the current revision', () => {
     const current = toRevision(revisionRow(), null)
-    expect(toVariant(variantRow(), current)).toMatchObject({ id: IDS.variant, channel: 'linkedin', current })
+    expect(toVariant(variantRow(), current)).toMatchObject({ id: IDS.variant, channel: 'facebook', current })
   })
 })
 

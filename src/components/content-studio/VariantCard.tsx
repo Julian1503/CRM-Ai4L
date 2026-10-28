@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from 'react'
 
-import type { ContentAsset, ContentRevision, ContentVariant, RevisionContent } from '@/lib/content-studio/types'
+import type { ContentAsset, ContentRevision, ContentVariant, RevisionContent, SocialPlatform } from '@/lib/content-studio/types'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 
 import { ApiError, duplicateVariant, errorMessage, generate, reviewRevision, setVariantArchived, suggest } from './api'
@@ -190,7 +190,7 @@ export default function VariantCard({ itemId, variant, assets, onChanged, onPubl
         /> : revision && <RevisionBody revision={revision} isEmail={variant.channel === 'email'} assets={assets} />}
         {previewing && revision && <div className={variantStyles.previewPane}>
           <div className={variantStyles.previewHeading}><strong>Preview</strong>{editing && previewDraft && <span>Unsaved preview</span>}</div>
-          {social ? <SocialPreview platform={variant.channel as 'facebook' | 'instagram' | 'linkedin'} text={composePostText({ ...revision, ...(editing && previewDraft ? previewDraft : contentOf(revision)) })} images={previewImages(editing && previewDraft ? previewDraft.assets : revision.assets, assets)} /> : <div className={variantStyles.emailPreview} aria-label="Approximate email preview">
+          {social ? <SocialPreview platform={variant.channel as SocialPlatform} text={composePostText({ ...revision, ...(editing && previewDraft ? previewDraft : contentOf(revision)) })} images={previewImages(editing && previewDraft ? previewDraft.assets : revision.assets, assets)} /> : <div className={variantStyles.emailPreview} aria-label="Approximate email preview">
             <small>Approximate email preview</small>
             <strong>{(editing && previewDraft ? previewDraft.fields : revision.fields).subject || 'Subject'}</strong>
             <span>{(editing && previewDraft ? previewDraft.fields : revision.fields).preheader || 'Preheader'}</span>

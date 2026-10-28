@@ -12,11 +12,11 @@ type AnyDb = Parameters<typeof listSocialAccounts>[0]
 const TOKEN = 'live-token-must-never-leak'
 
 const ENGINE_ACCOUNT: EngineAccount = {
-  platform: 'linkedin',
+  platform: 'facebook',
   externalId: '42',
   displayName: 'AI4L',
-  authorKind: 'organization',
-  scopes: ['w_organization_social'],
+  authorKind: 'page',
+  scopes: ['pages_manage_posts'],
   accessToken: TOKEN,
   refreshToken: 'refresh-secret',
   expiresAt: '2026-12-01T00:00:00.000Z',
@@ -29,7 +29,7 @@ describe('listSocialAccounts', () => {
     const builder = createQueryBuilderMock({ data: [accountRow()], error: null })
     const accounts = await listSocialAccounts(createDbMock(builder) as unknown as AnyDb)
 
-    expect(accounts).toEqual([expect.objectContaining({ id: IDS.account, platform: 'linkedin', authorKind: 'organization' })])
+    expect(accounts).toEqual([expect.objectContaining({ id: IDS.account, platform: 'facebook', authorKind: 'page' })])
     expect(Object.keys(accounts[0])).not.toContain('accessToken')
     expect(builder.argsFor('limit')).toEqual([200])
   })
@@ -88,7 +88,7 @@ describe('disconnectSocialAccount', () => {
 })
 
 describe('saveConnectedAccounts', () => {
-  const INPUT = { provider: 'linkedin' as const, brandId: IDS.brand, actorId: IDS.user }
+  const INPUT = { provider: 'meta' as const, brandId: IDS.brand, actorId: IDS.user }
 
   function tables(existing: unknown) {
     const order: string[] = []
@@ -112,7 +112,7 @@ describe('saveConnectedAccounts', () => {
 
     expect(ids).toEqual([IDS.account])
     const [row] = accounts.argsFor('insert') as [Record<string, unknown>]
-    expect(row).toMatchObject({ platform: 'linkedin', external_id: '42', status: 'needs_reauth', author_kind: 'organization' })
+    expect(row).toMatchObject({ platform: 'facebook', external_id: '42', status: 'needs_reauth', author_kind: 'page' })
     expect(JSON.stringify(row)).not.toContain(TOKEN)
     expect(order).toEqual(['secrets after 0 update(s)'])
     expect(accounts.allFor('update').at(-1)?.args[0]).toMatchObject({ status: 'connected', last_error: null })

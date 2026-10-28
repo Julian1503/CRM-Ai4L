@@ -11,7 +11,6 @@ import styles from './SocialPreview.module.css'
 const PREVIEW_FOLD: Record<SocialPlatform, { chars: number; label: string }> = {
   facebook: { chars: 477, label: 'See more' },
   instagram: { chars: 125, label: 'more' },
-  linkedin: { chars: 200, label: '…see more' },
 }
 
 /** Instagram crops outside this range and applies the first image's ratio to all. */

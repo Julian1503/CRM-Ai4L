@@ -128,7 +128,6 @@
 .channelTile input { position: absolute; opacity: 0; width: 1px; height: 1px; }
 .channelMark { display: grid; place-items: center; width: 2rem; height: 2rem; flex: none; border-radius: .5rem; background: #e7eef7; color: #0a4e8a; font: 700 .85rem/1 var(--font-body); }
 .tileInstagram .channelMark { background: #f9e8f1; color: #9c2863; }
-.tileLinkedin .channelMark { background: #e2f1fc; color: #0a5c9b; }
 .tileEmail .channelMark { background: #e6f3f5; color: #075778; }
 .channelCopy { display: grid; min-width: 0; gap: .12rem; flex: 1 1 5rem; }
 .channelCopy strong { font-size: .8rem; }
@@ -654,7 +653,6 @@ p.muted {
 
 .channelFacebook::before { background: #1877f2; }
 .channelInstagram::before { background: #d62976; }
-.channelLinkedin::before { background: #0a66c2; }
 .channelEmail::before { background: var(--accent); }
 
 .tagRow {

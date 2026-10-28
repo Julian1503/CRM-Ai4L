@@ -37,7 +37,7 @@ describe('requestAuthorizeUrl', () => {
   it('signs the exact path and body with the worker secret', async () => {
     reply(200, { url: 'https://www.facebook.com/v23.0/dialog/oauth?x=1' })
 
-    const url = await requestAuthorizeUrl('meta', { state: 'st'.repeat(10), redirectUri: 'https://crm.test/cb', options: {} }, ENV)
+    const url = await requestAuthorizeUrl('meta', { state: 'st'.repeat(10), redirectUri: 'https://crm.test/cb' }, ENV)
 
     expect(url).toBe('https://www.facebook.com/v23.0/dialog/oauth?x=1')
     const [target, init] = fetchMock.mock.calls[0] as [URL, RequestInit & { headers: Record<string, string> }]
@@ -56,7 +56,7 @@ describe('requestAuthorizeUrl', () => {
 
   it('keeps a base path of the engine URL in the signed path', async () => {
     reply(200, { url: 'https://x.test/' })
-    await requestAuthorizeUrl('mock', { state: 's', redirectUri: 'r', options: {} }, { CONTENT_ENGINE_URL: 'https://gw.test/engine', CONTENT_ENGINE_SECRET: SECRET })
+    await requestAuthorizeUrl('mock', { state: 's', redirectUri: 'r' }, { CONTENT_ENGINE_URL: 'https://gw.test/engine', CONTENT_ENGINE_SECRET: SECRET })
     expect(String(fetchMock.mock.calls[0][0])).toBe('https://gw.test/engine/v1/oauth/mock/authorize-url')
   })
 
@@ -66,13 +66,13 @@ describe('requestAuthorizeUrl', () => {
     ['no engine secret', { CONTENT_ENGINE_URL: 'https://engine.test' }, 'engine_not_configured'],
     ['a short engine secret', { CONTENT_ENGINE_URL: 'https://engine.test', CONTENT_ENGINE_SECRET: 'short' }, 'engine_not_configured'],
   ])('fails closed with %s', async (_label, env, code) => {
-    await expect(requestAuthorizeUrl('meta', { state: 's', redirectUri: 'r', options: {} }, env)).rejects.toMatchObject({ code })
+    await expect(requestAuthorizeUrl('meta', { state: 's', redirectUri: 'r' }, env)).rejects.toMatchObject({ code })
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('never signs with the worker secret', async () => {
     reply(200, { url: 'https://x.test/' })
-    await requestAuthorizeUrl('meta', { state: 's', redirectUri: 'r', options: {} }, ENV)
+    await requestAuthorizeUrl('meta', { state: 's', redirectUri: 'r' }, ENV)
     const [, init] = fetchMock.mock.calls[0] as [URL, RequestInit & { headers: Record<string, string> }]
     expect(
       verifyWorkerRequest({
@@ -91,18 +91,18 @@ describe('requestAuthorizeUrl', () => {
     [400, 'engine_refused'],
   ])('maps HTTP %s to %s', async (status, code) => {
     reply(status, { error: 'nope' })
-    await expect(requestAuthorizeUrl('meta', { state: 's', redirectUri: 'r', options: {} }, ENV)).rejects.toMatchObject({ code, status })
+    await expect(requestAuthorizeUrl('meta', { state: 's', redirectUri: 'r' }, ENV)).rejects.toMatchObject({ code, status })
   })
 
   it('maps a network failure and a malformed body', async () => {
     fetchMock.mockRejectedValueOnce(new Error('ECONNREFUSED'))
-    await expect(requestAuthorizeUrl('meta', { state: 's', redirectUri: 'r', options: {} }, ENV)).rejects.toMatchObject({ code: 'engine_unreachable' })
+    await expect(requestAuthorizeUrl('meta', { state: 's', redirectUri: 'r' }, ENV)).rejects.toMatchObject({ code: 'engine_unreachable' })
 
     reply(200, { url: 'javascript:alert(1)' })
-    await expect(requestAuthorizeUrl('meta', { state: 's', redirectUri: 'r', options: {} }, ENV)).rejects.toMatchObject({ code: 'engine_invalid_response' })
+    await expect(requestAuthorizeUrl('meta', { state: 's', redirectUri: 'r' }, ENV)).rejects.toMatchObject({ code: 'engine_invalid_response' })
 
     fetchMock.mockResolvedValueOnce(new Response('not json', { status: 200 }))
-    await expect(requestAuthorizeUrl('meta', { state: 's', redirectUri: 'r', options: {} }, ENV)).rejects.toMatchObject({ code: 'engine_invalid_response' })
+    await expect(requestAuthorizeUrl('meta', { state: 's', redirectUri: 'r' }, ENV)).rejects.toMatchObject({ code: 'engine_invalid_response' })
   })
 })
 
@@ -113,26 +113,27 @@ describe('exchangeCode', () => {
         ACCOUNT,
         { ...ACCOUNT, platform: 'instagram', authorKind: 'page' },
         { ...ACCOUNT, accessToken: '' },
-        { ...ACCOUNT, platform: 'linkedin', authorKind: 'member', externalId: 'p', refreshToken: 'r', expiresAt: '2026-12-01T00:00:00Z' },
+        { ...ACCOUNT, platform: 'linkedin', authorKind: 'organization' },
+        { ...ACCOUNT, platform: 'instagram', authorKind: 'instagram_business', externalId: 'ig', refreshToken: 'r', expiresAt: '2026-12-01T00:00:00Z' },
       ],
     })
 
-    const accounts = await exchangeCode('meta', { code: 'c', redirectUri: 'r', options: {} }, ENV)
+    const accounts = await exchangeCode('meta', { code: 'c', redirectUri: 'r' }, ENV)
 
     expect(accounts).toEqual([
       { ...ACCOUNT, scopes: ['pages_manage_posts'], refreshToken: null, expiresAt: null },
-      { ...ACCOUNT, platform: 'linkedin', authorKind: 'member', externalId: 'p', scopes: ['pages_manage_posts'], refreshToken: 'r', expiresAt: '2026-12-01T00:00:00Z' },
+      { ...ACCOUNT, platform: 'instagram', authorKind: 'instagram_business', externalId: 'ig', scopes: ['pages_manage_posts'], refreshToken: 'r', expiresAt: '2026-12-01T00:00:00Z' },
     ])
   })
 
   it('refuses a response without an accounts array', async () => {
     reply(200, { accounts: 'nope' })
-    await expect(exchangeCode('meta', { code: 'c', redirectUri: 'r', options: {} }, ENV)).rejects.toBeInstanceOf(EngineError)
+    await expect(exchangeCode('meta', { code: 'c', redirectUri: 'r' }, ENV)).rejects.toBeInstanceOf(EngineError)
   })
 
   it('never puts a token in an error message', async () => {
     reply(400, { error: `bad code, token=${TOKEN}` })
-    const error = await exchangeCode('meta', { code: 'c', redirectUri: 'r', options: {} }, ENV).catch((caught: Error) => caught)
+    const error = await exchangeCode('meta', { code: 'c', redirectUri: 'r' }, ENV).catch((caught: Error) => caught)
     expect(String((error as Error).message)).not.toContain(TOKEN)
   })
 })

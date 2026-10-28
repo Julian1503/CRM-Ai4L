@@ -191,11 +191,11 @@ describe('createItem / updateItem', () => {
       content_audit_events: OK_AUDIT,
     })
 
-    const item = await createItem(db as never, IDS.user, { title: 'Launch', brief: { topic: 'AI' }, channels: ['linkedin'] })
+    const item = await createItem(db as never, IDS.user, { title: 'Launch', brief: { topic: 'AI' }, channels: ['facebook'] })
 
     expect(item).toMatchObject({ id: IDS.item, variants: [] })
     expect(builder('content_items').argsFor('insert')).toEqual([
-      { brand_id: IDS.brand, title: 'Launch', brief: { topic: 'AI' }, channels: ['linkedin'], created_by: IDS.user },
+      { brand_id: IDS.brand, title: 'Launch', brief: { topic: 'AI' }, channels: ['facebook'], created_by: IDS.user },
     ])
     expect(auditAction(db)).toBe('item.created')
   })

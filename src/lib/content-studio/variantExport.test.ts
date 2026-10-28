@@ -16,7 +16,7 @@ function adminWithStorage() {
   return { admin: Object.assign(createDbMock(createQueryBuilderMock()), { storage: storage.storage }), storage }
 }
 
-const VARIANT = { id: IDS.variant, channel: 'linkedin', current_revision_id: IDS.revision }
+const VARIANT = { id: IDS.variant, channel: 'facebook', current_revision_id: IDS.revision }
 
 describe('exportVariant', () => {
   it('returns the composed text and signed image links in revision order', async () => {
@@ -36,7 +36,7 @@ describe('exportVariant', () => {
     const result = await exportVariant(db as never, IDS.variant, admin as never)
 
     expect(result).toEqual({
-      channel: 'linkedin',
+      channel: 'facebook',
       revisionId: IDS.revision,
       text: 'Hello world.\n\nBook now.\n\n#AI4L',
       assets: [{ assetId: IDS.asset, alt: 'first', downloadUrl: expect.stringContaining(`library/${IDS.asset}/social`) }],

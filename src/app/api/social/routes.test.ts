@@ -73,7 +73,7 @@ beforeEach(() => {
     ...ORIGINAL_ENV,
     NODE_ENV: 'test',
     CONTENT_STUDIO_ENABLED: 'true',
-    CONTENT_SOCIAL_PLATFORMS: 'facebook,instagram,linkedin',
+    CONTENT_SOCIAL_PLATFORMS: 'facebook,instagram',
     CONTENT_ENGINE_URL: 'https://engine.test',
     CONTENT_ENGINE_SECRET: 'e'.repeat(40),
     NEXT_PUBLIC_APP_URL: '',
@@ -135,13 +135,13 @@ describe('accounts', () => {
   it('lists accounts and the enabled platforms, uncacheable and token-free', async () => {
     const { db } = dbWith({ social_accounts: { data: [accountRow()], error: null } })
     mockServerClient.mockResolvedValue(db)
-    process.env.CONTENT_SOCIAL_PLATFORMS = 'linkedin'
+    process.env.CONTENT_SOCIAL_PLATFORMS = 'instagram,linkedin'
 
     const response = await listAccounts()
     const body = await response.json()
 
     expect(response.headers.get('cache-control')).toContain('no-store')
-    expect(body.enabledPlatforms).toEqual(['linkedin'])
+    expect(body.enabledPlatforms).toEqual(['instagram'])
     expect(body.accounts[0]).not.toHaveProperty('accessToken')
   })
 
@@ -184,25 +184,27 @@ describe('OAuth start', () => {
 
   it('stores a hashed state and redirects to the consent URL the engine built', async () => {
     const admin = startDbs()
-    fetchMock.mockResolvedValue(new Response(JSON.stringify({ url: 'https://www.linkedin.com/oauth/v2/authorization?x=1' }), { status: 200 }))
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ url: 'https://www.facebook.com/v23.0/dialog/oauth?x=1' }), { status: 200 }))
 
     const response = await start(
-      req('/oauth/linkedin/start', { method: 'POST', body: 'authorKind=member', headers: { 'Content-Type': 'application/x-www-form-urlencoded', Origin: ORIGIN } }),
-      provider('linkedin')
+      req('/oauth/meta/start', { method: 'POST', body: '', headers: { 'Content-Type': 'application/x-www-form-urlencoded', Origin: ORIGIN } }),
+      provider('meta')
     )
 
     expect(response.status).toBe(303)
-    expect(response.headers.get('location')).toBe('https://www.linkedin.com/oauth/v2/authorization?x=1')
+    expect(response.headers.get('location')).toBe('https://www.facebook.com/v23.0/dialog/oauth?x=1')
     const [row] = admin.builders.social_oauth_states.argsFor('insert') as [Record<string, unknown>]
-    expect(row).toMatchObject({ provider: 'linkedin', actor_id: ADMIN_SESSION.userId, options: { authorKind: 'member' } })
+    expect(row).toMatchObject({ provider: 'meta', actor_id: ADMIN_SESSION.userId })
     const sent = JSON.parse(fetchMock.mock.calls[0][1].body as string)
-    expect(sent.redirectUri).toBe(`${ORIGIN}/api/social/oauth/linkedin/callback`)
+    expect(sent).not.toHaveProperty('options')
+    expect(sent.redirectUri).toBe(`${ORIGIN}/api/social/oauth/meta/callback`)
     expect(row.state_hash).toBe(hashState(sent.state))
   })
 
   it.each([
     ['a cross-site post', 'meta', { Origin: 'https://evil.example' }, 'cross_site'],
     ['an unknown provider', 'twitter', {}, 'unknown_provider'],
+    ['LinkedIn, which is not supported', 'linkedin', {}, 'unknown_provider'],
   ])('refuses %s', async (_label, name, headers, reason) => {
     startDbs()
     const response = await start(req(`/oauth/${name}/start`, { method: 'POST', headers }), provider(name))
@@ -215,12 +217,6 @@ describe('OAuth start', () => {
     process.env = { ...process.env, NODE_ENV: 'production' }
     const response = await start(req('/oauth/mock/start', { method: 'POST' }), provider('mock'))
     expect(location(response).searchParams.get('reason')).toBe('unknown_provider')
-  })
-
-  it('refuses an invalid LinkedIn author kind', async () => {
-    startDbs()
-    const response = await start(req('/oauth/linkedin/start', { method: 'POST', body: { authorKind: 'page' } }), provider('linkedin'))
-    expect(location(response).searchParams.get('reason')).toBe('invalid_options')
   })
 
   it('returns to Settings with a short code when the engine is down', async () => {
@@ -257,7 +253,7 @@ describe('OAuth callback', () => {
 
   it('consumes the state, exchanges the code and stores encrypted tokens', async () => {
     const logs = [jest.spyOn(console, 'error').mockImplementation(() => undefined), jest.spyOn(console, 'log').mockImplementation(() => undefined)]
-    const admin = callbackDbs({ brand_id: IDS.brand, options: {} })
+    const admin = callbackDbs({ brand_id: IDS.brand })
     fetchMock.mockResolvedValue(new Response(JSON.stringify(ENGINE_ACCOUNTS), { status: 200 }))
 
     const response = await run(`code=${CODE}&state=${STATE}`)
@@ -290,14 +286,14 @@ describe('OAuth callback', () => {
   })
 
   it('refuses a missing state without touching the table', async () => {
-    const admin = callbackDbs({ brand_id: IDS.brand, options: {} })
+    const admin = callbackDbs({ brand_id: IDS.brand })
     const response = await run(`code=${CODE}`)
     expect(location(response).searchParams.get('reason')).toBe('invalid_state')
     expect(admin.builders.social_oauth_states).toBeUndefined()
   })
 
   it('burns the state when the provider reports a denial', async () => {
-    const admin = callbackDbs({ brand_id: IDS.brand, options: {} })
+    const admin = callbackDbs({ brand_id: IDS.brand })
     const response = await run(`error=access_denied&state=${STATE}`)
     expect(location(response).searchParams.get('reason')).toBe('denied')
     expect(admin.builders.social_oauth_states.argsFor('update')).toBeDefined()
@@ -305,13 +301,13 @@ describe('OAuth callback', () => {
   })
 
   it('refuses a missing code', async () => {
-    callbackDbs({ brand_id: IDS.brand, options: {} })
+    callbackDbs({ brand_id: IDS.brand })
     expect(location(await run(`state=${STATE}`)).searchParams.get('reason')).toBe('missing_code')
   })
 
   it('reports an exchange error with a short code and stores nothing', async () => {
     const errors = jest.spyOn(console, 'error').mockImplementation(() => undefined)
-    callbackDbs({ brand_id: IDS.brand, options: {} })
+    callbackDbs({ brand_id: IDS.brand })
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ error: `bad code ${CODE}` }), { status: 400 }))
 
     const response = await run(`code=${CODE}&state=${STATE}`)
@@ -322,14 +318,14 @@ describe('OAuth callback', () => {
   })
 
   it('reports an exchange that found no usable account', async () => {
-    callbackDbs({ brand_id: IDS.brand, options: {} })
+    callbackDbs({ brand_id: IDS.brand })
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ accounts: [] }), { status: 200 }))
     expect(location(await run(`code=${CODE}&state=${STATE}`)).searchParams.get('reason')).toBe('no_accounts')
   })
 
   it('reports a storage failure without detail', async () => {
     jest.spyOn(console, 'error').mockImplementation(() => undefined)
-    callbackDbs({ brand_id: IDS.brand, options: {} })
+    callbackDbs({ brand_id: IDS.brand })
     fetchMock.mockResolvedValue(new Response(JSON.stringify(ENGINE_ACCOUNTS), { status: 200 }))
     mockSaveSecrets.mockRejectedValue(new Error(`encrypt failed ${TOKEN}`))
     const response = await run(`code=${CODE}&state=${STATE}`)
@@ -351,7 +347,7 @@ describe('publications', () => {
       {
         social_publications: { data: null, error: null },
         content_variant_revisions: { data: revisionRow(), error: null },
-        content_variants: { data: variantRow({ channel: 'linkedin', current_revision_id: IDS.revision }), error: null },
+        content_variants: { data: variantRow({ channel: 'facebook', current_revision_id: IDS.revision }), error: null },
         social_accounts: { data: accountRow(), error: null },
         content_assets: { data: [assetRow()], error: null },
         ...overrides,

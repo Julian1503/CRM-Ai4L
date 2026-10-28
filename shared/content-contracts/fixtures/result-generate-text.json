@@ -1,7 +1,7 @@
 {
   "variants": [
     {
-      "channel": "linkedin",
+      "channel": "instagram",
       "style": "direct",
       "body": "Automating invoices: here is what you need to know.",
       "hashtags": [
@@ -11,7 +11,7 @@
       "callToAction": "Book a call.",
       "linkUrl": "https://ai4l.example/workshops",
       "violations": [
-        "body too short for linkedin (52 < 600 chars)"
+        "body too short for instagram (52 < 125 chars)"
       ],
       "promptVersion": "ai4l-2026-10-v1"
     },

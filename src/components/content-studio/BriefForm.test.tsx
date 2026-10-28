@@ -42,7 +42,7 @@ describe('BriefForm', () => {
 
     fireEvent.change(screen.getByLabelText('Reference URL'), { target: { value: 'ftp://nope' } })
     fireEvent.click(screen.getByRole('checkbox', { name: /^Facebook/ }))
-    fireEvent.click(screen.getByRole('checkbox', { name: /^LinkedIn/ }))
+    fireEvent.click(screen.getByRole('checkbox', { name: /^Instagram/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Create and generate' }))
 
     expect(screen.getByText('Give the piece a title.')).toBeInTheDocument()
@@ -67,7 +67,7 @@ describe('BriefForm', () => {
     fillRequired()
     fireEvent.change(screen.getByLabelText('Audience'), { target: { value: 'Owners' } })
     fireEvent.change(screen.getByLabelText('Reference URL'), { target: { value: 'https://ai4l.test/spring' } })
-    fireEvent.click(screen.getByRole('checkbox', { name: /^LinkedIn/ }))
+    fireEvent.click(screen.getByRole('checkbox', { name: /^Instagram/ }))
     fireEvent.click(screen.getByRole('checkbox', { name: /^Email/ }))
     fireEvent.click(screen.getByRole('radio', { name: '2' }))
     expect(screen.getByText('2 channels · 4 variants')).toBeInTheDocument()
@@ -107,7 +107,7 @@ describe('BriefForm', () => {
     expect(generateCalls).toHaveLength(2)
     expect(generateCalls[0].idempotencyKey).toBe(generateCalls[1].idempotencyKey)
     // An item created with no channels falls back to the ones ticked in the form.
-    expect(generateCalls[0].channels).toEqual(['facebook', 'linkedin'])
+    expect(generateCalls[0].channels).toEqual(['facebook', 'instagram'])
   })
 
   it('lets the operator open a saved item without generating', async () => {
@@ -180,7 +180,7 @@ describe('BriefForm', () => {
       ['POST /api/content-studio/suggestions']: jsonResponse({
         kind: 'brief_completion',
         cached: false,
-        completion: { title: 'AI workshops for small teams', factIds: ['f1'], channels: ['facebook', 'linkedin'] },
+        completion: { title: 'AI workshops for small teams', factIds: ['f1'], channels: ['facebook', 'instagram'] },
       }),
     })
     render(<BriefForm onCreated={jest.fn()} />)
@@ -217,7 +217,7 @@ describe('BriefForm', () => {
 
   it('starts a brief from an idea, switches ideas without touching typed text, and hides once the topic is typed', async () => {
     const ideas = [
-      { title: 'Five quick AI tips', topic: 'Five quick AI tips for small teams.', angle: 'Easy wins this month.', channels: ['linkedin'] },
+      { title: 'Five quick AI tips', topic: 'Five quick AI tips for small teams.', angle: 'Easy wins this month.', channels: ['email'] },
       { title: 'A story from the field', topic: 'How one team saved a day a week.', angle: 'Proof it works.', channels: ['facebook', 'email'] },
     ]
     const mock = routeFetch({ ['POST /api/content-studio/suggestions']: jsonResponse({ kind: 'content_ideas', cached: false, suggestions: ideas }) })
@@ -232,7 +232,7 @@ describe('BriefForm', () => {
     expect(screen.getByLabelText('Notes')).toHaveValue('Angle: Easy wins this month.')
     // The idea's channels never replace the ones ticked in the form.
     expect(screen.getByRole('checkbox', { name: /^Facebook/ })).toBeChecked()
-    expect(screen.getByRole('checkbox', { name: /^LinkedIn/ })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: /^Instagram/ })).toBeChecked()
     expect(screen.getByRole('checkbox', { name: /^Email/ })).not.toBeChecked()
 
     // The member rewrites the title; switching ideas keeps it and replaces the rest.

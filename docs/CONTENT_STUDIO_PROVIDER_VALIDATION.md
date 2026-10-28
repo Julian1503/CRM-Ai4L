@@ -27,7 +27,7 @@ Estado inicial (30-09-2026): todas pendientes. El código se entregó y probó s
 | SO-1 | Meta | Versión Graph vigente (WRCC usaba `v23.0`) y permisos `pages_manage_posts`, `pages_read_engagement`, `instagram_content_publish`, `business_management` aprobados para la app. | Pendiente |
 | SO-2 | Facebook | Post de texto, 1 foto y multi-foto en página de pruebas; un 5xx simulado en la llamada pública queda `uncertain` y no duplica. | Pendiente |
 | SO-3 | Instagram | Imagen y carrusel desde URL pública de `content-public`; relación de aspecto 0.8–1.91 y ancho ≥ 320 validados en preflight. | Pendiente |
-| SO-4 | LinkedIn | Versión `LinkedIn-Version` vigente (WRCC `202506`, probablemente retirada); organización frente a miembro con selección explícita; multiimagen. | Pendiente |
+| SO-4 | LinkedIn | ~~Versión `LinkedIn-Version` vigente; organización frente a miembro; multiimagen.~~ | Descartado — fuera de alcance por decisión del cliente (2026-10-28) |
 | SO-5 | Todas | Revocación de token: la cuenta pasa a `needs_reauth` y el preflight bloquea la publicación. | Pendiente |
 
 Una red se añade a `CONTENT_SOCIAL_PLATFORMS` solo cuando sus filas estén superadas. La falta de aprobación de una red no bloquea la generación, la biblioteca ni el email.

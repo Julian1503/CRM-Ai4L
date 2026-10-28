@@ -30,7 +30,6 @@ const SOCIAL_MAX_WIDTH = 1440
 export const HASHTAG_WARN_ABOVE: Readonly<Record<SocialPlatform, number>> = {
   facebook: 10,
   instagram: 15,
-  linkedin: 5,
 }
 
 const blocking = (code: string, message: string): PreflightIssue => ({ code, message, blocking: true })

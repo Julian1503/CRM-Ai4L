@@ -15,7 +15,7 @@ const BRAND: BrandProfile = {
   audience: 'Small businesses',
   region: 'AU',
   approvedFacts: [{ id: 'f1', text: 'Founded in 2020', source: 'About page' }],
-  channelRules: { linkedin: { cta: 'Book a call', structure: 'Hook, value, ask' } },
+  channelRules: { instagram: { cta: 'Book a call', structure: 'Hook, value, ask' } },
   hashtagSeeds: ['AI4L', 'Automation'],
   imageDirection: 'Real people, natural light',
   allowedLinkOrigins: ['https://ai4l.example'],
@@ -43,8 +43,8 @@ describe('BrandProfileSettings', () => {
 
     openTab('Channel rules')
     expect(screen.getByLabelText('Hashtag seeds')).toHaveValue('#AI4L #Automation')
-    fireEvent.click(screen.getByRole('button', { name: 'LinkedIn' }))
-    expect(screen.getByLabelText('LinkedIn call to action')).toHaveValue('Book a call')
+    fireEvent.click(screen.getByRole('button', { name: 'Instagram' }))
+    expect(screen.getByLabelText('Instagram call to action')).toHaveValue('Book a call')
 
     openTab('Visuals & links')
     expect(screen.getByText(/Links outside this list need human editing/)).toBeInTheDocument()
@@ -67,7 +67,7 @@ describe('BrandProfileSettings', () => {
       tone: 'Plain, no hype',
       hashtagSeeds: ['AI4L', 'Automation'],
       allowedLinkOrigins: ['https://ai4l.example', 'https://book.ai4l.example'],
-      channelRules: { linkedin: { cta: 'Book a call', structure: 'Hook, value, ask' } },
+      channelRules: { instagram: { cta: 'Book a call', structure: 'Hook, value, ask' } },
     })
     expect(body.approvedFacts).toEqual([
       { id: 'f1', text: 'Founded in 2020', source: 'About page' },
@@ -228,8 +228,8 @@ describe('draft conversion', () => {
       { id: 'f3', text: 'No source' },
     ])
     expect(update.hashtagSeeds).toEqual(['AI4L', 'Learn'])
-    expect(toUpdate({ ...draft, channelRules: { ...draft.channelRules, linkedin: { cta: 'Go', structure: '' } } }).channelRules).toEqual({
-      linkedin: { cta: 'Go' },
+    expect(toUpdate({ ...draft, channelRules: { ...draft.channelRules, instagram: { cta: 'Go', structure: '' } } }).channelRules).toEqual({
+      instagram: { cta: 'Go' },
       email: { structure: 'Short' },
     })
   })

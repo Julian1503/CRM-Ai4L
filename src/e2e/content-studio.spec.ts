@@ -51,7 +51,7 @@ test.describe('Content Studio', () => {
     await worker.completeGeneration(job, (channel) => `Mock ${channel} copy for ${title}.`)
 
     // The UI polls the job and reloads the item once it succeeds.
-    const card = page.getByRole('article', { name: /^linkedin variant/ })
+    const card = page.getByRole('article', { name: /^facebook variant/ })
     await expect(card).toBeVisible({ timeout: 60_000 })
     await expect(card.getByText('Pending review')).toBeVisible()
 
