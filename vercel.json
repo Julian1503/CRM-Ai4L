@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "regions": [
-    "hnd1"
+    "syd1"
   ],
   "github": {
     "silent": true
