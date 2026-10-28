@@ -58,7 +58,7 @@ No borrar tablas, snapshots ni objetos de `content-public`: emails ya enviados s
 
 - La API v2 de EmailOctopus no permite crear campañas HTML ni leer el HTML de Automations. El export queda registrado como exportación, no como envío.
 - Un email del Studio lleva como máximo una imagen principal.
-- La versión Graph de Meta `v23.0` viene de WRCC y debe revalidarse antes de producción.
+- La versión Graph de Meta es `v25.0` (vigente hasta el 29-07-2028; revisada el 28-10-2026). Se cambia sin desplegar con `META_GRAPH_VERSION` en el motor.
 - Solo se publica en Facebook e Instagram. LinkedIn quedó fuera de alcance por decisión del cliente (2026-10-28): no hay conexión, generación ni publicación para esa red.
 - La generación desde catálogo, el calendario, la analítica y la bandeja de comentarios/DM no forman parte de esta entrega.
 - Exportar o crear un email copia su imagen a `content-public` en ese momento (el HTML necesita una URL pública estable), antes de que la campaña se apruebe. La URL no es adivinable ni listable, pero no debe usarse una imagen confidencial en un email.

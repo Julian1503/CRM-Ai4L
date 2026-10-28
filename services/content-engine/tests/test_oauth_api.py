@@ -103,7 +103,7 @@ def test_redirect_uri_rules() -> None:
 
 def test_meta_authorize_url_uses_the_configured_version_and_scopes() -> None:
     url = MetaOAuthProvider(_live()).authorize_url(state=STATE, redirect_uri=REDIRECT)
-    assert url.startswith("https://www.facebook.com/v23.0/dialog/oauth?")
+    assert url.startswith("https://www.facebook.com/v25.0/dialog/oauth?")
     assert "pages_manage_posts" in parse_qs(urlsplit(url).query)["scope"][0]
     with_config = MetaOAuthProvider(_live(meta_login_config_id="cfg")).authorize_url(
         state=STATE, redirect_uri=REDIRECT

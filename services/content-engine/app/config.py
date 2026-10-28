@@ -102,7 +102,7 @@ class Settings(BaseSettings):
     # ── Meta (Facebook + Instagram). Versions must be revalidated before going live. ──
     meta_app_id: str = ""
     meta_app_secret: str = Field(default="", repr=False)
-    meta_graph_version: str = "v23.0"
+    meta_graph_version: str = "v25.0"
     meta_login_config_id: str = ""
 
     @field_validator("worker_kinds", mode="before")

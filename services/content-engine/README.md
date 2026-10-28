@@ -86,7 +86,7 @@ never called in CI or tests.
 
 ## Revalidate before going live
 
-* `META_GRAPH_VERSION=v23.0` and the Meta scopes (`app/social/oauth/meta.py`, now
+* `META_GRAPH_VERSION=v25.0` and the Meta scopes (`app/social/oauth/meta.py`, now
   including `business_management` for Business-Portfolio-owned Pages).
 * Default models `gpt-5-mini`, `gemini-2.5-flash`, `gpt-image-1`.
 

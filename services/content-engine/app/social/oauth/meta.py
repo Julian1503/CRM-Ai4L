@@ -3,7 +3,7 @@
 Code → short-lived user token → long-lived user token → Pages (``/me/accounts``, then the
 Business Portfolio fallback) → each Page's linked Instagram Business account. Page tokens
 minted from a long-lived user token carry no expiry. Graph version from META_GRAPH_VERSION
-(default v23.0) — revalidate before going live.
+(default v25.0, supported by Meta until 2028-07-29; checked 2026-10-28).
 """
 
 from __future__ import annotations
