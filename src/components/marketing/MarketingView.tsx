@@ -20,7 +20,6 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import { useToast } from '@/components/ui/Toast'
 
 import SendConfirmDialog from './SendConfirmDialog'
-import TestSendPanel from './TestSendPanel'
 import styles from './marketing.module.css'
 import StreamPill from './StreamPill'
 
@@ -284,8 +283,6 @@ export default function MarketingView({ initialCampaignId, refreshKey = 0 }: Mar
   const [sendAudienceSize, setSendAudienceSize] = useState<number | null>(null)
   const [sendAudienceLoading, setSendAudienceLoading] = useState(false)
   const [sendAudienceError, setSendAudienceError] = useState<string | null>(null)
-  // Informational: whether the content as it is now reached a test recipient (P0.2).
-  const [sendTested, setSendTested] = useState<boolean | null>(null)
   // The question waiting for an answer before a risky action (replaces window.confirm).
   const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(null)
   const { notify } = useToast()
@@ -690,7 +687,6 @@ export default function MarketingView({ initialCampaignId, refreshKey = 0 }: Mar
     setSendConfirmation(campaign)
     setSendAudienceSize(null)
     setSendAudienceError(null)
-    setSendTested(null)
     setSendAudienceLoading(true)
 
     try {
@@ -701,7 +697,6 @@ export default function MarketingView({ initialCampaignId, refreshKey = 0 }: Mar
       if (typeof body?.total !== 'number') throw new Error('Could not verify campaign audience.')
 
       setSendAudienceSize(body.total)
-      setSendTested(typeof body?.testSend?.currentRevisionTested === 'boolean' ? body.testSend.currentRevisionTested : null)
     } catch (requestError) {
       setSendAudienceError(
         requestError instanceof Error ? requestError.message : 'Could not verify campaign audience.'
@@ -1252,10 +1247,6 @@ export default function MarketingView({ initialCampaignId, refreshKey = 0 }: Mar
               )}
 
               {reviewingId === campaign.id && (
-                <TestSendPanel campaignId={campaign.id} revision={campaign.revision} />
-              )}
-
-              {reviewingId === campaign.id && (
                 <CampaignCopyEditor
                   campaignId={campaign.id}
                   snapshotId={campaign.content_snapshot_id ?? null}
@@ -1328,7 +1319,6 @@ export default function MarketingView({ initialCampaignId, refreshKey = 0 }: Mar
           campaignName={sendConfirmation.name}
           audienceLabel={sendConfirmation.segment?.name ?? 'Selected segment'}
           audienceSize={sendAudienceSize}
-          tested={sendTested}
           loading={sendAudienceLoading}
           error={sendAudienceError}
           onConfirm={confirmSend}

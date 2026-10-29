@@ -11,8 +11,6 @@ type SendConfirmDialogProps = {
   campaignName: string
   audienceLabel: string
   audienceSize: number | null
-  /** Whether this version reached a test recipient; null when unknown. Informational. */
-  tested?: boolean | null
   loading: boolean
   error: string | null
   onConfirm: () => void
@@ -23,7 +21,6 @@ export default function SendConfirmDialog({
   campaignName,
   audienceLabel,
   audienceSize,
-  tested = null,
   loading,
   error,
   onConfirm,
@@ -119,14 +116,6 @@ export default function SendConfirmDialog({
                   {loading ? 'Checking…' : audienceSize === null ? 'Could not verify' : audienceSize}
                 </dd>
               </div>
-              {!loading && tested !== null && (
-                <div>
-                  <dt>Test send</dt>
-                  <dd data-testid="send-confirm-tested">
-                    {tested ? 'This version was tested' : 'This version has not been tested. Consider sending a test first.'}
-                  </dd>
-                </div>
-              )}
             </dl>
 
             {error && <p className={styles.error} role="alert">{error}</p>}
