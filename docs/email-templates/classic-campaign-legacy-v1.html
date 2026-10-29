@@ -13,7 +13,9 @@
     {{Benefit3}}      Third outcome                                                  110
     {{CtaLabel}}      Button text, two to four words                                  28
     {{BookingUrl}}    The recipient's personal booking link (set by the CRM per send)  —
-    {{PrefsUrl}}      The recipient's unsubscribe / preferences page (set by the CRM)   —
+    {{PrefsUrl}}      The recipient's preferences page in the CRM (set by the CRM)     —
+    {{UnsubscribeURL}} EmailOctopus's own unsubscribe link (required by EmailOctopus;
+                      the CRM hears about it through the webhook)                      —
 
   Brand: logo cyan #29ABE2 and orange #F0A030 (from the logo) for accents; buttons and
   links use the deeper cyan #0A79A6 so white text on them stays readable (WCAG AA).
@@ -140,7 +142,9 @@
           </tr>
           <tr>
             <td class="px" style="padding:0 24px 24px;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:18px;color:#5B6E80;text-align:center;">
-              <a href="{{PrefsUrl}}" style="color:#0A79A6;text-decoration:underline;">Unsubscribe or choose which emails you receive</a>
+              <a href="{{PrefsUrl}}" style="color:#0A79A6;text-decoration:underline;">Choose which emails you receive</a>
+              &nbsp;&middot;&nbsp;
+              <a href="{{UnsubscribeURL}}" style="color:#0A79A6;text-decoration:underline;">Unsubscribe from all emails</a>
             </td>
           </tr>
 
