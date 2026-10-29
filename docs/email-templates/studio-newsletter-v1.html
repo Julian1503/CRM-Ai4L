@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<!--
+  Ai4L — "Studio newsletter" EmailOctopus template (contract studio-newsletter-v1).
+
+  Paste into the automation's email step (Started via API trigger, list "New Start").
+  The CRM fills every merge tag per recipient at send time; do not type values for them.
+
+    {{Preheader}}     Inbox preview text (also set it as the email's preview text)  120
+    {{Headline}}      Main line (also use it as the subject)                          80
+    {{Intro}}         Opening paragraph                                              320
+    {{Body}}          Main text; blank lines separate paragraphs                    1200
+    {{HeroImageUrl}}  Public image URL from the Content Studio                         —
+    {{HeroImageAlt}}  Image description, read aloud / shown when images are blocked  200
+    {{CtaLabel}}      Button text, two to four words                                  28
+    {{CtaUrl}}        Button link                                                       —
+    {{PrefsUrl}}      The recipient's unsubscribe / preferences page (set by the CRM)   —
+
+  Built for email clients: tables, inline styles, 600px column, bulletproof button for
+  Outlook, and a single-column layout that stacks naturally on phones.
+-->
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="x-apple-disable-message-reformatting">
+  <meta name="color-scheme" content="light">
+  <meta name="supported-color-schemes" content="light">
+  <title>{{Headline}}</title>
+  <!--[if mso]>
+  <noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript>
+  <![endif]-->
+  <style>
+    @media only screen and (max-width: 620px) {
+      .container { width: 100% !important; }
+      .px { padding-left: 24px !important; padding-right: 24px !important; }
+      .h1 { font-size: 26px !important; line-height: 32px !important; }
+    }
+    a { text-decoration: underline; }
+  </style>
+</head>
+<body style="margin:0;padding:0;background-color:#F2F5F7;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
+
+  <!-- Preheader: shown beside the subject in the inbox, hidden in the email. -->
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;mso-hide:all;font-size:1px;line-height:1px;color:#F2F5F7;">
+    {{Preheader}}&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;
+  </div>
+
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#F2F5F7;">
+    <tr>
+      <td align="center" style="padding:32px 12px;">
+
+        <table role="presentation" class="container" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px;">
+
+          <!-- Brand bar -->
+          <tr>
+            <td style="padding:0 0 16px 4px;font-family:Arial,Helvetica,sans-serif;font-size:20px;line-height:24px;font-weight:bold;color:#0E2A38;letter-spacing:-0.3px;">
+              <span style="color:#017595;">Ai</span>4L
+              <span style="display:inline-block;width:8px;height:8px;margin-left:2px;border-radius:4px;background-color:#F98908;"></span>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="background-color:#FFFFFF;border-radius:12px;overflow:hidden;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+
+                <!-- Accent stripe -->
+                <tr>
+                  <td style="height:6px;line-height:6px;font-size:0;background-color:#017595;">&nbsp;</td>
+                </tr>
+
+                <!-- Hero image -->
+                <tr>
+                  <td style="padding:0;">
+                    <img src="{{HeroImageUrl}}" alt="{{HeroImageAlt}}" width="600"
+                         style="display:block;width:100%;max-width:600px;height:auto;border:0;outline:none;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#5B6E80;background-color:#E6EEF2;">
+                  </td>
+                </tr>
+
+                <!-- Headline + intro -->
+                <tr>
+                  <td class="px" style="padding:36px 48px 8px;">
+                    <h1 class="h1" style="margin:0 0 16px;font-family:Arial,Helvetica,sans-serif;font-size:30px;line-height:36px;font-weight:bold;color:#0E2A38;letter-spacing:-0.5px;">
+                      {{Headline}}
+                    </h1>
+                    <p style="margin:0 0 20px;font-family:Arial,Helvetica,sans-serif;font-size:18px;line-height:28px;color:#3A4A57;">
+                      {{Intro}}
+                    </p>
+                  </td>
+                </tr>
+
+                <!-- Body: pre-line keeps the paragraph breaks the CRM writes. -->
+                <tr>
+                  <td class="px" style="padding:0 48px 8px;">
+                    <div style="margin:0 0 24px;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:26px;color:#1F2933;white-space:pre-line;">{{Body}}</div>
+                  </td>
+                </tr>
+
+                <!-- Button (VML fallback for Outlook on Windows) -->
+                <tr>
+                  <td class="px" align="left" style="padding:0 48px 40px;">
+                    <!--[if mso]>
+                    <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="{{CtaUrl}}" style="height:48px;v-text-anchor:middle;width:240px;" arcsize="17%" stroke="f" fillcolor="#017595">
+                      <w:anchorlock/>
+                      <center style="color:#FFFFFF;font-family:Arial,Helvetica,sans-serif;font-size:16px;font-weight:bold;">{{CtaLabel}}</center>
+                    </v:roundrect>
+                    <![endif]-->
+                    <!--[if !mso]><!-->
+                    <a href="{{CtaUrl}}"
+                       style="display:inline-block;padding:14px 28px;background-color:#017595;border-radius:8px;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:20px;font-weight:bold;color:#FFFFFF;text-decoration:none;">
+                      {{CtaLabel}} &rarr;
+                    </a>
+                    <!--<![endif]-->
+                  </td>
+                </tr>
+
+              </table>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td class="px" style="padding:24px 24px 8px;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:18px;color:#5B6E80;text-align:center;">
+              You are receiving this email from Ai4L because you subscribed to our updates.
+            </td>
+          </tr>
+          <tr>
+            <td class="px" style="padding:0 24px 24px;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:18px;color:#5B6E80;text-align:center;">
+              <a href="{{PrefsUrl}}" style="color:#017595;text-decoration:underline;">Unsubscribe or choose which emails you receive</a>
+            </td>
+          </tr>
+
+        </table>
+
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
