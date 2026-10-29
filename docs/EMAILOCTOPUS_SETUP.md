@@ -88,7 +88,9 @@ use them.
 **EmailOctopus's own unsubscribe link.** EmailOctopus refuses to save a template without
 `{{UnsubscribeURL}}` (confirmed 2026-10-29), so the footer carries both: the preferences
 link first, then `<a href="{{UnsubscribeURL}}">Unsubscribe from all emails</a>`. The
-ready-made templates in `docs/email-templates/` already do this. Their link removes the contact from the whole list, and the webhook treats
+ready-made templates in `docs/email-templates/` already do this. It equally requires the
+sender's postal address through `{{SenderInfo}}` or `{{SenderInfoLine}}` (the templates use
+the one-line form); the address itself is set in the EmailOctopus account settings. Their link removes the contact from the whole list, and the webhook treats
 that as withdrawing **both** streams (see `applyNewsletterEvent` in
 `src/lib/contacts/newsletter.ts`) — correct for "stop emailing me", but it gives the
 reader no way to keep one stream.

@@ -14,6 +14,8 @@
     {{CtaLabel}}      Button text, two to four words                                  28
     {{BookingUrl}}    The recipient's personal booking link (set by the CRM per send)  —
     {{PrefsUrl}}      The recipient's preferences page in the CRM (set by the CRM)     —
+    {{SenderInfoLine}} Your postal address on one line, from the EmailOctopus account
+                      settings (required by EmailOctopus and by anti-spam law)        —
     {{UnsubscribeURL}} EmailOctopus's own unsubscribe link (required by EmailOctopus;
                       the CRM hears about it through the webhook)                      —
 
@@ -138,6 +140,11 @@
           <tr>
             <td class="px" style="padding:24px 24px 8px;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:18px;color:#5B6E80;text-align:center;">
               You are receiving this email from Rapid Ai4 Learning because you subscribed to our updates.
+            </td>
+          </tr>
+          <tr>
+            <td class="px" style="padding:0 24px 8px;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:18px;color:#5B6E80;text-align:center;">
+              {{SenderInfoLine}}
             </td>
           </tr>
           <tr>
